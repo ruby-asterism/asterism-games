@@ -1,9 +1,9 @@
 GIT
   remote: https://github.com/kishima/riichi_engine.git
-  revision: 19d7084cd9ca62024d60c519f60fd98614096bb0
+  revision: 3a7aaffe92813448bdb78862b430810ebf715312
   branch: fmrb
   specs:
-    riichi_engine (0.1.1.fmrb4)
+    riichi_engine (0.1.1.fmrb5)
       zeitwerk
 
 GEM
@@ -35,7 +35,7 @@ CHECKSUMS
   minitest (5.27.0) sha256=2d3b17f8a36fe7801c1adcffdbc38233b938eb0b4966e97a6739055a45fa77d5
   msgpack (1.8.5) sha256=97419eaa7b35dfe3e462c0e6c1a3dfdcbfc8756605c09e46e4c6daef127517ba
   rake (13.4.2) sha256=cb825b2bd5f1f8e91ca37bddb4b9aaf345551b4731da62949be002fa89283701
-  riichi_engine (0.1.1.fmrb4)
+  riichi_engine (0.1.1.fmrb5)
   zeitwerk (2.8.3) sha256=2c85125a8467ce069e20123d1e709a08955c9d29c118c25b46b7b7fafdbb92e5
 
 BUNDLED WITH
