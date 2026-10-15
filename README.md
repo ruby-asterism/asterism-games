@@ -407,7 +407,7 @@ later. "Not sure" marks what could not be confirmed.
 | Kazoe yakuman (13 han) | yes | `kazoe_yakuman` (true) | yes | true |
 | Kiriage mangan | no | `kiriage_mangan` (false) | yes | false |
 | Nagashi mangan | yes; in place of the no-ten payments | `nagashi_mangan` (false) | yes | true |
-| Pao (liability) | daisangen, daisuushii (not sure about suukantsu) | `pao` (a list of yakuman, []; `suukantsu` too) | key only | daisangen, daisuushii |
+| Pao (liability) | daisangen, daisuushii (not suukantsu) | `pao` (a list of yakuman, []; `suukantsu` too) | key only | daisangen, daisuushii |
 | Tobi | yes; 0 points goes on, below 0 ends | `tobi` (true, below 0) | yes | true |
 | West round (south round in a tonpuu game) | when nobody has 30,000 after the last round; sudden death, ends after west 4 | `nishi_iri` (false), `nishi_iri_threshold` (30,000); the engine goes on past west 4 | yes (the host ends the game after west 4) | true, 30,000 |
 | Agari-yame, tenpai-yame | agari-yame for the last dealer in the lead; tenpai-yame not sure (not sure either: above 30,000 only) | `agari_yame` (true), `tenpai_yame` (false); the dealer in the lead, above 0 | tenpai-yame yes, agari-yame key only | agari-yame true, tenpai-yame false |
