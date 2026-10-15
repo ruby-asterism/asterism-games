@@ -380,8 +380,7 @@ under 3800 B.
 ## Rules
 
 The host's defaults follow Mahjong Soul's default rules (its four-player
-ranked games and the defaults of a friends' room) wherever riichi_engine can
-choose; the engine's own defaults stay as they are and the host passes its
+ranked games) wherever riichi_engine can choose; the engine's own defaults stay as they are and the host passes its
 values (`Engine::RULE_DEFAULTS`). A table's `rule` setting goes over them,
 and the owner's choices in the lobby go over that ("Local rules": the game,
 open tanyao, red fives, double ron, three rons, several yakuman, kazoe
@@ -410,10 +409,20 @@ later. "Not sure" marks what could not be confirmed.
 | Pao (liability) | daisangen, daisuushii (not suukantsu) | `pao` (a list of yakuman, []; `suukantsu` too) | key only | daisangen, daisuushii |
 | Tobi | yes; 0 points goes on, below 0 ends | `tobi` (true, below 0) | yes | true |
 | West round (south round in a tonpuu game) | when nobody has 30,000 after the last round; sudden death, ends after west 4 | `nishi_iri` (false), `nishi_iri_threshold` (30,000); the engine goes on past west 4 | yes (the host ends the game after west 4) | true, 30,000 |
-| Agari-yame, tenpai-yame | agari-yame for the last dealer in the lead; tenpai-yame not sure (not sure either: above 30,000 only) | `agari_yame` (true), `tenpai_yame` (false); the dealer in the lead, above 0 | tenpai-yame yes, agari-yame key only | agari-yame true, tenpai-yame false |
-| Starting points, first place target | 25,000, 30,000 | `initial_score` (25,000), `oka_origin` (30,000) | yes | 25,000, 30,000 |
-| Uma and oka | friends' room: 5-15 (+15/+5/-5/-15) and the oka to the top (not sure; ranked games use rank points instead) | `uma` (20/10/-10/-20) | yes | 15/5/-5/-15 |
-| Thinking time | 5 s a turn plus a 20 s bank (friends' room) | none (the host's timers) | (host) | 20 s a turn, 8 s a call (`turn_seconds`, `call_seconds`; no bank) |
+| Agari-yame, tenpai-yame | both, for the last dealer in the lead with 30,000 or more | `agari_yame` (true), `tenpai_yame` (false); the dealer in the lead, above 0 (30,000 when there is a west round: 0.1.1.fmrb4) | tenpai-yame yes, agari-yame key only | both true |
+| Starting points, return, first place target | 25,000, 25,000 (no oka), 30,000 | `initial_score` (25,000), `oka_origin` (30,000), `nishi_iri_threshold` (30,000) | key only | 25,000, 25,000, 30,000 |
+| Uma | 5-15 (+15/+5/-5/-15), rank uma only | `uma` (20/10/-10/-20) | key only | 15/5/-5/-15 |
+| Riichi sticks left at the end | to the top | none (`calculate_ranked_results` takes the points as given) | (host) | to the top |
+| Equal points at the end | the seat nearer the first dealer ranks higher | by seat number | (engine) | as the engine (the first dealer is always seat 0) |
+| A pair of the double wind | 4 fu | `renpuu_jantou_fu` (2) | key only | 4 |
+| Kuikae (swap-calling) | banned (the called tile and, after a chi, the other end) | always allowed; `kuikae` from 0.1.1.fmrb4 | not yet | (true until fmrb4) |
+| A closed kan after riichi | only of the drawn tile, when the waits stay the same | none; `riichi_ankan` from 0.1.1.fmrb4 | not yet | (none until fmrb4) |
+| Robbing a closed kan | for kokushi musou only | none; `kokushi_ankan_chankan` from 0.1.1.fmrb4 | not yet | (none until fmrb4) |
+| Honba at a pao ron | paid by the seat liable | the discarder; `pao_honba` from 0.1.1.fmrb4 | not yet | (the discarder until fmrb4) |
+| The winning tile of a tenhou | the one that scores most | the tile drawn; `tenhou_best_tile` from 0.1.1.fmrb4 | not yet | (the tile drawn until fmrb4) |
+| South round of a tonpuu game, sudden death | when nobody has 30,000 after the last round, the next round; it ends when somebody has 30,000 (a ron with several winners where the dealer keeps the deal goes on); one round at most (south for tonpuu, west for hanchan) | no south round; west ends only when the deal passes; `nan_iri`, `sudden_death` from 0.1.1.fmrb4 | not yet | west, ended by the host after west 4 |
+| Kan ura dora | yes | counted from 0.1.1.fmrb4 (`fix/kan-uradora`; before it a kan's ura indicator is not counted) | no | yes |
+| Thinking time | 5 s a turn plus a 20 s bank | none (the host's timers) | (host) | 20 s a turn, 8 s a call (`turn_seconds`, `call_seconds`; no bank) |
 
 ## riichi_engine
 
@@ -533,7 +542,8 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   paid (all of it at a tsumo, half with the discarder at a ron), a double
   yakuman's -2 and points (one yakuman when turned off), four winds ending
   the round by name (the dealer keeps the seat, one more honba; none when
-  turned off), why a game ended in the view, and a table saved before
+  turned off), why a game ended in the view, the riichi sticks left at the
+  end going to the top (equal points by seat), and a table saved before
   these rules read back and played on.
 - `test_rooms.rb`: the rooms' supervisor with stand-in host processes: which
   rooms get a host (the app, closed, ended), the child's settings (the

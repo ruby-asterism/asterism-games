@@ -708,10 +708,7 @@ module AsterismGames
                           elsif west_over then "west"
                           else "rounds"
                           end
-          scores = (0..3).to_h { |s| [s, @game["scores"][s]] }
-          @final = Engine::API.calculate_ranked_results(scores: scores, rule: @rule).map do |r|
-            [r.seat, r.rank, r.score, (r.point * 10).round]
-          end
+          @final = final_results.map { |r| [r.seat, r.rank, r.score, (r.point * 10).round] }
           @status = "over"
           @next_at = now + @opts["over_ms"]
           @stats["games"] += 1
@@ -721,6 +718,23 @@ module AsterismGames
           new_round
         end
         changed
+      end
+
+      # The ranks at the end of a game. The riichi sticks still on the table
+      # go to the top. Equal points rank by seat from the first dealer
+      # (riichi_engine ranks equals by seat number, and the first dealer
+      # here is always seat 0).
+      def final_results
+        scores = (0..3).to_h { |s| [s, @game["scores"][s]] }
+        ranked = Engine::API.calculate_ranked_results(scores: scores, rule: @rule)
+        left = @game["kyoutaku"].to_i
+        return ranked unless left.positive?
+
+        top = ranked.first.seat
+        scores[top] += left * 1000
+        @game["scores"][top] = scores[top]
+        @game["kyoutaku"] = 0
+        Engine::API.calculate_ranked_results(scores: scores, rule: @rule)
       end
 
       # The end of a game: back to the lobby, the seats as they were (the

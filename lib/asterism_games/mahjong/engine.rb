@@ -37,12 +37,14 @@ module AsterismGames
 
       module_function
 
-      # The host's rule defaults: Mahjong Soul's defaults where riichi_engine
-      # can choose (README "Rules"). A table's "rule" settings go over these.
+      # The host's rule defaults: Mahjong Soul's defaults (its four-player
+      # ranked games) where riichi_engine can choose (README "Rules"). A
+      # table's "rule" settings go over these. 25,000 to start and 25,000 to
+      # return (no oka); the first place target is nishi_iri_threshold.
       RULE_DEFAULTS = {
         "game_type" => "hanchan",
         "initial_score" => 25_000,
-        "oka_origin" => 30_000,
+        "oka_origin" => 25_000,
         "uma" => [15_000, 5_000, -5_000, -15_000],
         "aka_dora" => { "m" => 1, "p" => 1, "s" => 1 },
         "kuitan" => true,
@@ -55,6 +57,7 @@ module AsterismGames
         "tobi" => true,
         "nishi_iri" => true,
         "nishi_iri_threshold" => 30_000,
+        "renpuu_jantou_fu" => 4, # a pair of the double wind
         # Abortive draws besides nine kinds (four winds, four kans, four
         # riichi), nagashi mangan, pao (liability), when the kan dora of an
         # open or added kan shows (after the discard), agari-yame and
@@ -66,7 +69,7 @@ module AsterismGames
         "pao" => %w[daisangen daisuushii],
         "minkan_dora_after_discard" => true,
         "agari_yame" => true,
-        "tenpai_yame" => false
+        "tenpai_yame" => true
       }.freeze
 
       def rule(overrides = {})

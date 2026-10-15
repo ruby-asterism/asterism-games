@@ -61,8 +61,9 @@ class TestMahjongRoundEnds < Minitest::Test
       assert_equal v, r.public_send(k), k
     end
     %i[suufon_renda? suukaikan? suucha_riichi? nagashi_mangan? double_yakuman? minkan_dora_after_discard?
-       agari_yame?].each { |m| assert r.public_send(m), m }
-    refute r.tenpai_yame?
+       agari_yame? tenpai_yame?].each { |m| assert r.public_send(m), m }
+    assert_equal 25_000, r.oka_origin, "25,000 to return"
+    assert_equal 4, r.renpuu_jantou_fu
     refute r.triple_ron_draw?, "three rons all win"
     assert_equal %w[daisangen daisuushii], r.pao
   end
@@ -255,6 +256,22 @@ class TestMahjongRoundEnds < Minitest::Test
     assert_equal "west", t2.public_view(0)["fr"], "the host ends the game after west 4"
     assert_equal "ok", t2.act(t2.instance_variable_get(:@seats)[t2.public_view(0)["ow"]]["token"], t2.sv, E::NEXT, [], 0)
     refute t2.public_view(0).key?("fr"), "back in the lobby"
+  end
+
+  # The riichi sticks left on the table go to the top; equal points rank
+  # the seat nearer the first dealer (seat 0) first; 25,000 to return and
+  # the uma 15/5/-5/-15.
+  def test_the_sticks_left_go_to_the_top_and_ties_go_by_seat
+    t, = table4
+    g = t.instance_variable_get(:@game)
+    g["scores"] = [23_000, 30_000, 23_000, 22_000]
+    g["kyoutaku"] = 2
+    t.instance_variable_set(:@flow, { "end" => true, "reason" => "normal_end" })
+    t.next_round(0)
+    fin = t.public_view(0)["fin"]
+    assert_equal [[1, 1, 32_000, 220], [0, 2, 23_000, 30], [2, 3, 23_000, -70], [3, 4, 22_000, -180]], fin
+    assert_equal 100_000, fin.sum { |r| r[2] }
+    assert_equal 0, fin.sum { |r| r[3] }
   end
 
   def test_the_engines_reason_reaches_the_view

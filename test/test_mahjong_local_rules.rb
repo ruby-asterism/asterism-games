@@ -47,8 +47,8 @@ class TestMahjongLocalRules < Minitest::Test
     assert_equal [0, 1, 3, 1, 0, 1, 1, 0, 1, 1, 1], t.public_view(0)["ru"],
                  "hanchan, kuitan, three red fives, double ron, no sanchahou, multiple yakuman, kazoe, " \
                  "no kiriage, tobi, west round, the setting's time (1 s in the test table)"
-    assert_equal [1, 1, 1, 0], t.public_view(0)["rx"],
-                 "the abortive draws, nagashi mangan, double yakuman, no tenpai-yame"
+    assert_equal [1, 1, 1, 1], t.public_view(0)["rx"],
+                 "the abortive draws, nagashi mangan, double yakuman, tenpai-yame"
     assert_equal T::RULE_ITEMS.size, t.public_view(0)["ru"].size + t.public_view(0)["rx"].size
     assert_equal 11, t.public_view(0)["ru"].size, "the items a table app of MJ3b knows"
     assert_equal [1, 10, 20, 30, 60], t.rule_choices(TURN), "the setting's own time is one of the choices"
@@ -107,7 +107,7 @@ class TestMahjongLocalRules < Minitest::Test
       assert_equal "ok", t.set_rule(toks[0], item, was ? 0 : 1)
       assert_equal !was, t.rule.public_send(m), "item #{item}"
     end
-    assert_equal [1, 0, 0, 1], t.public_view(0)["rx"]
+    assert_equal [1, 0, 0, 0], t.public_view(0)["rx"]
     assert_equal "value", t.set_rule(toks[0], NAGASHI, 2)
   end
 
