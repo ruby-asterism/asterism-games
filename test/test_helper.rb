@@ -51,7 +51,7 @@ module MahjongTestHelper
   end
 
   # The keys a seat's view may have beyond the public view.
-  SEAT_KEYS = %w[me h dt a].freeze
+  SEAT_KEYS = %w[me h dt a wt].freeze
 
   # Checks one seat's view against the state: its own hand and nothing of
   # any other hand.

@@ -462,6 +462,59 @@ class TestMahjongRules < Minitest::Test
     assert_includes s.hands[0].tiles.map(&:to_s), "0m", "the red five stays in the hand"
   end
 
+  # A hand that is tenpai only after discarding 9m (waits 1s and 4s); a 1s
+  # in a river and a 4s as a dora indicator are seen.
+  def riichi_ready_state
+    s = round_state
+    E.apply(s, { type: :tsumo }, E.rule)
+    give(s, 0, %w[1m 2m 3m 4p 5p 6p 7s 8s 9s 1z 1z 2s 3s 9m])
+    s.last_tsumo = Mahjong::Tiles::Tile.new("9m")
+    4.times { |i| s.first_turn_flags[i] = false }
+    s.kawas[2].add(Mahjong::Tiles::Tile.new("1s"))
+    s.dora_hyouji = [Mahjong::Tiles::Tile.new("4s")]
+    s
+  end
+
+  def test_riichi_waits_after_each_riichi_discard
+    s = riichi_ready_state
+    o = E.offers(s, 0, E.rule).find { |t, _| t == E::RIICHI }
+    assert_equal ["9m"], o[1]
+    assert_equal [["9m", [["1s", 3], ["4s", 3]]]], E.riichi_waits(s, 0, o[1])
+    # the waits of a discard that is not offered, for the counting: after
+    # 3s the hand waits on nothing
+    assert_equal [["3s", []]], E.riichi_waits(s, 0, ["3s"])
+  end
+
+  def test_riichi_waits_count_the_seats_own_hand_and_melds
+    s = riichi_ready_state
+    give(s, 0, %w[1m 2m 3m 4p 5p 6p 7s 8s 9s 1z 1z 2s 3s 1s])
+    s.last_tsumo = Mahjong::Tiles::Tile.new("1s")
+    s.fuuros[1] = [Mahjong::State::Fuuro.new(type: :pon, tiles: [Mahjong::Tiles::Tile.new("4s")] * 3,
+                                             called_tile: Mahjong::Tiles::Tile.new("4s"), from_seat: 2)]
+    # discarding the drawn 1s: 1s seen twice (the river, the discard), 4s four times (pon, indicator)
+    waits = E.riichi_waits(s, 0, ["1s"])
+    assert_equal [["1s", [["1s", 2], ["4s", 0]]]], waits
+  end
+
+  def test_a_seat_that_may_riichi_gets_the_waits_in_its_view
+    t, toks = seated_table(1)
+    seat = toks.keys.first
+    now = run_until(t, 0) { t.state.phase == :dahai && t.state.current_seat == seat }
+    s = t.state
+    give(s, seat, %w[1m 2m 3m 4p 5p 6p 7s 8s 9s 1z 1z 2s 3s 9m])
+    s.last_tsumo = Mahjong::Tiles::Tile.new("9m")
+    t.instance_variable_set(:@wait_help, nil)
+    v = t.view(seat, now)
+    assert_includes v["a"].map(&:first), E::RIICHI
+    b = v["wt"].bytes
+    assert_equal [M::Tiles.code("9m"), 2, M::Tiles.code("1s")], b[0, 3]
+    assert_equal M::Tiles.code("4s"), b[4]
+    assert_equal 6, b.size
+    # nobody else gets it, and nothing when riichi is not offered
+    (0..3).each { |o| assert_nil t.view(o, now)["wt"] unless o == seat }
+    assert_nil t.public_view(now)["wt"]
+  end
+
   def test_riichi_seat_is_offered_the_drawn_tile
     s = round_state
     E.apply(s, { type: :tsumo }, E.rule)

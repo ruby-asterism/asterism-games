@@ -165,6 +165,7 @@ A Hash (MessagePack); tiles are one byte each in binary strings (bin).
 | `res` | at a round's end: `k` (`tsumo_agari`, `ron_agari`, `ryuukyoku`, `kyuushu_kyuuhai`, `sanchahou`), `d` (the four score changes), `f` (who dealt in), `wn` (one entry per winner, in turn order from the discarder: `w` seat, `y` the yaku as riichi_engine names them, in Japanese, `pt` fu, han and points, `h` and `ag` the hand and the winning tile), `tp` (tenpai seats at a draw), `rs` (the seats of the three rons at a sanchahou) |
 | `fin` | at the end: `[[seat, rank, score, point x 10], ...]` |
 | `me`, `h`, `dt`, `a` | the member's view only: its seat (-1: watching), its hand (sorted, without the drawn tile), the drawn tile (-1 none), what it may do: `[[type, tiles], ...]` |
+| `wt` | the member's view only, when it may declare riichi: the riichi help, one binary string: per discard that declares riichi the tile, the number of waits n and n pairs `[wait, left]` (the waits as riichi_engine's wait judge gives them; left: 4 less what the seat can see of the tile: its own hand, the rivers, every meld, the dora indicators) |
 
 Tile numbers: `0..8` 1m..9m, `9` 0m (red five), `10..18` 1p..9p, `19` 0p,
 `20..28` 1s..9s, `29` 0s, `30..36` 1z..7z (east south west north white
@@ -184,8 +185,11 @@ message, Zenoh's headers and the key included, and drop a larger one without
 a word. The views stay far below: the largest seen in 20 CPU hanchan was
 about 570 B (the reply with its call key); a view built by hand with full
 rivers, four kans each, sixteen members with long names and three winners
-with fourteen yaku each is about 1.9 KB. The tests hold every view under
-3800 B.
+with fourteen yaku each is about 1.9 KB. The riichi help adds at most
+14 x (2 + 13 x 2) = 392 B (fourteen discards with thirteen waits each, more
+than a hand can have; a nine-sided chuuren gives 80 B); a view built by hand
+with it, full rivers, the other seats' kans and the long names is about
+1.5 KB. The tests hold every view under 3800 B.
 
 ### Time and saving
 
@@ -300,8 +304,9 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   through `act` (wins when offered, calls now and then, passes, timeouts,
   and now and then something not offered, refused): no exception, the points
   add up after every round, after every step no seat's view has another
-  seat's hand and every view fits in a board's message; and a worst-case
-  view.
+  seat's hand, the riichi help comes only with a riichi offer, and every
+  view fits in a board's message; and the worst-case views (a result, a
+  riichi turn with the riichi help at its largest).
 - `test_mahjong_rules.rb`: the lobby (join, sit, stand, the owner, CPUs,
   start, a spectator, away and back, back to the lobby after a game), tokens,
   refusals (no token, a wrong token, an action not offered, a stale state),
@@ -309,8 +314,9 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   deadline across a restart, calls (every player answers, one deadline for
   all, ron over pon), double ron (turn order, honba and sticks to the first,
   off: head bump), three rons (a draw; off: three winners), multiple
-  yakuman on and off, the host's rule defaults, and the engine fixes the
-  host relies on.
+  yakuman on and off, the host's rule defaults, the riichi help (the waits
+  after each riichi discard and what is left of them, only in the seat's
+  own view), and the engine fixes the host relies on.
 - `test_network.rb`: the same refusals through a router, with the host in a
   child process (skipped without `ASTERISM_TEST_ROUTER`).
 

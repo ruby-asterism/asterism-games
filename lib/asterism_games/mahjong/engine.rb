@@ -110,6 +110,31 @@ module AsterismGames
         out
       end
 
+      # The waits after each discard that declares riichi, for the screen's
+      # help (README "Views", "wt"): [[discard, [[wait, left], ...]], ...] in
+      # tile names, the waits as riichi_engine's wait judge gives them
+      # (MachiJudge, the same judge that offers the riichi). left is what the
+      # seat cannot see of the wait: 4 less the tiles in its own hand (the
+      # discard among them, it goes to the river), in the rivers, in every
+      # meld and among the dora indicators. Only what the seat sees is
+      # counted, so it tells nothing of the other hands.
+      def riichi_waits(state, seat, discards)
+        set = ::Mahjong::Tiles::TileSet
+        seen = Array.new(34, 0)
+        state.hands[seat].tiles.each { |t| seen[set.tile_index(t)] += 1 }
+        4.times do |s|
+          state.kawas[s].tiles.each { |k| seen[set.tile_index(k.tile)] += 1 unless k.called }
+          state.fuuros[s].each { |f| f.tiles.each { |t| seen[set.tile_index(t)] += 1 } }
+        end
+        state.dora_hyouji.each { |t| seen[set.tile_index(t)] += 1 }
+        hand = state.hands[seat]
+        discards.map do |name|
+          rest = hand.remove(name).to_34
+          waits = ::Mahjong::Scoring::Judges::MachiJudge.machi_tile_indices(rest).sort
+          [name, waits.map { |i| [set.from_index(i), [4 - seen[i], 0].max] }]
+        end
+      end
+
       # Whether [type, tiles] (from a player) is one of the offers; returns
       # the engine action Hash (without the seat) or nil.
       def match(offers, type, tiles)

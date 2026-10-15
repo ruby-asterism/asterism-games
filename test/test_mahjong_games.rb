@@ -15,7 +15,7 @@ class TestMahjongGames < Minitest::Test
 
   def play_games(n)
     out = { "games" => 0, "rounds" => 0, "max_view" => 0, "max_public" => 0, "kinds" => Hash.new(0),
-            "checks" => 0, "actions" => 0, "cpu_refused" => 0, "errors" => [] }
+            "checks" => 0, "actions" => 0, "cpu_refused" => 0, "wt_views" => 0, "max_wt" => 0, "errors" => [] }
     n.times do
       t = cpu_table
       now = 0
@@ -33,6 +33,11 @@ class TestMahjongGames < Minitest::Test
           v = check_secrecy(t, seat, now)
           out["max_view"] = [out["max_view"], reply_bytes(v)].max
           out["checks"] += 1
+          if v["wt"]
+            out["wt_views"] += 1
+            out["max_wt"] = [out["max_wt"], v["wt"].bytesize].max
+            out["errors"] << "wt without riichi" unless v["a"].any? { |t, _| t == E::RIICHI }
+          end
         end
         out["max_public"] = [out["max_public"], reply_bytes(t.public_view(now))].max
         raise "too many steps" if steps > 2_000_000
@@ -67,8 +72,9 @@ class TestMahjongGames < Minitest::Test
       Marshal.load(data)
     end
     sum = results.each_with_object(Hash.new(0)) do |x, a|
-      %w[games rounds actions checks cpu_refused].each { |k| a[k] += x[k] }
+      %w[games rounds actions checks cpu_refused wt_views].each { |k| a[k] += x[k] }
       a["max_view"] = [a["max_view"], x["max_view"]].max
+      a["max_wt"] = [a["max_wt"], x["max_wt"]].max
       a["max_public"] = [a["max_public"], x["max_public"]].max
       x["kinds"].each { |k, v| a["kind_#{k}"] += v }
     end
@@ -77,6 +83,7 @@ class TestMahjongGames < Minitest::Test
     assert_empty errors
     assert_equal GAMES, sum["games"]
     assert_operator sum["max_view"], :<, LIMIT
+    assert_operator sum["wt_views"], :>, 0 if GAMES >= 4
   end
 
   HUMAN_GAMES = Integer(ENV.fetch("MJ_HUMAN_GAMES", "1"))
@@ -174,5 +181,44 @@ class TestMahjongGames < Minitest::Test
     bytes = reply_bytes(v)
     puts "\n  worst case view: #{bytes} B"
     assert_operator bytes, :<, LIMIT
+  end
+
+  # The largest view while a seat may declare riichi: the same long names
+  # and full rivers, the other three seats with four kans each, and the
+  # riichi help (wt) at a size no hand reaches: fourteen discards with
+  # thirteen waits each (a real hand has at most 14 riichi discards and 13
+  # waits, kokushi; a nine-sided chuuren gives the most waits over all its
+  # discards, measured below).
+  def test_worst_case_riichi_view_fits
+    t, toks = seated_table(4)
+    seat = toks.keys.first
+    12.times { |i| t.join("wasm-bbbb#{format('%02d', i)}", "名前" * 5 + "ab", 0) }
+    st = t.state
+    4.times do |s|
+      t.instance_variable_get(:@seats)[s]["name"] = "名前" * 5 + "ab"
+      24.times { |i| st.kawas[s].add(Mahjong::Tiles::Tile.new(M::Tiles::NAMES[i % 37]), riichi: i == 3) }
+      next if s == seat
+      st.fuuros[s] = 4.times.map do |k|
+        tile = Mahjong::Tiles::Tile.new("#{k + 1}z")
+        Mahjong::State::Fuuro.new(type: :kakan, tiles: [tile] * 4, called_tile: tile, from_seat: (s + 1) % 4)
+      end
+    end
+    v = t.view(seat, 0)
+    v["a"] = [[E::DAHAI, (0..13).to_a.pack("C*").b], [E::RIICHI, (0..13).to_a.pack("C*").b],
+              [E::TSUMO_AGARI, "".b], [E::ANKAN, "\x01".b], [E::ANKAN, "\x02".b], [E::ANKAN, "\x03".b],
+              [E::KYUUSHU, "".b]]
+    v["dl"] = [15, 20_000]
+    v["wt"] = 14.times.flat_map { |d| [d, 13] + 13.times.flat_map { |w| [w, 4] } }.pack("C*").b
+    bytes = reply_bytes(v)
+    puts "\n  worst case riichi view: #{bytes} B (wt #{v['wt'].bytesize} B)"
+    assert_operator bytes, :<, LIMIT
+
+    # A real hand with many waits: nine-sided chuuren and a drawn tile.
+    s = st
+    s.hands[seat] = Mahjong::State::Hand.new(%w[1m 1m 1m 2m 3m 4m 5m 6m 7m 8m 9m 9m 9m 5m])
+    w = E.riichi_waits(s, seat, %w[1m 2m 3m 4m 5m 6m 7m 8m 9m])
+    n = w.sum { |_d, ws| 2 + ws.size * 2 }
+    puts "  chuuren: #{w.count { |_d, ws| ws.any? }} discards, #{w.sum { |_d, ws| ws.size }} waits, wt #{n} B"
+    assert_operator n, :<, 14 * 28
   end
 end

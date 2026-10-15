@@ -643,8 +643,30 @@ module AsterismGames
           v["h"] = Tiles.pack(Tiles.sort(hand)).b
           v["dt"] = drawn ? Tiles.code(drawn) : -1
         end
-        v["a"] = offers(seat).map { |t, ts| [t, Tiles.pack(ts).b] }
+        a = offers(seat)
+        v["a"] = a.map { |t, ts| [t, Tiles.pack(ts).b] }
+        wt = riichi_help(seat, a)
+        v["wt"] = wt if wt
         v
+      end
+
+      # The waits after each riichi discard (README "Views", "wt"), when the
+      # seat may declare riichi: one binary String, per discard the tile, the
+      # number of waits n and n pairs [wait, left]. Worked out once per state
+      # version and seat.
+      def riichi_help(seat, offers)
+        o = offers.find { |t, _ts| t == Engine::RIICHI }
+        return nil unless o
+        key = [@sv, seat]
+        return @wait_help[1] if @wait_help && @wait_help[0] == key
+        out = []
+        Engine.riichi_waits(@state, seat, o[1]).each do |d, waits|
+          out << Tiles.code(d) << waits.size
+          waits.each { |w, left| out << Tiles.code(w) << left }
+        end
+        bin = out.pack("C*").b
+        @wait_help = [key, bin]
+        bin
       end
 
       # A member's view by its token (nil: not a member).
@@ -783,6 +805,7 @@ module AsterismGames
       def reset_all
         @ver = 1
         @sv = 0
+        @wait_help = nil
         @now = 0
         @status = "wait"
         @seats = [nil] * 4
