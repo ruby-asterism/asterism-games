@@ -56,6 +56,7 @@ module AsterismGames
           @seats[i] = { "kind" => "human", "node" => node, "token" => SecureRandom.hex(16) }
         end
         @seats[i]["name"] = clean_name(name, node)
+        name_cpus
         start_game(now) if @status == "wait"
         changed
         { "seat" => i, "token" => @seats[i]["token"] }
@@ -65,7 +66,8 @@ module AsterismGames
       def leave(token)
         i = seat_of(token)
         return false unless i
-        @seats[i] = cpu_seat(i)
+        @seats[i] = cpu_seat
+        name_cpus
         @decl.delete(i)
         @deadline = nil if @deadline_seat == i
         changed
@@ -444,6 +446,7 @@ module AsterismGames
         @sv = d["sv"].to_i
         @status = d["status"]
         @seats = d["seats"]
+        name_cpus
         @game = d["game"]
         @state = d["round"] ? Engine::API.deserialize_round_state(d["round"]) : nil
         @decl = (d["decl"] || {}).to_h do |k, a|
@@ -476,7 +479,8 @@ module AsterismGames
         @ver = 1
         @sv = 0
         @status = @opts["humans"].to_i.zero? ? "play" : "wait"
-        @seats = (0..3).map { |i| cpu_seat(i) }
+        @seats = (0..3).map { cpu_seat }
+        name_cpus
         @game = nil
         @state = nil
         @decl = {}
@@ -492,8 +496,16 @@ module AsterismGames
         start_game(0) if @status == "play"
       end
 
-      def cpu_seat(i)
-        { "kind" => "cpu", "name" => "CPU#{i + 1}" }
+      def cpu_seat
+        { "kind" => "cpu" }
+      end
+
+      # The CPUs are numbered among themselves in seat order, so they are
+      # CPU1, CPU2, CPU3 whichever seat a player drew (numbered by seat they
+      # skipped the player's number: CPU1, CPU2, CPU4).
+      def name_cpus
+        n = 0
+        @seats.each { |s| s["name"] = "CPU#{n += 1}" if s["kind"] == "cpu" }
       end
 
       def ai_for(level)

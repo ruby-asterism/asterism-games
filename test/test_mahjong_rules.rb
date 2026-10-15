@@ -22,6 +22,18 @@ class TestMahjongRules < Minitest::Test
     assert_equal({ "error" => "full" }, t.sit("fmruby-bbbbbb", "Other", 0))
   end
 
+  def test_cpus_are_numbered_among_themselves
+    4.times do
+      t = human_table
+      seat, token = sit(t)
+      names = t.public_view(0)["nm"]
+      assert_equal "Player", names[seat]
+      assert_equal %w[CPU1 CPU2 CPU3], names.each_with_index.reject { |_, i| i == seat }.map(&:first)
+      t.leave(token)
+      assert_equal %w[CPU1 CPU2 CPU3 CPU4], t.public_view(0)["nm"]
+    end
+  end
+
   def test_view_and_act_need_the_token
     t = human_table
     _seat, token = sit(t)
