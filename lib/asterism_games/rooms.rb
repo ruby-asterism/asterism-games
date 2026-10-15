@@ -1,0 +1,338 @@
+# frozen_string_literal: true
+
+require "json"
+require "fileutils"
+require "socket"
+require "time"
+
+module AsterismGames
+  # Tables in the rooms of an Asterism console (G2, the console's
+  # docs/rooms.md): README "Rooms".
+  #
+  # The console writes the open rooms to rooms.json (the file its door
+  # reads) in the "rooms" volume, next to the room slots' certificates:
+  #
+  #   {"slots": {"01": {"room": "<uid>", "until": <Unix s>, "max": 16, "app": "/app/..."}},
+  #    "revoked": [{"room": "<uid>", "until": <Unix s>}], ...}
+  #   certs/room-01.tar   the slot's certificate (namespace room/01)
+  #
+  # A room whose link opens one of the configured apps (the mahjong table's
+  # screen) gets the configured tables: this supervisor forks one host
+  # process (Host) for the room, which joins the router with the slot's
+  # certificate in the room's key space and serves the tables there, as
+  # browsers in the room see them (asterism/games/games/mahjong1). One
+  # process per room, since the asterism gem keeps one connection a
+  # process. Other rooms get nothing.
+  #
+  # A room's tables are saved under state_dir/rooms/<slot>/ with the room's
+  # ID (room.json). When the slot holds another room, or the room was
+  # closed or has ended, the directory is removed: a new room on the slot
+  # starts with an empty lobby. A host process that stops on its own is
+  # started again (after 1, 2, 4 .. 30 s); a restarted supervisor finds the
+  # rooms and their saved tables again.
+  class Rooms
+    CHECK_S = 1.0
+    STOP_WAIT_S = 8
+    BACKOFF_MAX_S = 30
+
+    # The rooms that should have a host, from rooms.json's content:
+    # {slot => {"room", "until", "app"}} (open, not ended, opening one of
+    # the apps). nil content (no file, not readable): nil.
+    def self.wanted(data, apps, now)
+      return nil unless data.is_a?(Hash) && data["slots"].is_a?(Hash)
+      revoked = Array(data["revoked"]).map { |r| r.is_a?(Hash) ? r["room"] : nil }.compact
+      data["slots"].each_with_object({}) do |(slot, r), out|
+        next unless slot.to_s.match?(/\A\d{2}\z/) && r.is_a?(Hash) && r["room"].is_a?(String)
+        next if revoked.include?(r["room"]) || r["until"].to_i <= now
+        next unless apps.include?(r["app"].to_s)
+        out[slot.to_s] = { "room" => r["room"], "until" => r["until"].to_i, "app" => r["app"].to_s }
+      end
+    end
+
+    # Whether a slot's saved tables (room.json: {"room", "until"}) are of a
+    # room that is over: the slot holds another room now, the room is
+    # revoked (closed), or it has ended. With no readable rooms.json nothing
+    # is over (a missing file is not a closed room).
+    def self.over?(saved, data, now)
+      return false unless saved.is_a?(Hash) && data.is_a?(Hash) && data["slots"].is_a?(Hash)
+      return true if saved["until"].to_i <= now
+      revoked = Array(data["revoked"]).map { |r| r.is_a?(Hash) ? r["room"] : nil }
+      return true if revoked.include?(saved["room"])
+      held = data["slots"][saved["slot"].to_s]
+      held.is_a?(Hash) && held["room"] != saved["room"]
+    end
+
+    attr_reader :children
+
+    # config: Config (its "rooms" and "state_dir"); spawn: a lambda(slot,
+    # child config) -> pid (tests give their own).
+    def initialize(config, log: ->(m) { warn m }, spawn: nil, clock: -> { Time.now.to_f })
+      @config = config
+      @rooms = config["rooms"]
+      @log = log
+      @clock = clock
+      @spawn = spawn || method(:fork_host)
+      @dir = File.join(config["state_dir"], "rooms")
+      FileUtils.mkdir_p(@dir)
+      @children = {} # slot => {"pid", "room", "until", "since", "restarts", "next_at"}
+      @mtime = nil
+      @data = nil
+      @read_ok = false
+      @read_at = nil
+      @stop = false
+      @started_at = Time.now.utc
+      @lock = Mutex.new
+    end
+
+    def stop!
+      @stop = true
+    end
+
+    def rooms_file = File.join(@rooms["dir"], "rooms.json")
+    def certs_dir = File.join(@rooms["dir"], "certs")
+    def slot_dir(slot) = File.join(@dir, slot)
+
+    def run
+      @log.call("games: rooms from #{rooms_file}: tables for rooms opening #{@rooms['apps'].join(', ')} " \
+                "(at most #{@rooms['max']} rooms)")
+      start_status_server
+      until @stop
+        @lock.synchronize { check }
+        sleep CHECK_S
+      end
+      @lock.synchronize { stop_all }
+      @log.call("games: rooms: stopped")
+    end
+
+    # One pass: read rooms.json when it changed, stop and remove what is
+    # over, start what is wanted, start again what stopped.
+    def check(now = @clock.call)
+      read_file
+      reap(now)
+      wanted = self.class.wanted(@data, @rooms["apps"], now.to_i)
+      @children.keys.each do |slot|
+        c = @children[slot]
+        w = wanted && wanted[slot]
+        next if wanted.nil? || (w && w["room"] == c["room"])
+        stop_child(slot, w ? "the slot holds another room" : "the room is closed or ended")
+      end
+      clean_dirs(now)
+      return unless wanted
+      wanted.keys.sort.each do |slot|
+        next if @children[slot] && @children[slot]["pid"]
+        if @children[slot].nil? && running_count >= @rooms["max"]
+          note_full(slot)
+          next
+        end
+        start_child(slot, wanted[slot], now)
+      end
+    end
+
+    def running_count = @children.count { |_s, c| c["pid"] || c["next_at"] }
+
+    def read_file
+      st = File.stat(rooms_file)
+      return if @mtime && st.mtime == @mtime && @read_ok
+      @data = JSON.parse(File.read(rooms_file))
+      @mtime = st.mtime
+      @read_ok = true
+      @read_at = Time.now.utc
+    rescue SystemCallError, JSON::ParserError => e
+      @log.call("games: rooms: #{rooms_file}: #{e.class}: #{e.message}; nothing changes until it is readable") if @read_ok != false || @data
+      @read_ok = false
+      @data = nil
+    end
+
+    # Removes the saved tables of rooms that are over (and of slots no room
+    # file knows of, once the file is readable).
+    def clean_dirs(now)
+      Dir.children(@dir).each do |slot|
+        next if @children[slot]
+        d = slot_dir(slot)
+        saved = read_json(File.join(d, "room.json"))
+        next unless saved.nil? ? @data : self.class.over?(saved.merge("slot" => slot), @data, now.to_i)
+        FileUtils.rm_rf(d)
+        @log.call("games: room #{slot}: removed the saved tables of #{saved ? "room #{saved['room']}" : 'an unknown room'}")
+      end
+    rescue SystemCallError => e
+      @log.call("games: rooms: #{e.message}")
+    end
+
+    def start_child(slot, room, now)
+      c = @children[slot] ||= { "restarts" => 0 }
+      return if c["next_at"] && now < c["next_at"]
+      d = slot_dir(slot)
+      saved = read_json(File.join(d, "room.json"))
+      if saved && saved["room"] != room["room"]
+        FileUtils.rm_rf(d)
+        @log.call("games: room #{slot}: room #{saved['room']} is over; its tables are removed")
+      end
+      FileUtils.mkdir_p(d)
+      write_json(File.join(d, "room.json"), { "room" => room["room"], "until" => room["until"], "slot" => slot })
+      tar = File.join(certs_dir, "room-#{slot}.tar")
+      unless File.exist?(tar)
+        @log.call("games: room #{slot}: no #{tar}; trying again later")
+        c["next_at"] = now + BACKOFF_MAX_S
+        return
+      end
+      cfg = child_config(slot, tar, d)
+      c.merge!("room" => room["room"], "until" => room["until"], "since" => Time.now.utc.iso8601, "next_at" => nil)
+      c["pid"] = @spawn.call(slot, cfg)
+      @log.call("games: room #{slot}: room #{room['room']} opens #{room['app']}: host pid #{c['pid']}")
+    end
+
+    def child_config(slot, tar, dir)
+      { "node" => @rooms["node"], "app" => @config["app"], "credentials" => tar,
+        "credentials_router" => @rooms["router"], "namespace" => "room/#{slot}", "state_dir" => dir,
+        "status_file" => File.join(dir, "host.json"), "tables" => @rooms["tables"] }
+    end
+
+    def fork_host(slot, cfg)
+      fork do
+        @server&.close
+        $PROGRAM_NAME = "asterism-games room #{slot}"
+        host = Host.new(cfg, log: ->(m) { @log.call("room #{slot}: #{m}") })
+        %w[INT TERM].each { |s| trap(s) { host.stop! } }
+        host.run
+        exit!(0)
+      end
+    end
+
+    def reap(now)
+      @children.each do |slot, c|
+        next unless c["pid"]
+        pid, st = Process.wait2(c["pid"], Process::WNOHANG)
+        next unless pid
+        c["pid"] = nil
+        c["restarts"] += 1
+        delay = [2**[c["restarts"] - 1, 5].min, BACKOFF_MAX_S].min
+        c["next_at"] = now + delay
+        c["last_exit"] = st.exitstatus || "signal #{st.termsig}"
+        @log.call("games: room #{slot}: host pid #{pid} stopped (#{c['last_exit']}); again in #{delay} s")
+      rescue Errno::ECHILD
+        c["pid"] = nil
+      end
+    end
+
+    def stop_child(slot, why)
+      c = @children.delete(slot)
+      return unless c && c["pid"]
+      @log.call("games: room #{slot}: stopping host pid #{c['pid']} (#{why})")
+      terminate([c["pid"]])
+    end
+
+    def stop_all
+      pids = @children.values.map { |c| c["pid"] }.compact
+      terminate(pids)
+      @children.clear
+    end
+
+    def terminate(pids)
+      pids.each do |pid|
+        Process.kill("TERM", pid)
+      rescue Errno::ESRCH
+        nil
+      end
+      deadline = Time.now + STOP_WAIT_S
+      pids.each do |pid|
+        loop do
+          break if Process.wait(pid, Process::WNOHANG)
+          if Time.now > deadline
+            Process.kill("KILL", pid)
+            Process.wait(pid)
+            break
+          end
+          sleep 0.05
+        end
+      rescue Errno::ECHILD, Errno::ESRCH
+        nil
+      end
+    end
+
+    def note_full(slot)
+      @full_noted ||= {}
+      return if @full_noted[slot]
+      @full_noted[slot] = true
+      @log.call("games: room #{slot}: no table (#{@rooms['max']} rooms have tables already; rooms.max)")
+    end
+
+    # ------------------------------------------------------------ status
+
+    # What the console's admin page shows (GET /status): the rooms with a
+    # host and their tables, as counts.
+    def status
+      @lock.synchronize do
+        now = @clock.call
+        wanted = self.class.wanted(@data, @rooms["apps"], now.to_i) || {}
+        rooms = @children.keys.sort.to_h do |slot|
+          c = @children[slot]
+          h = read_json(File.join(slot_dir(slot), "host.json")) || {}
+          fresh = h["at"].to_i >= now.to_i - 10 && h["pid"] == c["pid"]
+          [slot, { "room" => c["room"], "until" => c["until"], "pid" => c["pid"], "since" => c["since"],
+                   "restarts" => c["restarts"], "last_exit" => c["last_exit"],
+                   "state" => c["pid"] ? (fresh && h["connected"] ? "up" : "starting") : "restarting",
+                   "connected" => fresh ? h["connected"] : false, "tables" => fresh ? h["tables"] : {} }]
+        end
+        { "host" => "asterism-games", "version" => AsterismGames::VERSION, "since" => @started_at.iso8601,
+          "rooms_file" => { "ok" => @read_ok, "read_at" => @read_at&.iso8601 },
+          "apps" => @rooms["apps"], "max" => @rooms["max"], "rooms" => rooms,
+          "without_table" => (wanted.keys - rooms.keys).sort,
+          "busy" => rooms.values.any? { |r| r["tables"].to_h.values.any? { |t| t["humans"].to_i.positive? } },
+          "rss_kb" => rss_kb([Process.pid] + @children.values.map { |c| c["pid"] }.compact) }
+      end
+    end
+
+    def rss_kb(pids)
+      pids.sum do |pid|
+        File.read("/proc/#{pid}/status")[/^VmRSS:\s+(\d+)/, 1].to_i
+      rescue SystemCallError
+        0
+      end
+    end
+
+    # GET /status on rooms.status_listen (host:port): one request per
+    # connection, JSON. Nothing else is answered.
+    def start_status_server
+      listen = @rooms["status_listen"].to_s
+      return if listen.empty?
+      host, port = listen.split(/:(?=\d+\z)/)
+      @server = TCPServer.new(host, port.to_i)
+      @log.call("games: status on #{listen} (GET /status)")
+      Thread.new do
+        loop do
+          s = @server.accept
+          Thread.new(s) { |c| answer(c) }
+        rescue IOError
+          break
+        end
+      end
+    end
+
+    def answer(sock)
+      line = sock.gets.to_s
+      while (l = sock.gets) && l != "\r\n"; end
+      ok = line.start_with?("GET /status ")
+      body = ok ? JSON.generate(status) : "not found\n"
+      sock.write("HTTP/1.1 #{ok ? '200 OK' : '404 Not Found'}\r\nContent-Type: #{ok ? 'application/json' : 'text/plain'}\r\n" \
+                 "Content-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n#{body}")
+    rescue StandardError
+      nil
+    ensure
+      sock.close rescue nil
+    end
+
+    private
+
+    def read_json(path)
+      JSON.parse(File.read(path))
+    rescue SystemCallError, JSON::ParserError
+      nil
+    end
+
+    def write_json(path, data)
+      tmp = "#{path}.tmp"
+      File.write(tmp, JSON.generate(data))
+      File.rename(tmp, path)
+    end
+  end
+end

@@ -614,6 +614,16 @@ module AsterismGames
         v
       end
 
+      # Counts for the host's status (Host#status_now, the console's admin
+      # page): no names, no nodes, no tokens.
+      def summary(now)
+        humans = (0..3).count { |i| human?(i) }
+        { "st" => @status, "members" => @members.size, "humans" => humans,
+          "cpus" => @seats.count { |s| s && s["kind"] == "cpu" },
+          "away" => (0..3).count { |i| human?(i) && away?(i) },
+          "round" => @game ? [Engine::BAKAZE.index(@game["bakaze"]), @game["kyoku"]] : nil }
+      end
+
       # The deadline a view shows: an away seat's own turn ends sooner.
       def shown_deadline
         st = @state

@@ -1,0 +1,17 @@
+# Settings of the game host in the rooms of an Asterism console (README
+# "Rooms"); the image starts with these (deploy/vps). The environment
+# overrides them (ASTERISM_GAMES_ROOMS_DIR, ASTERISM_GAMES_ROOM_MAX,
+# MAHJONG_TURN_SECONDS and the rest).
+app: games                     # the Asterism application of the tables
+state_dir: /state              # rooms/<slot>/: the room's ID and its tables
+rooms:
+  dir: /rooms                  # the console's rooms volume (rooms.json, certs/room-NN.tar), read-only
+  apps:                        # a room whose link opens one of these gets the tables below
+    - /app/game/mahjong/mahjong.app.rb
+  max: 3                       # rooms with tables at once (one host process each, about 60 MB)
+  node: games                  # the host's node ID in a room (asterism/games/games/mahjong1)
+  status_listen: 0.0.0.0:7460  # GET /status for the console's rooms page
+  tables:
+    - name: mahjong1
+      game: mahjong
+      # turn_seconds, call_seconds, rule: ... as in config/example.yml

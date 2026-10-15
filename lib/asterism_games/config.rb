@@ -12,7 +12,29 @@ module AsterismGames
       "app" => "games",
       "credentials" => nil,
       "state_dir" => "var/state",
-      "tables" => [{ "name" => "mahjong1", "game" => "mahjong" }, { "name" => "mahjong2", "game" => "mahjong" }]
+      "tables" => [{ "name" => "mahjong1", "game" => "mahjong" }, { "name" => "mahjong2", "game" => "mahjong" }],
+      "rooms" => nil
+    }.freeze
+
+    # The rooms of a console (README "Rooms"): given (a "rooms" section or
+    # ASTERISM_GAMES_ROOMS_DIR), the host serves tables in rooms instead of
+    # the tables above.
+    ROOM_DEFAULTS = {
+      "dir" => nil,                                          # the console's rooms volume (rooms.json, certs/)
+      "apps" => ["/app/game/mahjong/mahjong.app.rb"],        # a room opening one of these gets the tables
+      "max" => 3,                                            # rooms with tables at once
+      "node" => "games",                                     # the host's node ID in a room
+      "router" => nil,                                       # over the slot certificate's router
+      "status_listen" => nil,                                # host:port for GET /status
+      "tables" => [{ "name" => "mahjong1", "game" => "mahjong" }]
+    }.freeze
+    ROOM_ENV_KEYS = {
+      "ASTERISM_GAMES_ROOMS_DIR" => ["dir", :s],
+      "ASTERISM_GAMES_ROOM_APPS" => ["apps", :list],
+      "ASTERISM_GAMES_ROOM_MAX" => ["max", :i],
+      "ASTERISM_GAMES_ROOM_NODE" => ["node", :s],
+      "ASTERISM_GAMES_ROOM_ROUTER" => ["router", :s],
+      "ASTERISM_GAMES_STATUS_LISTEN" => ["status_listen", :s]
     }.freeze
 
     # Environment variable => [key, kind]; the table ones apply to every
@@ -55,6 +77,28 @@ module AsterismGames
       @data = DEFAULTS.merge(file)
       ENV_KEYS.each { |k, (key, _)| @data[key] = env[k] if env[k] && !env[k].empty? }
       @data["tables"] = Array(@data["tables"]).map { |t| table_options(t, env) }
+      @data["rooms"] = room_options(@data["rooms"], env)
+    end
+
+    # The rooms section with its defaults and the environment, or nil when
+    # no rooms directory is given.
+    def room_options(r, env)
+      r = ROOM_DEFAULTS.merge(r.is_a?(Hash) ? r : {})
+      ROOM_ENV_KEYS.each do |k, (key, kind)|
+        v = env[k]
+        next if v.nil? || v.empty?
+        r[key] = case kind
+                 when :list then v.split(",").map(&:strip).reject(&:empty?)
+                 when :i then Integer(v)
+                 else v
+                 end
+      end
+      return nil if r["dir"].to_s.empty?
+      r["apps"] = Array(r["apps"]).map(&:to_s)
+      r["max"] = r["max"].to_i
+      raise ArgumentError, "rooms.max must be 1 or more" if r["max"] < 1
+      r["tables"] = Array(r["tables"]).map { |t| table_options(t, env) }
+      r
     end
 
     def [](key)

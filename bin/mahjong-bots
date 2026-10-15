@@ -10,6 +10,7 @@
 #
 #   bundle exec bin/mahjong-bots [--router tcp/127.0.0.1:7447] [--table games/games/mahjong2]
 #                                [--players 4] [--think-ms 500] [--games 1] [--prefix bot-NAME]
+#                                [--credentials room-01.tar --namespace room/01]   # in a room
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 require "asterism"
 require "asterism_games/mahjong/engine"
@@ -25,6 +26,8 @@ ARGV.each_slice(2) do |k, v|
   when "--think-ms" then opts[:think] = v.to_i
   when "--games" then opts[:games] = v.to_i
   when "--prefix" then opts[:prefix] = v
+  when "--credentials" then opts[:credentials] = v
+  when "--namespace" then opts[:namespace] = v
   else abort "unknown option #{k}"
   end
 end
@@ -32,7 +35,10 @@ $stdout.sync = true
 
 def play(i, opts)
   node = "#{opts[:prefix]}-#{i}"
-  Asterism.connect(opts[:router], node: node, app: "game")
+  extra = {}
+  extra[:credentials] = opts[:credentials] if opts[:credentials]
+  extra[:config] = { "namespace" => opts[:namespace] } if opts[:namespace]
+  Asterism.connect(opts[:credentials] ? nil : opts[:router], node: node, app: "game", **extra)
   t = Asterism[opts[:table], timeout: 3.0]
   tok = t.join("Bot#{i + 1}")["token"]
   sleep 0.5 * i
@@ -75,7 +81,9 @@ def play(i, opts)
   puts "#{node}: #{calls} actions, leaves: #{t.leave(tok)}"
 rescue Asterism::Error => e
   puts "#{node}: #{e.class}: #{e.message}"
-  retry if (tries = (tries || 0) + 1) < 5
+  Asterism.close rescue nil
+  sleep 3
+  retry if (tries = (tries || 0) + 1) < 20
 ensure
   Asterism.close rescue nil
 end

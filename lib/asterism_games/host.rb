@@ -1,10 +1,13 @@
 # frozen_string_literal: true
 
 require "asterism"
+require "json"
+require_relative "version"
 require_relative "config"
 require_relative "store"
 require_relative "mahjong/table"
 require_relative "mahjong/remote"
+require_relative "rooms"
 
 module AsterismGames
   # The game host: one Asterism node that exposes a game object for every
@@ -72,14 +75,20 @@ module AsterismGames
     def connect
       opts = { node: @config["node"], app: @config["app"] }
       opts[:credentials] = @config["credentials"] if @config["credentials"]
-      locator = @config["credentials"] ? nil : @config["router"]
+      # A room's host (Rooms): the slot's certificate and the room's key
+      # space, so every key is the room's (room/<slot>/asterism/...).
+      opts[:config] = { "namespace" => @config["namespace"] } if @config["namespace"]
+      locator = @config["credentials"] ? @config["credentials_router"] : @config["router"]
       ::Asterism.connect(locator, **opts)
-      ::Asterism.profile(name: "asterism-games")
+      ::Asterism.profile(name: "asterism-games") unless @config["namespace"]
       @games.each_key do |name|
         ::Asterism.expose(name, @remotes[name], methods: @methods[name])
       end
       @session = ::Asterism.session
-      @log.call("games: #{@config['node']}/#{@config['app']} up (#{@games.keys.join(', ')}) via #{locator || 'credentials'}")
+      @connected = true
+      write_status
+      @log.call("games: #{@config['node']}/#{@config['app']} up (#{@games.keys.join(', ')}) via " \
+                "#{locator || 'credentials'}#{" in #{@config['namespace']}" if @config['namespace']}")
     end
 
     def serve
@@ -91,6 +100,29 @@ module AsterismGames
         step
         sleep LOOP_S
       end
+    end
+
+    STATUS_EVERY_MS = 2000
+
+    # What the room supervisor shows (Rooms#status): written to
+    # config["status_file"] every STATUS_EVERY_MS. Counts only, no names,
+    # no nodes, no tokens.
+    def status_now(now = @clock.call)
+      { "pid" => Process.pid, "at" => Time.now.to_i, "connected" => @connected ? true : false,
+        "reconnecting" => (@connected && ::Asterism.reconnecting?) ? true : false,
+        "tables" => @games.transform_values { |g| g.respond_to?(:summary) ? g.summary(now) : {} } }
+    rescue StandardError
+      { "pid" => Process.pid, "at" => Time.now.to_i, "connected" => false, "tables" => {} }
+    end
+
+    def write_status(now = @clock.call)
+      path = @config["status_file"] or return
+      @status_at = now
+      tmp = "#{path}.tmp"
+      File.write(tmp, JSON.generate(status_now(now)))
+      File.rename(tmp, path)
+    rescue SystemCallError => e
+      @log.call("games: status file: #{e.message}")
     end
 
     # One pass over the games (also used by the tests without a network).
@@ -105,6 +137,7 @@ module AsterismGames
           put_state(name, g, now)
         end
       end
+      write_status(now) if @config["status_file"] && now - @status_at.to_i >= STATUS_EVERY_MS
     end
 
     def put_state(name, game, now)
@@ -137,6 +170,8 @@ module AsterismGames
       nil
     ensure
       @session = nil
+      @connected = false
+      write_status
     end
 
     # Measures every answer an exposed object gives (as the reply payload

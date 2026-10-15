@@ -8,20 +8,25 @@ players; seats nobody takes are played by CPUs), built on the
 [riichi_engine](https://github.com/HenrikStephensen/riichi_engine) gem (a
 fork with fixes, see "riichi_engine" below).
 
-Status: Step 2 of the mahjong plan: up to four players at a table (a lobby
+Status: Step 3 of the mahjong plan: up to four players at a table (a lobby
 to sit and start, calls by several players decided together, players that
-drop out played for after a short wait until they are back), two tables at once, on a local
-network. Not published yet.
+drop out played for after a short wait until they are back), two tables at
+once on a local network, or a table in each room of an Asterism console
+on a server ("Rooms"; the server's setup: docs/install.md). Not published yet.
 
 | Path | What |
 |---|---|
 | `bin/asterism-games` | the host |
 | `bin/mahjong-bots` | players without screens, for trying a table (one process each) |
 | `lib/asterism_games/host.rb` | the connection, the loop, the puts, the game registry (`Host::GAMES`) |
+| `lib/asterism_games/rooms.rb` | the rooms' supervisor: one host process per room that opens a table ("Rooms") |
 | `lib/asterism_games/config.rb` | the settings (file and environment) |
 | `lib/asterism_games/store.rb` | saved states, one JSON file per table |
 | `lib/asterism_games/mahjong/` | the mahjong table: `table.rb` (seats, rounds, views, time), `engine.rb` (the calls into riichi_engine), `remote.rb` (the exposed object), `tiles.rb` (tile numbers) |
 | `config/example.yml` | settings to copy |
+| `config/rooms.yml` | the settings of the server's image (rooms) |
+| `deploy/vps/` | the server's image, compose file, `update.sh` (docs/install.md) |
+| `docs/install.md` | putting the host on a server next to an Asterism console |
 | `test/` | the tests (`rake test`) |
 
 ## Running
@@ -73,6 +78,66 @@ A mahjong table takes (the environment applies to every table):
 | `cpu_level` | `MAHJONG_CPU_LEVEL` | `normal` | `easy` / `normal` / `hard` (riichi_engine's CPU levels) |
 | `humans` | | 4 | seats members may take (0: four CPUs that play at once, for tests) |
 | `rule` | | (below) | riichi_engine rule keys over the host's defaults ("Rules") |
+
+## Rooms
+
+An Asterism console (0.2.2 and later) makes rooms: a key space of its own
+(`room/<slot>/**`) that people join from a browser with the room's link
+(the console's docs/rooms.md). With a `rooms` section (or
+`ASTERISM_GAMES_ROOMS_DIR`) the host serves tables in rooms instead of the
+`tables` above.
+
+- **Which rooms.** The console writes the open rooms to `rooms.json` in its
+  "rooms" volume, with the app each room's link opens. A room that opens
+  one of `rooms.apps` (the mahjong table's screen,
+  `/app/game/mahjong/mahjong.app.rb`) gets the tables of `rooms.tables` (one
+  table, `mahjong1`); other rooms get nothing. The admin chooses the app
+  when making the room (Admin > Rooms, "Opens": Mahjong), so a table needs
+  no step beyond the one a room needs anyway. The people in the room open
+  the link and see the table in the screen's list, as on a home network
+  (`games/games/mahjong1`).
+- **One process per room.** The asterism gem keeps one connection a
+  process, so the supervisor forks a host process (Host) per room. It joins
+  the router with the slot's certificate (`certs/room-<slot>.tar`, in the
+  same volume, read-only) in the room's namespace (`room/<slot>`): its keys
+  are the room's, and nothing of it reaches other rooms or the registered
+  side (the router's ACL). At most `rooms.max` rooms have tables (3); a room
+  beyond that gets none (the status says so). A host process that stops is
+  started again after 1, 2, 4 ... 30 s.
+- **A slot used again.** The tables of a room are saved under
+  `state_dir/rooms/<slot>/` with the room's ID (`room.json`). When the room
+  is closed or has ended (the file lists it as revoked, or its end has
+  passed), or the slot holds another room, the host process stops and the
+  directory is removed: the next room on the slot starts from an empty
+  lobby, with no seats or tokens of the last one. A file that cannot be read
+  changes nothing (it is not taken as every room closed).
+- **Restarts.** Stopped (SIGTERM) and started again, the supervisor finds
+  the open rooms and each host reads its saved tables: a game goes on from
+  the same turn. When the router restarts, each host connects again within
+  3 s.
+- **Status.** `rooms.status_listen` (`0.0.0.0:7460` in the image) answers
+  `GET /status`: the rooms with tables, each table's state and counts
+  (seated, CPUs, at the table, away; no names, nodes or tokens), whether the
+  host can read `rooms.json`, the rooms without a table, `busy` (someone
+  sits at a table) and the RSS. The console's rooms page shows it
+  (`ASTERISM_GAMES_STATUS_URL`); `bin/asterism-games status [--idle]` prints
+  it (`--idle` exits 0 when nobody sits at a table: update.sh's
+  `--when-idle`). In the console's graph each room's frame shows the host's
+  node (`games`) and its tables, like any node in a room.
+
+| Key (`rooms:`) | Environment | Default | |
+|---|---|---|---|
+| `dir` | `ASTERISM_GAMES_ROOMS_DIR` | none (no rooms) | the console's rooms volume: `rooms.json`, `certs/` |
+| `apps` | `ASTERISM_GAMES_ROOM_APPS` (comma separated) | `/app/game/mahjong/mahjong.app.rb` | a room whose link opens one of these gets the tables |
+| `max` | `ASTERISM_GAMES_ROOM_MAX` | 3 | rooms with tables at once |
+| `node` | `ASTERISM_GAMES_ROOM_NODE` | `games` | the host's node ID in a room |
+| `router` | `ASTERISM_GAMES_ROOM_ROUTER` | the certificate's (`tls/zenohd:7448`) | the router |
+| `status_listen` | `ASTERISM_GAMES_STATUS_LISTEN` | none | host:port of `GET /status` |
+| `tables` | | one table `mahjong1` | as `tables` above; the `MAHJONG_*` environment applies |
+
+Memory (CRuby 3.2, the image, measured): the supervisor about 43 MB RSS,
+each room's host about 45-50 MB more (the forked process shares the loaded
+code with the supervisor at first).
 
 ## The mahjong table
 
@@ -354,12 +419,20 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   yakuman on and off, the host's rule defaults, the riichi help (the waits
   after each riichi discard and what is left of them, only in the seat's
   own view), and the engine fixes the host relies on.
+- `test_rooms.rb`: the rooms' supervisor with stand-in host processes: which
+  rooms get a host (the app, closed, ended), the child's settings (the
+  slot's certificate, the namespace), a new room on the slot starting from
+  nothing (and a slot that moved while the supervisor was down), the same
+  room keeping its tables across a restart, an unreadable file changing
+  nothing, `max` and a stopped host started again, the status (counts
+  only) and the settings from the environment.
 - `test_network.rb`: the same refusals through a router, with the host in a
   child process (skipped without `ASTERISM_TEST_ROUTER`).
 
 `bin/mahjong-bots` fills a table with players over the network (to try a
 second table, or the host under load): `bundle exec bin/mahjong-bots
---table games/games/mahjong2`.
+--table games/games/mahjong2`. In a room: `--credentials room-01.tar
+--namespace room/01 --table games/games/mahjong1`.
 
 ## License
 

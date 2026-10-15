@@ -3,7 +3,39 @@
 
 # The game host. Settings: README "Settings" (a YAML file given by --config
 # or ASTERISM_GAMES_CONFIG, and the environment).
+#
+#   bin/asterism-games [--config PATH]          # the host (tables, or the rooms' tables)
+#   bin/asterism-games status [--idle] [URL]    # the rooms' host: what GET /status says;
+#                                               # --idle: exit 0 when nobody sits at a table
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+
+if ARGV.first == "status"
+  require "json"
+  require "net/http"
+  args = ARGV.drop(1)
+  idle = args.delete("--idle")
+  url = args.first || "http://127.0.0.1:#{(ENV['ASTERISM_GAMES_STATUS_LISTEN'] || ':7460')[/\d+\z/]}/status"
+  begin
+    s = JSON.parse(Net::HTTP.get(URI(url)))
+  rescue StandardError => e
+    warn "asterism-games status: #{url}: #{e.message}"
+    exit 2
+  end
+  rooms = s["rooms"] || {}
+  puts "asterism-games #{s['version']} since #{s['since']}: #{rooms.size} room(s) with tables (at most #{s['max']}), " \
+       "RSS #{(s['rss_kb'].to_i / 1024.0).round(1)} MB"
+  rooms.each do |slot, r|
+    tables = (r["tables"] || {}).map do |n, t|
+      "#{n} #{t['st']} (#{t['humans']} seated, #{t['cpus']} CPU, #{t['members']} at the table)"
+    end
+    puts "  room #{slot}: #{r['state']}, #{tables.empty? ? 'no tables yet' : tables.join('; ')}"
+  end
+  puts "  rooms waiting for a table: #{s['without_table'].join(', ')}" unless s["without_table"].to_a.empty?
+  puts s["busy"] ? "busy: someone sits at a table" : "idle: nobody sits at a table"
+  exit(s["busy"] ? 1 : 0) if idle
+  exit 0
+end
+
 require "asterism_games/host"
 
 path = ENV["ASTERISM_GAMES_CONFIG"]
@@ -11,7 +43,9 @@ if (i = ARGV.index("--config"))
   path = ARGV[i + 1]
 end
 $stdout.sync = true
-host = AsterismGames::Host.new(AsterismGames::Config.load(path), log: ->(m) { puts "#{Time.now.strftime('%H:%M:%S')} #{m}" })
+config = AsterismGames::Config.load(path)
+log = ->(m) { puts "#{Time.now.strftime('%H:%M:%S')} #{m}" }
+host = config["rooms"] ? AsterismGames::Rooms.new(config, log: log) : AsterismGames::Host.new(config, log: log)
 %w[INT TERM].each { |s| trap(s) { host.stop! } }
 host.run
 puts "games: stopped (state saved)"

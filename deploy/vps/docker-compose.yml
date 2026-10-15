@@ -1,0 +1,76 @@
+# The game host on a server, next to an Asterism console (its deploy/vps,
+# compose project "asterism"): docs/install.md. Its own compose project
+# ("asterism-games"), so the console's update.sh (docker compose up
+# --remove-orphans on project "asterism") never touches it, and this one's
+# never touches the console.
+#
+#   games    7460 (GET /status)       none: the console asks on the "router" network
+#            joins zenohd tls/7448 with a room slot's certificate, one process per room
+#
+# From the console's project it takes, by name (ASTERISM_PROJECT, "asterism"):
+#   <project>_rooms    read-only: rooms.json (the open rooms, which app each opens)
+#                      and certs/room-NN.tar (the slots' certificates)
+#   <project>_router   the network zenohd and the console are on
+# and it keeps its own:
+#   state              the saved tables (rooms/<slot>/), written after every change;
+#                      the console's daily backup takes it in (the console's
+#                      deploy/vps/docker-compose.games.yml)
+#
+# Settings: .env next to this file (env.example). Updating: ./update.sh.
+name: asterism-games
+
+services:
+  games:
+    image: ${GAMES_IMAGE:-asterism-games}:${GAMES_VERSION:-dev}
+    build:
+      context: ../..
+      dockerfile: deploy/vps/Dockerfile
+      args:
+        GAMES_VERSION: ${GAMES_VERSION:-dev}
+    init: true
+    restart: unless-stopped
+    # SIGTERM: every room's host saves its tables and leaves (the
+    # supervisor waits 8 s for them).
+    stop_grace_period: 15s
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ASTERISM_GAMES_CONFIG: /app/config/rooms.yml
+      ASTERISM_GAMES_ROOMS_DIR: /rooms
+      ASTERISM_GAMES_STATE_DIR: /state
+      ASTERISM_GAMES_STATUS_LISTEN: 0.0.0.0:7460
+      ASTERISM_GAMES_ROOM_MAX: ${GAMES_ROOM_MAX:-3}
+      MALLOC_ARENA_MAX: "2"
+    volumes:
+      - rooms:/rooms:ro
+      - state:/state
+    networks:
+      router:
+        aliases: [asterism-games]
+    # The supervisor (about 40 MB) and one process per room with tables
+    # (about 60 MB each): 3 rooms fit in 320 MB. Over it, the kernel stops a
+    # process of the container and the supervisor (or docker) starts it again.
+    mem_limit: ${GAMES_MEM_LIMIT:-384m}
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "bundle", "exec", "bin/asterism-games", "status"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  state: {}
+  rooms:
+    external: true
+    name: ${ASTERISM_PROJECT:-asterism}_rooms
+
+networks:
+  router:
+    external: true
+    name: ${ASTERISM_PROJECT:-asterism}_router
