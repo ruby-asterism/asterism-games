@@ -302,8 +302,8 @@ class TestMahjongRules < Minitest::Test
     assert_equal [0], t.public_view(10)["res"]["wn"].map { |w| w["w"] }, "the head bump: seat 0 is before seat 1 after seat 2"
   end
 
-  def test_three_rons_are_a_draw
-    t, toks = calls_table([0, 1, 3])
+  def test_three_rons_are_a_draw_when_triple_ron_draw_is_on
+    t, toks = calls_table([0, 1, 3], "rule" => { "triple_ron_draw" => true })
     [0, 1, 3].each { |s| assert_equal "ok", t.act(toks[s], t.sv, E::RON, [], 10) }
     res = t.public_view(10)["res"]
     assert_equal "sanchahou", res["k"]
@@ -313,8 +313,8 @@ class TestMahjongRules < Minitest::Test
     assert_equal 1, flow["honba"]
   end
 
-  def test_three_rons_win_when_triple_ron_draw_is_off
-    t, toks = calls_table([0, 1, 3], "rule" => { "triple_ron_draw" => false })
+  def test_three_rons_all_win_by_default
+    t, toks = calls_table([0, 1, 3])
     [0, 1, 3].each { |s| assert_equal "ok", t.act(toks[s], t.sv, E::RON, [], 10) }
     assert_equal [3, 0, 1], t.public_view(10)["res"]["wn"].map { |w| w["w"] }
   end
@@ -336,7 +336,7 @@ class TestMahjongRules < Minitest::Test
   def test_the_host_rule_defaults
     r = E.rule
     assert r.double_ron?
-    assert r.triple_ron_draw?
+    refute r.triple_ron_draw?
     assert r.multiple_yakuman?
     assert r.nishi_iri?
     assert_equal 30_000, r.nishi_iri_threshold

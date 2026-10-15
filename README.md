@@ -211,7 +211,7 @@ later. "Not sure" marks what could not be confirmed.
 | Ippatsu, ura dora, kan dora, kan ura | yes | always | no | yes |
 | When a kan dora shows | at once for a closed kan, after the discard for an open or added kan (not sure) | at once for every kan | no | at once (later) |
 | Double ron | yes | `double_ron` (true) | yes (fork `fix/multiple-ron`) | true |
-| Three rons | all three win (no sanchahou) | `triple_ron_draw` (true) | yes (fork `fix/multiple-ron`) | **true: a draw** (the user's decision, 2026-10-15; differs from Mahjong Soul) |
+| Three rons | all three win (no sanchahou) | `triple_ron_draw` (true) | yes (fork `fix/multiple-ron`) | **false: all three win** (as Mahjong Soul) |
 | Honba and sticks at a double ron | to the first winner from the discarder | the host's scoring | (host) | to the first winner |
 | Dealer at a double ron | keeps the seat if one of the winners | `GameFlow` (winners) | (engine) | as the engine |
 | Abortive draws | nine kinds, four winds, four kans, four riichi; the dealer keeps the seat | nine kinds only (the others are documented, not implemented) | no | nine kinds (the others later) |

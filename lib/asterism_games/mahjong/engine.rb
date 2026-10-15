@@ -38,9 +38,7 @@ module AsterismGames
       module_function
 
       # The host's rule defaults: Mahjong Soul's defaults where riichi_engine
-      # can choose (README "Rules"), except triple_ron_draw (three rons are a
-      # draw, the user's decision of 2026-10-15). A table's "rule" settings go
-      # over these.
+      # can choose (README "Rules"). A table's "rule" settings go over these.
       RULE_DEFAULTS = {
         "game_type" => "hanchan",
         "initial_score" => 25_000,
@@ -51,7 +49,7 @@ module AsterismGames
         "kazoe_yakuman" => true,
         "kiriage_mangan" => false,
         "double_ron" => true,
-        "triple_ron_draw" => true,
+        "triple_ron_draw" => false,
         "multiple_yakuman" => true,
         "tobi" => true,
         "nishi_iri" => true,

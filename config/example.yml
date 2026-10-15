@@ -19,7 +19,7 @@ tables:
     # rule: riichi_engine's rule keys over the host's defaults (README "Rules"):
     #   game_type: hanchan    # or tonpuu
     #   double_ron: true
-    #   triple_ron_draw: true
+    #   triple_ron_draw: false
     #   multiple_yakuman: true
     #   nishi_iri: true
     #   nishi_iri_threshold: 30000
