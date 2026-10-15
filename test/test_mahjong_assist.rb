@@ -83,6 +83,11 @@ class TestMahjongAssist < Minitest::Test
   def test_acceptance_after_each_discard
     t, seat, = at_discard(%w[1m 2m 3m 4p 5p 6p 7s 8s 1z 2z 5m 7m 9p 4z])
     s = t.state
+    # the rivers and melds of the random game so far would count too
+    4.times do |i|
+      s.kawas[i] = Mahjong::State::Kawa.new
+      s.fuuros[i] = [] unless i == seat
+    end
     s.kawas[1].add(tile("6m"))
     s.dora_hyouji = [tile("2z")]
     uk = E.ukeire_after(s, seat, %w[1z 9p])
