@@ -13,6 +13,7 @@ tables:
     result_seconds: 8        # a round's result stays this long (or until "next")
     over_seconds: 60         # the end of a game stays this long (or until the owner's "next")
     away_seconds: 10         # a player not heard from this long is shown as away
+    away_wait_seconds: 2     # an away player's time to discard or call (back: the full times)
     cpu_ms: 700              # a CPU's pause before it acts
     cpu_level: normal        # easy / normal / hard (riichi_engine's CPU levels)
     humans: 4                # seats players may take

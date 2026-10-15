@@ -30,6 +30,7 @@ module AsterismGames
       "MAHJONG_RESULT_SECONDS" => ["result_ms", 1000],
       "MAHJONG_OVER_SECONDS" => ["over_ms", 1000],
       "MAHJONG_AWAY_SECONDS" => ["away_ms", 1000],
+      "MAHJONG_AWAY_WAIT_SECONDS" => ["away_wait_ms", 1000],
       "MAHJONG_CPU_MS" => ["cpu_ms", 1],
       "MAHJONG_CPU_LEVEL" => ["cpu_level", nil]
     }.freeze
@@ -37,7 +38,8 @@ module AsterismGames
     TABLE_FILE_KEYS = {
       "turn_seconds" => ["turn_ms", 1000], "call_seconds" => ["call_ms", 1000],
       "result_seconds" => ["result_ms", 1000], "over_seconds" => ["over_ms", 1000],
-      "away_seconds" => ["away_ms", 1000], "cpu_ms" => ["cpu_ms", 1],
+      "away_seconds" => ["away_ms", 1000], "away_wait_seconds" => ["away_wait_ms", 1000],
+      "cpu_ms" => ["cpu_ms", 1],
       "cpu_level" => ["cpu_level", nil], "humans" => ["humans", 1]
     }.freeze
 

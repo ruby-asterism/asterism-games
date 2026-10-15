@@ -91,6 +91,102 @@ class TestMahjongRules < Minitest::Test
     assert seat
   end
 
+  # Plan A (mj2.md 11.1): an away seat waits away_wait_ms instead of the
+  # full times, and gets the full times again once it is back.
+  def test_an_away_seat_discards_after_the_short_wait
+    t, toks = seated_table(2, "turn_ms" => 20_000, "away_ms" => 5000, "away_wait_ms" => 2000)
+    nodes = toks.transform_values { |tok| t.node_of(tok) }
+    seat = toks.keys.min
+    other = (toks.keys - [seat]).first
+    keep = ->(now) { t.touch(nodes[other], now) }
+    now = run_until(t, 0) { keep.(t.instance_variable_get(:@now)); t.state.phase == :dahai && t.state.current_seat == seat }
+    t.touch(nodes[seat], now)
+    keep.(now)
+    v = t.public_view(now)
+    assert_equal [1 << seat, 20_000], v["dl"], "present: the full time"
+    kawa = t.state.kawas[seat].count
+    keep.(now + 4900)
+    t.tick(now + 4900)
+    assert_equal kawa, t.state.kawas[seat].count, "not away yet: still waiting"
+    keep.(now + 5100)
+    t.tick(now + 5100)
+    assert_equal kawa + 1, t.state.kawas[seat].count, "away: the short wait (2 s from the start) is over"
+    assert_equal 1, t.stats["away_turns"]
+    # Away from the start of its next turn: 2 s, not 20.
+    now = run_until(t, now + 5100) { keep.(t.instance_variable_get(:@now)); t.status != "play" || (t.state.phase == :dahai && t.state.current_seat == seat) }
+    skip "the round ended first" unless t.status == "play"
+    assert_equal [1 << seat, 2000], t.public_view(now)["dl"]
+    kawa = t.state.kawas[seat].count
+    keep.(now + 1990)
+    t.tick(now + 1990)
+    assert_equal kawa, t.state.kawas[seat].count
+    keep.(now + 2000)
+    t.tick(now + 2000)
+    assert_equal kawa + 1, t.state.kawas[seat].count
+    # Back: the full time again.
+    now = run_until(t, now + 2000) { keep.(t.instance_variable_get(:@now)); t.touch(nodes[seat], t.instance_variable_get(:@now)); t.status != "play" || (t.state.phase == :dahai && t.state.current_seat == seat) }
+    skip "the round ended first" unless t.status == "play"
+    assert_equal 0, t.public_view(now)["aw"]
+    assert_equal [1 << seat, 20_000], t.public_view(now)["dl"]
+  end
+
+  def test_a_seat_that_comes_back_mid_turn_gets_its_full_time
+    t, toks = seated_table(1, "turn_ms" => 20_000, "away_ms" => 5000, "away_wait_ms" => 2000)
+    seat, token = toks.first
+    node = t.node_of(token)
+    now = run_until(t, 0) { t.state.phase == :dahai && t.state.current_seat == seat }
+    t.touch(node, now)
+    t.tick(now)
+    assert_equal [1 << seat, 20_000], t.public_view(now)["dl"]
+    kawa = t.state.kawas[seat].count
+    # Back within away_ms: never away, the turn keeps its 20 s.
+    t.touch(node, now + 4000)
+    t.tick(now + 8000)
+    assert_equal kawa, t.state.kawas[seat].count
+    assert_equal 0, t.public_view(now + 8000)["aw"]
+    assert_equal [1 << seat, 12_000], t.public_view(now + 8000)["dl"]
+  end
+
+  def test_an_away_seat_passes_a_call_early_and_the_others_keep_their_time
+    t, toks = calls_table([1], pon: true, "away_ms" => 3000, "away_wait_ms" => 1000)
+    present = t.node_of(toks[3])
+    [0, 2].each { |s| t.touch(t.node_of(toks[s]), 0) }
+    t.touch(present, 2900)
+    t.tick(2900)
+    assert_equal :naki_wait, t.state.phase
+    assert_equal [0b1010, 2100], t.public_view(2900)["dl"]
+    t.touch(present, 3100)
+    t.tick(3100)
+    assert_equal :naki_wait, t.state.phase, "seat 3 still has its time"
+    assert_equal [0b1000, 1900], t.public_view(3100)["dl"], "seat 1 (away) has passed"
+    assert_equal 1, t.stats["away_calls"]
+    pon = t.view(3, 3100)["a"].find { |a, _| a == E::PON }
+    assert_equal "ok", t.act(toks[3], t.sv, E::PON, M::Tiles.unpack(pon[1]), 3200)
+    assert_equal 3, t.state.current_seat, "the pon stood"
+  end
+
+  # The called tile is where a table lays it sideways (fu in the views).
+  def test_melds_put_the_called_tile_where_it_lies_sideways
+    t, = seated_table(1)
+    tl = ->(*n) { n.map { |x| Mahjong::Tiles::Tile.new(x) } }
+    fu = ->(type, tiles, called, from) { Mahjong::State::Fuuro.new(type: type, tiles: tl.(*tiles), called_tile: Mahjong::Tiles::Tile.new(called), from_seat: from) }
+    order = ->(f, seat) { M::Tiles.unpack(t.send(:fuuro_bytes, [f], seat).byteslice(3..)) }
+    assert_equal %w[4s 3s 5s], order.(fu.(:chi, %w[3s 4s 5s], "4s", 1), 2), "from the left: first"
+    assert_equal %w[7z 7z 7z], order.(fu.(:pon, %w[7z 7z 7z], "7z", 0), 2)
+    assert_equal %w[5m 0m 5m], order.(fu.(:pon, %w[0m 5m 5m], "0m", 0), 2), "from across: second"
+    assert_equal %w[5m 5m 0m], order.(fu.(:pon, %w[0m 5m 5m], "0m", 3), 2), "from the right: last"
+    assert_equal %w[5m 5m 0m 5m], order.(fu.(:kakan, %w[0m 5m 5m 5m], "0m", 3), 2), "an added kan: last of the three"
+    assert_equal %w[5m 5m 5m 0m], order.(fu.(:daiminkan, %w[0m 5m 5m 5m], "0m", 3), 2), "an open kan from the right: last"
+  end
+
+  def test_the_away_wait_is_a_setting
+    c = AsterismGames::Config.new({ "tables" => [{ "name" => "a", "away_wait_seconds" => 3 }] }, {})
+    assert_equal 3000, c["tables"][0]["away_wait_ms"]
+    c = AsterismGames::Config.new({ "tables" => [{ "name" => "a" }] }, { "MAHJONG_AWAY_WAIT_SECONDS" => "1.5" })
+    assert_equal 1500, c["tables"][0]["away_wait_ms"]
+    assert_equal 2000, M::Table::DEFAULTS["away_wait_ms"]
+  end
+
   def test_the_game_goes_back_to_the_lobby
     t, toks = seated_table(1, "over_ms" => 1000)
     seat, token = toks.first
@@ -174,6 +270,7 @@ class TestMahjongRules < Minitest::Test
       t, toks = seated_table(1, store: store, "turn_ms" => 60_000)
       seat, token = toks.first
       now = run_until(t, 0) { t.state.phase == :dahai && t.state.current_seat == seat && t.state.kawas[seat].count >= 3 }
+      t.touch("wasm-aaaaa0", now) # present (a restarted host counts everybody as just seen)
       t.save(now)
       u = human_table(store: store, "turn_ms" => 60_000)
       u.resume_clock(now)

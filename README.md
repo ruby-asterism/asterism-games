@@ -10,7 +10,7 @@ fork with fixes, see "riichi_engine" below).
 
 Status: Step 2 of the mahjong plan: up to four players at a table (a lobby
 to sit and start, calls by several players decided together, players that
-drop out played for until they are back), two tables at once, on a local
+drop out played for after a short wait until they are back), two tables at once, on a local
 network. Not published yet.
 
 | Path | What |
@@ -70,6 +70,7 @@ A mahjong table takes (the environment applies to every table):
 | `result_seconds` | `MAHJONG_RESULT_SECONDS` | 8 | a round's result stays this long (or until a player presses next) |
 | `over_seconds` | `MAHJONG_OVER_SECONDS` | 60 | the end of a game stays this long (or until the owner presses next), then the table is back in its lobby |
 | `away_seconds` | `MAHJONG_AWAY_SECONDS` | 10 | a member that has not called the table this long is shown as away |
+| `away_wait_seconds` | `MAHJONG_AWAY_WAIT_SECONDS` | 2 | an away member's time to discard or to call, instead of `turn_seconds` / `call_seconds` |
 | `cpu_ms` | `MAHJONG_CPU_MS` | 700 | a CPU's pause before it acts |
 | `cpu_level` | `MAHJONG_CPU_LEVEL` | `normal` | `easy` / `normal` / `hard` (riichi_engine's CPU levels) |
 | `humans` | | 4 | seats members may take (0: four CPUs that play at once, for tests) |
@@ -129,11 +130,16 @@ see the choices exactly as the engine lists them.
 
 A member that has not called the table for `away_seconds` (its screen asks
 its view every 3 s) is away: the public view marks its seat (`"aw"`) and the
-member list. Its seat is played for by the same timeouts as anyone's (the
-drawn tile after `turn_seconds`, a pass after `call_seconds`) until it calls
-again; its screen then asks its view and goes on. A seat is never handed to
-a CPU because its player is away (that is a choice left for later); a member
-that leaves (`leave`) during a game is.
+member list. While it is away its seat is played for after a short wait:
+`away_wait_seconds` from the start of its turn or of the calls (the drawn
+tile is discarded, a call is passed), instead of `turn_seconds` and
+`call_seconds`, so the others are not held up a whole turn every time. The
+other players keep their own times (in the calls, the away seat passes
+early and the rest go on waiting). A wait that started before the member
+went away ends as soon as it is seen away, if its short wait is over by
+then. Once it calls again it has the full times again; its screen asks its
+view and goes on. A seat is never handed to a CPU because its player is
+away; a member that leaves (`leave`) during a game is.
 
 ### Views
 
@@ -152,7 +158,7 @@ A Hash (MessagePack); tiles are one byte each in binary strings (bin).
 | `sc`, `ri` | the scores; riichi as bits |
 | `dora` | the dora indicators |
 | `kw` | four rivers, one byte a tile: `0x40` the riichi tile, `0x80` called away |
-| `fu` | four meld lists: per meld `[kind, from, n, n tiles]`; kind 1 chi, 2 pon, 3 closed kan, 4 open kan, 5 added kan; from 1 right, 2 across, 3 left, 0 none |
+| `fu` | four meld lists: per meld `[kind, from, n, n tiles]`; kind 1 chi, 2 pon, 3 closed kan, 4 open kan, 5 added kan; from 1 right, 2 across, 3 left, 0 none. The tiles are in the order a table shows them: the called tile is first when it came from the left, second from across, last from the right (an added kan: the last of the first three, the added tile fourth) |
 | `hc` | the four hand sizes |
 | `ls`, `ev` | the last discard `[seat, tile]`; the last action `[type, seat]` |
 | `dl` | `[seats as bits, ms]`: whom the host waits for (one seat's turn, or every seat that may still call) and how long it still waits |

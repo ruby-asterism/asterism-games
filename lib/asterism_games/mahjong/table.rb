@@ -21,8 +21,10 @@ module AsterismGames
     # Seats are nil (empty, in the lobby only), "human" (a member) or "cpu"
     # (riichi_engine's player). A human who does not decide in time is played
     # for: the drawn tile is discarded, a call is passed. A member that has
-    # not called the table for away_ms is shown as away; its seat goes on
-    # being played for by the same timeouts until it comes back.
+    # not called the table for away_ms is shown as away; until it comes back
+    # its seat is played for after a shorter wait (away_wait_ms instead of
+    # turn_ms and call_ms, counted from the start of the wait), so the others
+    # are not held up a full turn each time. Back, it has the full times again.
     class Table
       SAVE_FORMAT = 2
       MAX_ROUNDS = 40 # a hanchan has far fewer; a guard against a loop
@@ -35,6 +37,7 @@ module AsterismGames
         "result_ms" => 8_000,     # the result of a round stays this long
         "over_ms" => 60_000,      # the end of a game stays this long (then the lobby)
         "away_ms" => 10_000,      # a member not heard from this long is away
+        "away_wait_ms" => 2_000,  # an away seat's time to discard or call
         "cpu_level" => "normal",  # easy / normal / hard
         "humans" => 4,            # seats members may take (0: CPUs only, at once)
         "rule" => {}              # riichi_engine rule keys over Engine::RULE_DEFAULTS
@@ -321,8 +324,8 @@ module AsterismGames
         when :dahai
           seat = st.current_seat
           if human?(seat)
-            return set_deadline(1 << seat, now + @opts["turn_ms"]) if @deadline.nil?
-            return false if now < @deadline
+            return set_deadline(1 << seat, now + @opts["turn_ms"], now) if @deadline.nil?
+            return false if now < turn_deadline(seat)
             @stats["timeouts"] += 1
             @stats["away_turns"] += 1 if away?(seat)
             auto_discard(seat, now)
@@ -353,13 +356,22 @@ module AsterismGames
             @stats["multi_human_calls"] += 1
             @log&.call("mahjong: #{@name}: calls: humans #{humans.inspect} may call (cpus #{(seats - humans).inspect})")
           end
-          set_deadline(bits { |i| humans.include?(i) && !@decl.key?(i) }, now + @opts["call_ms"])
+          set_deadline(bits { |i| humans.include?(i) && !@decl.key?(i) }, now + @opts["call_ms"], now)
         end
         seats.each do |seat|
           next if @decl.key?(seat) || human?(seat)
           @decl[seat] = Engine.cpu_choice(st, seat, @rule, @ai) || { type: :skip, seat: seat }
         end
         waiting = humans.reject { |s| @decl.key?(s) }
+        # An away seat passes after its short wait; the others keep theirs.
+        if @deadline && !waiting.empty? && now >= away_deadline
+          waiting.select { |s| away?(s) }.each do |s|
+            @stats["timeouts"] += 1
+            @stats["away_calls"] += 1
+            @decl[s] = { type: :skip, seat: s }
+          end
+          waiting = humans.reject { |s| @decl.key?(s) }
+        end
         unless waiting.empty?
           if now < @deadline
             mask = bits { |i| waiting.include?(i) }
@@ -412,12 +424,25 @@ module AsterismGames
         @opts["cpu_ms"] <= 0
       end
 
-      # The deadline of the seats in mask (bits).
-      def set_deadline(mask, at)
+      # The deadline of the seats in mask (bits); the wait starts at from.
+      def set_deadline(mask, at, from)
         @deadline = at
         @deadline_bits = mask
+        @wait_from = from
         changed
         false
+      end
+
+      # When an away seat's wait ends (away_wait_ms from the start of the
+      # wait, never later than everybody's deadline).
+      def away_deadline
+        return @deadline if @wait_from.nil?
+        [@deadline, @wait_from + @opts["away_wait_ms"]].min
+      end
+
+      # The deadline of the seat whose turn it is: shorter while it is away.
+      def turn_deadline(seat)
+        away?(seat) ? away_deadline : @deadline
       end
 
       def cpu_act(seat, now)
@@ -580,11 +605,18 @@ module AsterismGames
           v["hc"] = (0..3).map { |s| st.hands[s].count }
           v["ls"] = st.last_dahai ? [st.last_dahai[:seat], Tiles.code(st.last_dahai[:tile].to_s)] : nil
           v["ev"] = @event
-          v["dl"] = @deadline ? [@deadline_bits, [@deadline - now, 0].max] : nil
+          v["dl"] = @deadline ? [@deadline_bits, [shown_deadline - now, 0].max] : nil
         end
         v["res"] = result_view if @result && (@status == "result" || @status == "over")
         v["fin"] = @final if @final
         v
+      end
+
+      # The deadline a view shows: an away seat's own turn ends sooner.
+      def shown_deadline
+        st = @state
+        return @deadline unless st && st.phase == :dahai
+        turn_deadline(st.current_seat)
       end
 
       # The members in the order they joined: [name, seat (-1 none), flags]
@@ -641,9 +673,23 @@ module AsterismGames
           kind = %i[chi pon ankan daiminkan kakan].index(f.type) + 1
           from = f.from_seat.nil? ? 0 : (f.from_seat - seat) % 4
           out << kind << from << f.tiles.size
-          f.tiles.each { |t| out << Tiles.code(t.to_s) }
+          meld_order(f, kind, from).each { |t| out << Tiles.code(t) }
         end
         out.pack("C*").b
+      end
+
+      # A meld's tiles in the order a table shows them: the called tile where
+      # it lies sideways (first when taken from the left, second from across,
+      # last from the right; for an added kan the last of the first three, the
+      # added tile after them).
+      def meld_order(f, kind, from)
+        tiles = f.tiles.map(&:to_s)
+        called = f.respond_to?(:called_tile) && f.called_tile ? f.called_tile.to_s : nil
+        return tiles if called.nil? || from.zero? || kind == 3 || !(i = tiles.index(called))
+        tiles.delete_at(i)
+        n = kind == 5 ? 3 : tiles.size + 1
+        at = { 3 => 0, 2 => 1, 1 => n - 1 }[from]
+        tiles.insert(at, called)
       end
 
       def result_view
@@ -686,6 +732,7 @@ module AsterismGames
           "game" => @game, "round" => @state&.to_json,
           "decl" => @decl.to_h { |k, a| [k.to_s, saved_action(a)] },
           "deadline_left" => @deadline && [@deadline - now, 0].max, "deadline_bits" => @deadline_bits,
+          "wait_spent" => @deadline && @wait_from && [now - @wait_from, 0].max,
           "cpu_left" => @cpu_at && [@cpu_at - now, 0].max, "next_left" => @next_at && [@next_at - now, 0].max,
           "result" => @result, "flow" => @flow, "final" => @final, "event" => @event }
       end
@@ -724,6 +771,7 @@ module AsterismGames
       def resume_clock(now, d = @store&.read(@name))
         return unless d && d["format"] == SAVE_FORMAT
         @deadline = d["deadline_left"] && now + d["deadline_left"]
+        @wait_from = @deadline && now - d["wait_spent"].to_i
         @cpu_at = d["cpu_left"] && now + d["cpu_left"]
         @next_at = d["next_left"] && now + d["next_left"]
         @members.each_value { |m| m["seen"] = now }
