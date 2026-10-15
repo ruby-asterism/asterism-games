@@ -22,8 +22,10 @@ module MahjongTestHelper
     M::Table.new("t", { "humans" => 0, "cpu_ms" => 0, "result_ms" => 0 }.merge(opts.transform_keys(&:to_s)))
   end
 
+  # A table with humans; a fixed time per move (no bank) unless bank_ms is
+  # given.
   def human_table(store: nil, **opts)
-    M::Table.new("t", { "cpu_ms" => 0, "result_ms" => 0, "turn_ms" => 1000,
+    M::Table.new("t", { "cpu_ms" => 0, "result_ms" => 0, "turn_ms" => 1000, "bank_ms" => 0,
                         "call_ms" => 1000 }.merge(opts.transform_keys(&:to_s)), store: store)
   end
 

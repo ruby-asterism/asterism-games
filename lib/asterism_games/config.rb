@@ -48,6 +48,7 @@ module AsterismGames
     }.freeze
     TABLE_ENV_KEYS = {
       "MAHJONG_TURN_SECONDS" => ["turn_ms", 1000],
+      "MAHJONG_BANK_SECONDS" => ["bank_ms", 1000],
       "MAHJONG_CALL_SECONDS" => ["call_ms", 1000],
       "MAHJONG_RESULT_SECONDS" => ["result_ms", 1000],
       "MAHJONG_OVER_SECONDS" => ["over_ms", 1000],
@@ -60,7 +61,8 @@ module AsterismGames
     }.freeze
     # Table keys in the file, in seconds, and the table's own (ms) names.
     TABLE_FILE_KEYS = {
-      "turn_seconds" => ["turn_ms", 1000], "call_seconds" => ["call_ms", 1000],
+      "turn_seconds" => ["turn_ms", 1000], "bank_seconds" => ["bank_ms", 1000],
+      "call_seconds" => ["call_ms", 1000],
       "result_seconds" => ["result_ms", 1000], "over_seconds" => ["over_ms", 1000],
       "away_seconds" => ["away_ms", 1000], "away_wait_seconds" => ["away_wait_ms", 1000],
       "cpu_ms" => ["cpu_ms", 1],

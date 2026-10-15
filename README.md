@@ -68,12 +68,13 @@ A mahjong table takes (the environment applies to every table):
 
 | Key | Environment | Default | |
 |---|---|---|---|
-| `turn_seconds` | `MAHJONG_TURN_SECONDS` | 20 | a player's time to discard; after it the drawn tile is discarded |
+| `turn_seconds` | `MAHJONG_TURN_SECONDS` | 5 | a player's time for a move (a discard, riichi, a kan, a win); a move that takes longer goes on into the bank ("Time") |
+| `bank_seconds` | `MAHJONG_BANK_SECONDS` | 20 | each player's bank for a game; when the move's time and the bank are used up, the drawn tile is discarded (0: no bank, `turn_seconds` a move and no more) |
 | `call_seconds` | `MAHJONG_CALL_SECONDS` | 8 | the time to call a discard, the same for every player who may; after it the call is passed |
 | `result_seconds` | `MAHJONG_RESULT_SECONDS` | 8 | a round's result stays this long (or until a player presses next) |
 | `over_seconds` | `MAHJONG_OVER_SECONDS` | 60 | the end of a game stays this long (or until the owner presses next), then the table is back in its lobby |
 | `away_seconds` | `MAHJONG_AWAY_SECONDS` | 10 | a member that has not called the table this long is shown as away |
-| `away_wait_seconds` | `MAHJONG_AWAY_WAIT_SECONDS` | 2 | an away member's time to discard or to call, instead of `turn_seconds` / `call_seconds` |
+| `away_wait_seconds` | `MAHJONG_AWAY_WAIT_SECONDS` | 2 | an away member's time to discard or to call, instead of `turn_seconds` and the bank / `call_seconds` |
 | `cpu_ms` | `MAHJONG_CPU_MS` | 700 | a CPU's pause before it acts |
 | `cpu_level` | `MAHJONG_CPU_LEVEL` | `normal` | `easy` / `normal` / `hard` (riichi_engine's CPU levels) |
 | `humans` | | 4 | seats members may take (0: four CPUs that play at once, for tests) |
@@ -224,7 +225,12 @@ choice. A new room (a slot used again) starts from the host's rules.
 `ru` has one number per item for items 0-10 and `rx` for items 11-14, in
 this order (a table screen that knows only the first eleven reads `ru` as
 before); `rule(token, item, value)` takes one of the values listed (or the
-host's own value for the item):
+host's own value for the item). Item 10 is the time ("Time"): its value is
+a code, the seconds for a move plus 1000 times the seconds of the bank
+(5+20 is 20005, a fixed 20 s is 20). `ru` gives its seconds for a move
+only (what a table app before MJ-E3 shows as "the time to discard"), `tb`
+its bank, and in the lobby `tc` the codes to choose from, in order (the
+host's own value among them):
 
 | Item | | riichi_engine key | Values |
 |---|---|---|---|
@@ -238,7 +244,7 @@ host's own value for the item):
 | 7 | kiriage mangan | `kiriage_mangan` | 0 / 1 |
 | 8 | tobi | `tobi` | 0 / 1 |
 | 9 | the extra round ("延長"): west for a hanchan, south for a tonpuu game | `nishi_iri`, `nan_iri` together | 0 / 1 (the value is the key of the game chosen; a table app that calls the item the west round sets both) |
-| 10 | the time to discard, seconds | (the host's `turn_seconds`) | 10, 20, 30, 60 |
+| 10 | the time for a move and the bank ("持ち時間") | (the host's `turn_seconds`, `bank_seconds`) | `tc`: 5+20 (20005), 3+5 (5003), 10+30 (30010), a fixed 20 s (20) and 60 s (60), and the host's own; also 10, 20, 30, 60 (fixed, the choices of a table app before MJ-E3) |
 | 11 | the abortive draws besides nine kinds (four winds, four kans, four riichi) | `suufon_renda`, `suukaikan`, `suucha_riichi` together | 0 / 1 (1 only when all three are on; a host setting with some of them shows 0, and 0 chosen again goes back to it) |
 | 12 | nagashi mangan | `nagashi_mangan` | 0 / 1 |
 | 13 | double yakuman (suuankou tanki, kokushi 13-wait, junsei chuuren) | `double_yakuman` | 0 / 1 |
@@ -292,6 +298,28 @@ open kan over chi; several rons by the rule (by default every ron wins,
 two or three; `triple_ron_draw` makes three a draw, sanchahou), equal calls in turn order from the discarder. The players
 see the choices exactly as the engine lists them.
 
+### Time
+
+Mahjong Soul's "5+20" by default: a move (a discard, riichi, a kan, a win,
+nine kinds) has `turn_seconds` (5), and each player has a bank of
+`bank_seconds` (20). What a move takes beyond its 5 s comes off the bank;
+when the 5 s and the bank are both used up, the move is played for (the
+drawn tile is discarded). The bank is full at the start of a game and lasts
+it out: it is not filled again at a new round (Mahjong Soul's rule text
+says only "5+20"; when the bank fills is the host's choice). A bank of 0 is
+a fixed time a move (`turn_seconds` and no more). The calls on a discard
+keep `call_seconds` and do not touch the bank. An away player keeps its
+short wait ("Players that drop out"; it takes nothing off the bank while
+`away_wait_seconds` is shorter than `turn_seconds`). The owner chooses the
+time in the lobby ("Local rules", item 10). The banks are saved with the
+table; a table saved before the bank starts its game with full banks (and
+a fixed time the owner had chosen stays fixed).
+
+The player sees the time on its own move: `dl` is `[seats, ms left, the
+bank's ms]` when the move has a bank, the bank being the last part of the
+ms left (the move's own time is what comes before it); a table app before
+MJ-E3 reads the first two and shows the whole time left.
+
 ### Players that drop out
 
 A member that has not called the table for `away_seconds` (its screen asks
@@ -327,9 +355,10 @@ A Hash (MessagePack); tiles are one byte each in binary strings (bin).
 | `fu` | four meld lists: per meld `[kind, from, n, n tiles]`; kind 1 chi, 2 pon, 3 closed kan, 4 open kan, 5 added kan; from 1 right, 2 across, 3 left, 0 none. The tiles are in the order a table shows them: the called tile is first when it came from the left, second from across, last from the right (an added kan: the last of the first three, the added tile fourth) |
 | `hc` | the four hand sizes |
 | `ls`, `ev` | the last discard `[seat, tile]`; the last action `[type, seat]` |
-| `dl` | `[seats as bits, ms]`: whom the host waits for (one seat's turn, or every seat that may still call) and how long it still waits |
+| `dl` | `[seats as bits, ms]`: whom the host waits for (one seat's turn, or every seat that may still call) and how long it still waits; on a player's own move with a bank, a third number, the bank's ms in it ("Time") |
 | `res` | at a round's end: `k` (`tsumo_agari`, `ron_agari`, `ryuukyoku`, and the abortive draws `kyuushu_kyuuhai`, `sanchahou`, `suufon_renda`, `suukaikan`, `suucha_riichi`), `rd` (the round: `[bakaze, kyoku, honba]`), `d` (the four score changes), `f` (who dealt in), `wn` (one entry per winner, in turn order from the discarder: `w` seat, `y` the yaku as riichi_engine names them, in Japanese, `yh` the han of each (-1: a yakuman, -2: a double yakuman), `pt` fu, han and points, `h` and `ag` the hand and the winning tile, `pa` pao: `[[the seat that pays, the yakuman], ...]`), `tp` (tenpai seats at a draw), `ng` (the seats with nagashi mangan at a draw; paid in place of the no-ten payments), `rs` (the seats of the three rons at a sanchahou) |
-| `ru`, `rx` | the local rules ("Local rules"), one number per item: items 0-10 and 11-14 |
+| `ru`, `rx` | the local rules ("Local rules"), one number per item: items 0-10 and 11-14 (item 10 the seconds for a move) |
+| `tb`, `tc` | item 10's bank, seconds; in the lobby, item 10's choices as codes ("Local rules") |
 | `fin` | at the end: `[[seat, rank, score, point x 10], ...]` |
 | `fr` | at the end, why the game ended: `normal_end` (the last round played, the fourth round of the extra round too), `tobi`, `all_last_oya_agari` (agari-yame), `all_last_oya_tenpai` (tenpai-yame), `sudden_death` (somebody reached 30,000 in the extra round), `west` (after west 4, the host's, only without `sudden_death`), `rounds` (the host's guard against a loop); none for a game saved before it was added |
 | `me`, `h`, `dt`, `a` | the member's view only: its seat (-1: watching), its hand (sorted, without the drawn tile), the drawn tile (-1 none), what it may do: `[[type, tiles], ...]` |
@@ -366,9 +395,10 @@ under 3800 B.
 
 ### Time and saving
 
-- The host draws for the player. A player that does not discard within
-  `turn_seconds` discards the drawn tile (the last tile after a call); a call
-  not made within `call_seconds` is passed.
+- The host draws for the player. A player that does not move within
+  `turn_seconds` and what is left of its bank ("Time") discards the drawn
+  tile (the last tile after a call); a call not made within `call_seconds`
+  is passed.
 - One host process holds every table of its settings (two by default); each
   is saved to its own file and goes on by itself.
 - After every change the table is written to `state_dir/<table>.json`
@@ -384,7 +414,7 @@ ranked games) wherever riichi_engine can choose; the engine's own defaults stay 
 values (`Engine::RULE_DEFAULTS`). A table's `rule` setting goes over them,
 and the owner's choices in the lobby go over that ("Local rules": the game,
 open tanyao, red fives, double ron, three rons, several yakuman, kazoe
-yakuman, kiriage mangan, tobi, the extra round, the time to discard, the
+yakuman, kiriage mangan, tobi, the extra round, the time and the bank, the
 abortive draws, nagashi mangan, double yakuman, tenpai-yame).
 Where the engine cannot choose, the table says so: those rules are left for
 later. "Not sure" marks what could not be confirmed.
@@ -422,7 +452,9 @@ later. "Not sure" marks what could not be confirmed.
 | Honba at a pao ron | paid by the seat liable | `pao_honba` (`"discarder"`) | key only | `"liable"` |
 | The winning tile of a tenhou | the one that scores most | `tenhou_best_tile` (false: the tile drawn) | key only | true |
 | Kan ura dora | yes | always (`fix/kan-uradora`) | no | yes |
-| Thinking time | 5 s a turn plus a 20 s bank | none (the host's timers) | (host) | 20 s a turn, 8 s a call (`turn_seconds`, `call_seconds`; no bank) |
+| Thinking time | 5+20: 5 s a move plus a 20 s bank | none (the host's timers) | yes (item 10) | 5 s a move, a 20 s bank for the game, 8 s a call (`turn_seconds`, `bank_seconds`, `call_seconds`; "Time") |
+| Same-turn furiten | after passing a winning tile (robbing a kan too), until one's next draw | on a pass of a ron offered, and on a winning tile with no ron offered (no yaku on it, or furiten already; `fix/dojun-furiten-no-yaku`) | no | as the engine |
+| Formal tenpai (karaten) | yes, except a single wait on a tile the hand holds four of | the wait judge leaves out only a tile the hand holds four of (a single wait on the fourth tile of a pon is tenpai; `test/karaten-tenpai`) | no | as the engine |
 
 ## riichi_engine
 
@@ -433,7 +465,7 @@ fixed: the `fmrb` branch of
 [riichi_engine](https://github.com/HenrikStephensen/riichi_engine)
 (`Gemfile` takes it as a git source, so the lockfile pins a revision). Each fix is a branch of its own
 (`fix/*`, `feat/*`), written to be sent upstream; `fmrb` merges them (version
-`0.1.1.fmrb4`, not published). The host has no corrections of its own around
+`0.1.1.fmrb5`, not published). The host has no corrections of its own around
 the engine any more.
 
 What 0.1.0 got wrong, and what this host did about it before the fork:
@@ -463,6 +495,7 @@ What 0.1.0 got wrong, and what this host did about it before the fork:
 | 21 | every discard ends the first go-around for all four (no nine kinds, double riichi or chiihou for a child) | `fix/first-turn-flags` | none |
 | 22 | an unknown `game_type` never ends | `fix/unknown-game-type` | none |
 | 23 | a kan's ura dora indicator is not counted (the ura indicators stay as dealt) | `fix/kan-uradora` | none |
+| 24 | a seat that lets a winning tile go by with no ron offered (no yaku on it) is not furiten for the go-around | `fix/dojun-furiten-no-yaku` | none |
 
 New keys in 0.1.1.fmrb3, each off by default (the engine plays as 0.1.0
 without them; the host turns them on, "Rules"): `suufon_renda`,
@@ -558,6 +591,13 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   turned off), why a game ended in the view, the riichi sticks left at the
   end going to the top (equal points by seat), and a table saved before
   these rules read back and played on.
+- `test_mahjong_time.rb`: the time ("Time"): 5+20 by default and from the
+  settings, a move beyond its 5 s taking the rest off the bank, the move
+  played for when the bank is used up (then 5 s a move), the bank lasting
+  the game (not filled at a new round, full at the next game), an away
+  player's short wait leaving the bank, the calls keeping their time, the
+  owner's choice (a bank, a fixed time, the old app's values) reaching the
+  table, the banks saved, and a table saved before the bank read back.
 - `test_rooms.rb`: the rooms' supervisor with stand-in host processes: which
   rooms get a host (the app, closed, ended), the child's settings (the
   slot's certificate, the namespace), a new room on the slot starting from

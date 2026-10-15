@@ -229,7 +229,7 @@ class TestMahjongGames < Minitest::Test
     v["a"] = [[E::DAHAI, (0..13).to_a.pack("C*").b], [E::RIICHI, (0..13).to_a.pack("C*").b],
               [E::TSUMO_AGARI, "".b], [E::ANKAN, "\x01".b], [E::ANKAN, "\x02".b], [E::ANKAN, "\x03".b],
               [E::KYUUSHU, "".b]]
-    v["dl"] = [15, 20_000]
+    v["dl"] = [15, 25_000, 20_000] # a move with a bank (README "Time")
     v["wt"] = 14.times.flat_map { |d| [d, 13] + 13.times.flat_map { |w| [w, 4] } }.pack("C*").b
     bytes = reply_bytes(v)
     puts "\n  worst case riichi view: #{bytes} B (wt #{v['wt'].bytesize} B)"

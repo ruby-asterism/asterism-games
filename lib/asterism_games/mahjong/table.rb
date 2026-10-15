@@ -20,7 +20,11 @@ module AsterismGames
     #
     # Seats are nil (empty, in the lobby only), "human" (a member) or "cpu"
     # (riichi_engine's player). A human who does not decide in time is played
-    # for: the drawn tile is discarded, a call is passed. A member that has
+    # for: the drawn tile is discarded, a call is passed. A human's time for
+    # a move is turn_ms, and each seat has a bank of bank_ms for the game
+    # (README "Time"): a move that takes longer than turn_ms takes the rest
+    # from the bank, and the move is played for when both are used up (bank
+    # 0: a fixed time per move). A member that has
     # not called the table for away_ms is shown as away; until it comes back
     # its seat is played for after a shorter wait (away_wait_ms instead of
     # turn_ms and call_ms, counted from the start of the wait), so the others
@@ -33,7 +37,8 @@ module AsterismGames
       ASSIST_DEFAULT = 1   # the riichi help, for a screen that does not ask
 
       DEFAULTS = {
-        "turn_ms" => 20_000,      # a human's time to discard
+        "turn_ms" => 5_000,       # a human's time for a move (a discard, riichi, a kan, a win)
+        "bank_ms" => 20_000,      # and the bank a move may go on into, one per seat for the game (0: none)
         "call_ms" => 8_000,       # every human's time to call a discard
         "cpu_ms" => 700,          # a CPU waits this long before it acts
         "result_ms" => 8_000,     # the result of a round stays this long
@@ -50,8 +55,8 @@ module AsterismGames
       # The local rules the owner chooses in the lobby (README "Local
       # rules"): one value per item, in this order, and rule(token, item,
       # value) changes one. Items 0-9 and 11-14 are riichi_engine rule keys
-      # (9 sets two keys together, 11 three), 10 is the host's own time to
-      # discard.
+      # (9 sets two keys together, 11 three), 10 is the host's own time for
+      # a move and the bank (time_code).
       # The view's "ru" has items 0-10 and "rx" the rest: a table app that
       # knows 11 items reads "ru" as before and does not see the others.
       RULE_ITEMS = [
@@ -65,7 +70,7 @@ module AsterismGames
         ["kiriage", "kiriage_mangan"],
         ["tobi", "tobi"],
         ["extra", %w[nishi_iri nan_iri]], # the extra round: west for a hanchan, south for a tonpuu game
-        ["turn", nil],                  # seconds to discard
+        ["turn", nil],                  # the time for a move and the bank (time_code)
         ["abortive", %w[suufon_renda suukaikan suucha_riichi]], # the abortive draws besides nine kinds
         ["nagashi", "nagashi_mangan"],
         ["double_yakuman", "double_yakuman"],
@@ -75,6 +80,13 @@ module AsterismGames
       RULE_GAMES = %w[hanchan tonpuu].freeze
       RULE_AKA = { 0 => { "m" => 0, "p" => 0, "s" => 0 }, 3 => { "m" => 1, "p" => 1, "s" => 1 },
                    4 => { "m" => 1, "p" => 2, "s" => 1 } }.freeze
+      # Item 10's choices, [seconds for a move, seconds of the bank] (bank 0:
+      # a fixed time per move): Mahjong Soul's default 5+20 first. The
+      # value of the item is time_code: the seconds for a move plus 1000
+      # times the bank, so a fixed time is just its seconds.
+      RULE_TIMES = [[5, 20], [3, 5], [10, 30], [20, 0], [60, 0]].freeze
+      # The fixed times a table app before MJ-E3 offers (it shows the seconds
+      # for a move and steps through these); the host takes them too.
       RULE_TURNS = [10, 20, 30, 60].freeze
       # The public view's keys that belong to the game (a spectator's delayed
       # view takes them from the past, the rest is now).
@@ -88,7 +100,7 @@ module AsterismGames
         @store = store
         @log = log
         @choice = {}         # the owner's local rules: riichi_engine keys
-        @turn_choice = nil   # the owner's time to discard (ms), nil: the setting's
+        @time_choice = nil   # the owner's [time for a move, bank] (ms), nil: the setting's
         @rule = effective_rule
         @ai = ai_for(@opts["cpu_level"])
         @stats = Hash.new(0)
@@ -236,14 +248,15 @@ module AsterismGames
         item = item.to_i
         return "no rule" unless (0...RULE_ITEMS.size).cover?(item)
         value = value.to_i
-        return "value" unless rule_choices(item).include?(value)
+        return "value" unless rule_choices(item).include?(value) || (RULE_ITEMS[item][0] == "turn" && RULE_TURNS.include?(value))
         return "no change" if rule_values[item] == value
         name, key = RULE_ITEMS[item]
         base = base_rule
         if name == "turn"
-          @turn_choice = value * 1000 == @opts["turn_ms"].to_i ? nil : value * 1000
+          t = [value % 1000 * 1000, value / 1000 * 1000]
+          @time_choice = t == host_time ? nil : t
         else
-          own = rule_values_of(base, @opts["turn_ms"].to_i)[item]
+          own = rule_values_of(base, host_time)[item]
           Array(key).each do |k|
             v = case name
                 when "game" then RULE_GAMES[value]
@@ -265,27 +278,26 @@ module AsterismGames
 
       # The rule values in RULE_ITEMS order (the view's "ru" and "rx").
       def rule_values
-        rule_values_of(@rule.to_h, turn_ms)
+        rule_values_of(@rule.to_h, time_ms)
       end
 
       # The values an item may take: the screen's choices and the setting's.
       def rule_choices(item)
         name, = RULE_ITEMS[item]
-        own = rule_values_of(base_rule, @opts["turn_ms"].to_i)[item]
-        list = case name
-               when "aka" then RULE_AKA.keys
-               when "turn" then RULE_TURNS
-               else [0, 1]
-               end
-        (list + [own]).uniq.sort
+        own = rule_values_of(base_rule, host_time)[item]
+        case name
+        when "aka" then (RULE_AKA.keys + [own]).uniq.sort
+        when "turn" then (RULE_TIMES.map { |m, b| m + b * 1000 } + [own]).uniq
+        else [0, 1]
+        end
       end
 
-      def rule_values_of(r, turn)
+      def rule_values_of(r, time)
         RULE_ITEMS.map do |name, key|
           case name
           when "game" then r["game_type"].to_s.start_with?("tonpuu") ? 1 : 0
           when "aka" then aka_total(r["aka_dora"])
-          when "turn" then turn / 1000
+          when "turn" then time_code(time)
           when "abortive" then key.all? { |k| r[k] } ? 1 : 0
           when "extra" then r[r["game_type"].to_s.start_with?("tonpuu") ? "nan_iri" : "nishi_iri"] ? 1 : 0
           else r[key] ? 1 : 0
@@ -307,8 +319,42 @@ module AsterismGames
         Engine.rule(base_rule.merge(@choice))
       end
 
+      # Item 10's value for [time for a move, bank] (ms): the seconds for a
+      # move plus 1000 times the seconds of the bank.
+      def time_code(time)
+        time[0].to_i / 1000 + time[1].to_i / 1000 * 1000
+      end
+
+      # The host's [time for a move, bank] (ms), the table's settings.
+      def host_time
+        [@opts["turn_ms"].to_i, @opts["bank_ms"].to_i]
+      end
+
+      # The table's [time for a move, bank] (ms): the owner's choice or the
+      # host's.
+      def time_ms
+        @time_choice || host_time
+      end
+
       def turn_ms
-        @turn_choice || @opts["turn_ms"]
+        time_ms[0]
+      end
+
+      def bank_ms
+        time_ms[1]
+      end
+
+      # What is left of a seat's bank (ms).
+      def bank_left(seat)
+        @banks ? @banks[seat].to_i : 0
+      end
+
+      # A seat's move is over (it acted, or its time ran out): what it took
+      # beyond the time for a move comes off its bank.
+      def spend_bank(seat, now)
+        return unless @banks && @wait_from && human?(seat)
+        over = now - @wait_from - turn_ms
+        @banks[seat] = [@banks[seat].to_i - over, 0].max if over.positive?
       end
 
       # The owner starts the game: four seats taken, at least one human. The
@@ -393,6 +439,7 @@ module AsterismGames
           @decl[seat] = a
           changed
         else
+          spend_bank(seat, now)
           @deadline = nil
           apply(a, now)
         end
@@ -507,10 +554,11 @@ module AsterismGames
         when :dahai
           seat = st.current_seat
           if human?(seat)
-            return set_deadline(1 << seat, now + turn_ms, now) if @deadline.nil?
+            return set_deadline(1 << seat, now + turn_ms + bank_left(seat), now) if @deadline.nil?
             return false if now < turn_deadline(seat)
             @stats["timeouts"] += 1
             @stats["away_turns"] += 1 if away?(seat)
+            spend_bank(seat, now)
             auto_discard(seat, now)
             true
           else
@@ -750,6 +798,7 @@ module AsterismGames
         @status = "wait"
         @state = nil
         @game = nil
+        @banks = nil
         @result = nil
         @flow = nil
         @final = nil
@@ -766,6 +815,8 @@ module AsterismGames
       def start_game(now)
         @game = { "bakaze" => "ton", "kyoku" => 1, "honba" => 0, "kyoutaku" => 0, "oya" => 0,
                   "scores" => [@rule.initial_score] * 4, "rounds" => 0 }
+        # The banks are full at the start of a game and last it out.
+        @banks = [bank_ms] * 4
         @final = nil
         @final_reason = nil
         new_round
@@ -800,6 +851,12 @@ module AsterismGames
         ru = rule_values
         v["ru"] = ru[0, RULE_RU]
         v["rx"] = ru[RULE_RU..]
+        # Item 10 in "ru" is the seconds for a move (what a table app before
+        # MJ-E3 shows); "tb" is the bank's seconds, and in the lobby "tc" the
+        # item's choices (time_code).
+        v["ru"][10] = ru[10] % 1000
+        v["tb"] = ru[10] / 1000
+        v["tc"] = rule_choices(10) if @status == "wait"
         if @game
           v["sc"] = @game["scores"].dup
           v["r"] = [Engine::BAKAZE.index(@game["bakaze"]), @game["kyoku"], @game["honba"], @game["kyoutaku"], @game["oya"]]
@@ -816,7 +873,7 @@ module AsterismGames
           v["hc"] = (0..3).map { |s| st.hands[s].count }
           v["ls"] = st.last_dahai ? [st.last_dahai[:seat], Tiles.code(st.last_dahai[:tile].to_s)] : nil
           v["ev"] = @event
-          v["dl"] = @deadline ? [@deadline_bits, [shown_deadline - now, 0].max] : nil
+          v["dl"] = deadline_view(now)
         end
         v["res"] = result_view if @result && (@status == "result" || @status == "over")
         v["fin"] = @final if @final
@@ -832,6 +889,21 @@ module AsterismGames
           "cpus" => @seats.count { |s| s && s["kind"] == "cpu" },
           "away" => (0..3).count { |i| human?(i) && away?(i) },
           "round" => @game ? [Engine::BAKAZE.index(@game["bakaze"]), @game["kyoku"]] : nil }
+      end
+
+      # "dl": [seats, ms left] and, on a seat's own move with a bank, the
+      # bank's ms (the last part of the ms left; the time for the move is
+      # what comes before it). An away seat's move shows no bank (it is
+      # played for after away_wait_ms).
+      def deadline_view(now)
+        return nil unless @deadline
+        out = [@deadline_bits, [shown_deadline - now, 0].max]
+        st = @state
+        if st.phase == :dahai && human?(st.current_seat) && !away?(st.current_seat)
+          b = bank_left(st.current_seat)
+          out << b if b.positive?
+        end
+        out
       end
 
       # The deadline a view shows: an away seat's own turn ends sooner.
@@ -1036,7 +1108,8 @@ module AsterismGames
           "wait_spent" => @deadline && @wait_from && [now - @wait_from, 0].max,
           "cpu_left" => @cpu_at && [@cpu_at - now, 0].max, "next_left" => @next_at && [@next_at - now, 0].max,
           "result" => @result, "flow" => @flow, "final" => @final, "final_reason" => @final_reason, "event" => @event,
-          "rules" => { "choice" => @choice, "turn_ms" => @turn_choice } }
+          "banks" => @banks,
+          "rules" => { "choice" => @choice, "turn_ms" => @time_choice&.at(0), "bank_ms" => @time_choice&.at(1) } }
       end
 
       def saved_action(a)
@@ -1067,8 +1140,13 @@ module AsterismGames
         @event = d["event"]
         rules = d["rules"].is_a?(Hash) ? d["rules"] : {}
         @choice = rules["choice"].is_a?(Hash) ? rules["choice"] : {}
-        @turn_choice = rules["turn_ms"]&.to_i
+        # A table saved before the bank chose a fixed time ("turn_ms" alone).
+        @time_choice = rules["turn_ms"] && [rules["turn_ms"].to_i, rules["bank_ms"].to_i]
         @rule = effective_rule
+        # A game saved before the bank starts with full banks.
+        @banks = if d["banks"].is_a?(Array) && d["banks"].size == 4 then d["banks"].map(&:to_i)
+                 elsif @game then [bank_ms] * 4
+                 end
         resume_clock(now, d)
         @log&.call("mahjong: #{@name}: resumed (#{@status}, state #{@sv}, #{@members.size} members)")
       end
@@ -1105,6 +1183,7 @@ module AsterismGames
         @away_bits = 0
         @game = nil
         @state = nil
+        @banks = nil
         @decl = {}
         @deadline = nil
         @deadline_bits = 0
