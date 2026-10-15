@@ -9,7 +9,7 @@ tables:
   - name: mahjong1
     game: mahjong
     turn_seconds: 5          # a player's time for a move
-    bank_seconds: 20         # and a bank for the game the move goes on into (0: none; README "Time")
+    bank_seconds: 20         # and a bank the move goes on into, full every round (0: none; README "Time")
     call_seconds: 8          # every player's time to call a discard
     result_seconds: 8        # a round's result stays this long (or until "next")
     over_seconds: 60         # the end of a game stays this long (or until the owner's "next")
