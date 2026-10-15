@@ -50,7 +50,8 @@ module AsterismGames
       # The local rules the owner chooses in the lobby (README "Local
       # rules"): one value per item, in this order, and rule(token, item,
       # value) changes one. Items 0-9 and 11-14 are riichi_engine rule keys
-      # (11 sets three keys together), 10 is the host's own time to discard.
+      # (9 sets two keys together, 11 three), 10 is the host's own time to
+      # discard.
       # The view's "ru" has items 0-10 and "rx" the rest: a table app that
       # knows 11 items reads "ru" as before and does not see the others.
       RULE_ITEMS = [
@@ -63,7 +64,7 @@ module AsterismGames
         ["kazoe", "kazoe_yakuman"],
         ["kiriage", "kiriage_mangan"],
         ["tobi", "tobi"],
-        ["nishi_iri", "nishi_iri"],     # the hanchan's west round (a tonpuu game has no south round)
+        ["extra", %w[nishi_iri nan_iri]], # the extra round: west for a hanchan, south for a tonpuu game
         ["turn", nil],                  # seconds to discard
         ["abortive", %w[suufon_renda suukaikan suucha_riichi]], # the abortive draws besides nine kinds
         ["nagashi", "nagashi_mangan"],
@@ -250,8 +251,11 @@ module AsterismGames
                 else value == 1
                 end
             # Back to the host's value: no choice is kept (for the three
-            # abortive draws, all three as the host has them).
-            if value == own || v == base[k] then @choice.delete(k) else @choice[k] = v end
+            # abortive draws, all three as the host has them). The extra
+            # round's two keys go back one by one (its value is the one of
+            # the game chosen, not of the host's game).
+            back = name == "extra" ? v == base[k] : (value == own || v == base[k])
+            if back then @choice.delete(k) else @choice[k] = v end
           end
         end
         @rule = effective_rule
@@ -283,6 +287,7 @@ module AsterismGames
           when "aka" then aka_total(r["aka_dora"])
           when "turn" then turn / 1000
           when "abortive" then key.all? { |k| r[k] } ? 1 : 0
+          when "extra" then r[r["game_type"].to_s.start_with?("tonpuu") ? "nan_iri" : "nishi_iri"] ? 1 : 0
           else r[key] ? 1 : 0
           end
         end
@@ -696,14 +701,16 @@ module AsterismGames
       def next_round(now)
         f = @flow
         @game["rounds"] += 1
-        # riichi_engine plays the west round on until somebody reaches the
-        # threshold (west 4 is followed by west 1 again); the game ends after
-        # west 4 as on Mahjong Soul.
+        # With sudden_death riichi_engine ends the extra round itself (after
+        # its fourth round at the latest); without it the west round goes on
+        # until somebody reaches the threshold (west 4 is followed by west 1
+        # again), and the host ends the game after west 4.
         west_over = @game["bakaze"] == "sha" && f["bakaze"] == "sha" && f["kyoku"].to_i < @game["kyoku"].to_i
         if f["end"] || west_over || @game["rounds"] >= MAX_ROUNDS
           # Why the game ended (the view's "fr"): the engine's reason (tobi,
-          # normal_end, all_last_oya_agari, all_last_oya_tenpai), "west"
-          # after west 4, "rounds" at MAX_ROUNDS.
+          # normal_end, all_last_oya_agari, all_last_oya_tenpai,
+          # sudden_death), "west" after west 4 (without sudden_death),
+          # "rounds" at MAX_ROUNDS.
           @final_reason = if f["end"] then f["reason"]
                           elsif west_over then "west"
                           else "rounds"

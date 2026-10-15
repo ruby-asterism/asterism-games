@@ -228,7 +228,7 @@ host's own value for the item):
 
 | Item | | riichi_engine key | Values |
 |---|---|---|---|
-| 0 | the game | `game_type` | 0 hanchan, 1 tonpuu (east round only; riichi_engine has no south round for a tonpuu game) |
+| 0 | the game | `game_type` | 0 hanchan, 1 tonpuu |
 | 1 | open tanyao | `kuitan` | 0 / 1 |
 | 2 | red fives | `aka_dora` | 0 none, 3 one each of 5m 5p 5s, 4 two of 5p |
 | 3 | double ron | `double_ron` | 0 (the head bump) / 1 |
@@ -237,7 +237,7 @@ host's own value for the item):
 | 6 | kazoe yakuman | `kazoe_yakuman` | 0 / 1 |
 | 7 | kiriage mangan | `kiriage_mangan` | 0 / 1 |
 | 8 | tobi | `tobi` | 0 / 1 |
-| 9 | the west round of a hanchan | `nishi_iri` | 0 / 1 |
+| 9 | the extra round ("延長"): west for a hanchan, south for a tonpuu game | `nishi_iri`, `nan_iri` together | 0 / 1 (the value is the key of the game chosen; a table app that calls the item the west round sets both) |
 | 10 | the time to discard, seconds | (the host's `turn_seconds`) | 10, 20, 30, 60 |
 | 11 | the abortive draws besides nine kinds (four winds, four kans, four riichi) | `suufon_renda`, `suukaikan`, `suucha_riichi` together | 0 / 1 (1 only when all three are on; a host setting with some of them shows 0, and 0 chosen again goes back to it) |
 | 12 | nagashi mangan | `nagashi_mangan` | 0 / 1 |
@@ -331,7 +331,7 @@ A Hash (MessagePack); tiles are one byte each in binary strings (bin).
 | `res` | at a round's end: `k` (`tsumo_agari`, `ron_agari`, `ryuukyoku`, and the abortive draws `kyuushu_kyuuhai`, `sanchahou`, `suufon_renda`, `suukaikan`, `suucha_riichi`), `rd` (the round: `[bakaze, kyoku, honba]`), `d` (the four score changes), `f` (who dealt in), `wn` (one entry per winner, in turn order from the discarder: `w` seat, `y` the yaku as riichi_engine names them, in Japanese, `yh` the han of each (-1: a yakuman, -2: a double yakuman), `pt` fu, han and points, `h` and `ag` the hand and the winning tile, `pa` pao: `[[the seat that pays, the yakuman], ...]`), `tp` (tenpai seats at a draw), `ng` (the seats with nagashi mangan at a draw; paid in place of the no-ten payments), `rs` (the seats of the three rons at a sanchahou) |
 | `ru`, `rx` | the local rules ("Local rules"), one number per item: items 0-10 and 11-14 |
 | `fin` | at the end: `[[seat, rank, score, point x 10], ...]` |
-| `fr` | at the end, why the game ended: `normal_end` (the last round played), `tobi`, `all_last_oya_agari` (agari-yame), `all_last_oya_tenpai` (tenpai-yame), `west` (after west 4, the host's), `rounds` (the host's guard against a loop); none for a game saved before it was added |
+| `fr` | at the end, why the game ended: `normal_end` (the last round played, the fourth round of the extra round too), `tobi`, `all_last_oya_agari` (agari-yame), `all_last_oya_tenpai` (tenpai-yame), `sudden_death` (somebody reached 30,000 in the extra round), `west` (after west 4, the host's, only without `sudden_death`), `rounds` (the host's guard against a loop); none for a game saved before it was added |
 | `me`, `h`, `dt`, `a` | the member's view only: its seat (-1: watching), its hand (sorted, without the drawn tile), the drawn tile (-1 none), what it may do: `[[type, tiles], ...]` |
 | `wt` | the member's view only, the help (Assist, levels 1-3): one binary string, per discard the tile, the number of waits n and n pairs `[wait, left]` (the waits as riichi_engine's wait judge gives them; left: 4 less what the seat can see of the tile: its own hand, the rivers, every meld, the dora indicators) |
 | `uk` | the member's view only, level 3 when no discard leaves the hand tenpai: one binary string, per discard the tile, the shanten after it, the number n of tiles that bring it down and n pairs `[tile, left]` (left as in `wt`; a tile the seat sees all four of is left out) |
@@ -384,7 +384,7 @@ ranked games) wherever riichi_engine can choose; the engine's own defaults stay 
 values (`Engine::RULE_DEFAULTS`). A table's `rule` setting goes over them,
 and the owner's choices in the lobby go over that ("Local rules": the game,
 open tanyao, red fives, double ron, three rons, several yakuman, kazoe
-yakuman, kiriage mangan, tobi, the west round, the time to discard, the
+yakuman, kiriage mangan, tobi, the extra round, the time to discard, the
 abortive draws, nagashi mangan, double yakuman, tenpai-yame).
 Where the engine cannot choose, the table says so: those rules are left for
 later. "Not sure" marks what could not be confirmed.
@@ -408,20 +408,20 @@ later. "Not sure" marks what could not be confirmed.
 | Nagashi mangan | yes; in place of the no-ten payments | `nagashi_mangan` (false) | yes | true |
 | Pao (liability) | daisangen, daisuushii (not suukantsu) | `pao` (a list of yakuman, []; `suukantsu` too) | key only | daisangen, daisuushii |
 | Tobi | yes; 0 points goes on, below 0 ends | `tobi` (true, below 0) | yes | true |
-| West round (south round in a tonpuu game) | when nobody has 30,000 after the last round; sudden death, ends after west 4 | `nishi_iri` (false), `nishi_iri_threshold` (30,000); the engine goes on past west 4 | yes (the host ends the game after west 4) | true, 30,000 |
-| Agari-yame, tenpai-yame | both, for the last dealer in the lead with 30,000 or more | `agari_yame` (true), `tenpai_yame` (false); the dealer in the lead, above 0 (30,000 when there is a west round: 0.1.1.fmrb4) | tenpai-yame yes, agari-yame key only | both true |
+| The extra round: west for a hanchan, south for a tonpuu game | when nobody has 30,000 after the last round | `nishi_iri` (false), `nan_iri` (false), `nishi_iri_threshold` (30,000) | yes (one item for both) | true, true, 30,000 |
+| Sudden death in the extra round | it ends when somebody has 30,000 (a ron with several winners where the dealer keeps the deal goes on, before agari-yame too); one round at most | `sudden_death` (false: the round goes on until the deal passes with somebody at 30,000, west 4 back to west 1) | key only | true (without it the host ends the game after west 4) |
+| Agari-yame, tenpai-yame | both, for the last dealer in the lead with 30,000 or more | `agari_yame` (true), `tenpai_yame` (false); the dealer in the lead, above 0 (30,000 when there is an extra round) | tenpai-yame yes, agari-yame key only | both true |
 | Starting points, return, first place target | 25,000, 25,000 (no oka), 30,000 | `initial_score` (25,000), `oka_origin` (30,000), `nishi_iri_threshold` (30,000) | key only | 25,000, 25,000, 30,000 |
 | Uma | 5-15 (+15/+5/-5/-15), rank uma only | `uma` (20/10/-10/-20) | key only | 15/5/-5/-15 |
 | Riichi sticks left at the end | to the top | none (`calculate_ranked_results` takes the points as given) | (host) | to the top |
 | Equal points at the end | the seat nearer the first dealer ranks higher | by seat number | (engine) | as the engine (the first dealer is always seat 0) |
 | A pair of the double wind | 4 fu | `renpuu_jantou_fu` (2) | key only | 4 |
-| Kuikae (swap-calling) | banned (the called tile and, after a chi, the other end) | always allowed; `kuikae` from 0.1.1.fmrb4 | not yet | (true until fmrb4) |
-| A closed kan after riichi | only of the drawn tile, when the waits stay the same | none; `riichi_ankan` from 0.1.1.fmrb4 | not yet | (none until fmrb4) |
-| Robbing a closed kan | for kokushi musou only | none; `kokushi_ankan_chankan` from 0.1.1.fmrb4 | not yet | (none until fmrb4) |
-| Honba at a pao ron | paid by the seat liable | the discarder; `pao_honba` from 0.1.1.fmrb4 | not yet | (the discarder until fmrb4) |
-| The winning tile of a tenhou | the one that scores most | the tile drawn; `tenhou_best_tile` from 0.1.1.fmrb4 | not yet | (the tile drawn until fmrb4) |
-| South round of a tonpuu game, sudden death | when nobody has 30,000 after the last round, the next round; it ends when somebody has 30,000 (a ron with several winners where the dealer keeps the deal goes on); one round at most (south for tonpuu, west for hanchan) | no south round; west ends only when the deal passes; `nan_iri`, `sudden_death` from 0.1.1.fmrb4 | not yet | west, ended by the host after west 4 |
-| Kan ura dora | yes | counted from 0.1.1.fmrb4 (`fix/kan-uradora`; before it a kan's ura indicator is not counted) | no | yes |
+| Kuikae (swap-calling) | banned (the called tile and, after a chi, the other end) | `kuikae` (true: allowed) | key only | false (banned; a chi that leaves nothing to discard is not offered) |
+| A closed kan after riichi | only of the drawn tile, when the waits stay the same | `riichi_ankan` (false) | key only | true |
+| Robbing a closed kan | for kokushi musou only | `kokushi_ankan_chankan` (false) | key only | true |
+| Honba at a pao ron | paid by the seat liable | `pao_honba` (`"discarder"`) | key only | `"liable"` |
+| The winning tile of a tenhou | the one that scores most | `tenhou_best_tile` (false: the tile drawn) | key only | true |
+| Kan ura dora | yes | always (`fix/kan-uradora`) | no | yes |
 | Thinking time | 5 s a turn plus a 20 s bank | none (the host's timers) | (host) | 20 s a turn, 8 s a call (`turn_seconds`, `call_seconds`; no bank) |
 
 ## riichi_engine
@@ -433,7 +433,7 @@ fixed: the `fmrb` branch of
 [riichi_engine](https://github.com/HenrikStephensen/riichi_engine)
 (`Gemfile` takes it as a git source, so the lockfile pins a revision). Each fix is a branch of its own
 (`fix/*`, `feat/*`), written to be sent upstream; `fmrb` merges them (version
-`0.1.1.fmrb3`, not published). The host has no corrections of its own around
+`0.1.1.fmrb4`, not published). The host has no corrections of its own around
 the engine any more.
 
 What 0.1.0 got wrong, and what this host did about it before the fork:
@@ -462,13 +462,19 @@ What 0.1.0 got wrong, and what this host did about it before the fork:
 | 20 | the CPU judges riichi on the hand before the discard (it never declares riichi) | `fix/cpu-riichi` | none |
 | 21 | every discard ends the first go-around for all four (no nine kinds, double riichi or chiihou for a child) | `fix/first-turn-flags` | none |
 | 22 | an unknown `game_type` never ends | `fix/unknown-game-type` | none |
+| 23 | a kan's ura dora indicator is not counted (the ura indicators stay as dealt) | `fix/kan-uradora` | none |
 
 New keys in 0.1.1.fmrb3, each off by default (the engine plays as 0.1.0
 without them; the host turns them on, "Rules"): `suufon_renda`,
 `suukaikan`, `suucha_riichi` (`feat/abortive-draws`), `nagashi_mangan`
 (`feat/nagashi-mangan`), `pao` (`feat/pao`), `minkan_dora_after_discard`
 (`feat/kan-dora-after-discard`), `double_yakuman` used at last
-(`feat/double-yakuman`), `tenpai_yame` (`feat/agari-yame`).
+(`feat/double-yakuman`), `tenpai_yame` (`feat/agari-yame`). New keys in
+0.1.1.fmrb4, likewise: `kuikae` (`feat/kuikae`; on by default, the host
+turns it off), `riichi_ankan` (`feat/riichi-ankan`),
+`kokushi_ankan_chankan` (`feat/kokushi-ankan-chankan`), `pao_honba`
+(`feat/pao-honba`), `tenhou_best_tile` (`feat/tenhou-best-tile`),
+`nan_iri` and `sudden_death` (`feat/sudden-death`).
 
 The fork compares its win evaluation with the Python package `mahjong`
 (PyPI) on 30 000 random winning hands and one or more hands per yaku
@@ -485,11 +491,12 @@ riichi and calls less), over 40 hanchan each: 15 % at normal (68 of 449
 rounds), 14 % at hard (57 of 419), 33 % at easy.
 
 Still as in 0.1.0: tobi ends the game below 0 points, not at 0 (the
-fork's documents now say so, `fix/tobi-doc`); the west round never ends
-without a player above the threshold (the host ends the game after west 4);
-`tsumo_agari` and `ron_agari` leave the points to the host (the engine's API
-says so). No kuikae ban (a seat may discard the tile it just called), and a
-riichi declared on a tile that is ronned does not get its stick back. A
+fork's documents now say so, `fix/tobi-doc`); without `sudden_death` the
+west round never ends without a player above the threshold (the host ends
+the game after west 4); `tsumo_agari` and `ron_agari` leave the points to
+the host (the engine's API says so). Without `kuikae` set to false a seat
+may discard the tile it just called, and a riichi declared on a tile that
+is ronned does not get its stick back. A
 CPU decision takes about 2 ms of CRuby time at the median (about 0.4 s at
 most, the first time a suit pattern with many tiles is counted).
 
@@ -528,18 +535,24 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
 - `test_mahjong_local_rules.rb`: the local rules (the host's values to
   start from, the owner only, the lobby only, the values offered, each item
   reaching the engine, the time to discard, saved and kept for the next
-  game; a tonpuu game chosen in the lobby ends in the east round, open
+  game; a tonpuu game chosen in the lobby ends in the east round or the
+  south round after it, open
   tanyao off offers no ron on an open tanyao-only hand, the red fives in
   the wall), the spectators (over a whole game no hand, draw, offer or help
   in a spectator's view, the put or `table`; with a delay they see the
   game as it was that long ago while the players do not wait; none by
   default; how many) and the han of each yaku in a result; the items of
   0.1.1.fmrb3 (the three abortive draws as one item, over a setting with
-  only some of them).
-- `test_mahjong_round_ends.rb`: the rules of 0.1.1.fmrb3 the host turns on:
-  every host key reaching the engine, nagashi mangan paid in place of the
-  no-ten payments (and not when turned off), pao recorded at the pon and
-  paid (all of it at a tsumo, half with the discarder at a ron), a double
+  only some of them) and the extra round item (both keys, its value by the
+  game chosen, over a setting with only one of them).
+- `test_mahjong_round_ends.rb`: the rules of 0.1.1.fmrb3 and fmrb4 the host
+  turns on: every host key reaching the engine, nagashi mangan paid in place
+  of the no-ten payments (and not when turned off), pao recorded at the pon
+  and paid (all of it at a tsumo, half with the discarder at a ron, the
+  honba of a ron by the seat liable), no swap-calling after a chi (not
+  offered, refused), the west round ended by sudden death (the reason in
+  the view), a tonpuu game going south below 30,000 (not with the extra
+  round turned off), a double
   yakuman's -2 and points (one yakuman when turned off), four winds ending
   the round by name (the dealer keeps the seat, one more honba; none when
   turned off), why a game ended in the view, the riichi sticks left at the

@@ -12,6 +12,7 @@ class TestMahjongLocalRules < Minitest::Test
   GAME = 0
   KUITAN = 1
   AKA = 2
+  EXTRA = 9
   TURN = 10
   ABORTIVE = 11
   NAGASHI = 12
@@ -85,11 +86,40 @@ class TestMahjongLocalRules < Minitest::Test
   def test_every_engine_item_reaches_the_engine
     t, toks = lobby
     { 3 => :double_ron?, 4 => :triple_ron_draw?, 5 => :multiple_yakuman?, 6 => :kazoe_yakuman?,
-      7 => :kiriage_mangan?, 8 => :tobi?, 9 => :nishi_iri? }.each do |item, m|
+      7 => :kiriage_mangan?, 8 => :tobi? }.each do |item, m|
       was = t.rule.public_send(m)
       assert_equal "ok", t.set_rule(toks[0], item, was ? 0 : 1)
       assert_equal !was, t.rule.public_send(m), "item #{item}"
     end
+  end
+
+  # Item 9, the extra round, sets both keys: the west round of a hanchan
+  # (nishi_iri) and the south round of a tonpuu game (nan_iri). Its value is
+  # the one of the game chosen.
+  def test_the_extra_round_item_sets_both_keys
+    t, toks = lobby
+    assert t.rule.nishi_iri? && t.rule.nan_iri?
+    assert_equal "ok", t.set_rule(toks[0], EXTRA, 0)
+    refute t.rule.nishi_iri?
+    refute t.rule.nan_iri?
+    assert_equal 0, t.public_view(0)["ru"][EXTRA]
+    assert_equal "ok", t.set_rule(toks[0], GAME, 1)
+    assert_equal 0, t.public_view(0)["ru"][EXTRA], "a tonpuu game shows nan_iri"
+    assert_equal "ok", t.set_rule(toks[0], EXTRA, 1)
+    assert t.rule.nishi_iri? && t.rule.nan_iri?
+    assert_equal({ "game_type" => "tonpuu" }, t.instance_variable_get(:@choice), "back to the host's values")
+    # a setting with only the west round: a tonpuu game shows 0, a hanchan 1
+    u, utoks = lobby(1, "rule" => { "nan_iri" => false })
+    assert_equal 1, u.public_view(0)["ru"][EXTRA]
+    assert_equal "ok", u.set_rule(utoks[0], GAME, 1)
+    assert_equal 0, u.public_view(0)["ru"][EXTRA]
+    assert_equal "ok", u.set_rule(utoks[0], EXTRA, 1)
+    assert u.rule.nan_iri?
+    assert_equal "ok", u.set_rule(utoks[0], EXTRA, 0)
+    refute u.rule.nan_iri?
+    refute u.rule.nishi_iri?
+    assert_equal "ok", u.set_rule(utoks[0], EXTRA, 1)
+    assert_equal({ "game_type" => "tonpuu", "nan_iri" => true }, u.instance_variable_get(:@choice))
   end
 
   def test_the_new_items_reach_the_engine
@@ -158,7 +188,8 @@ class TestMahjongLocalRules < Minitest::Test
   end
 
   # One human (played as the engine's CPU would) and three CPUs, a tonpuu
-  # game chosen in the lobby: it ends in the east round.
+  # game chosen in the lobby: it ends in the east round, or in the south
+  # round when nobody had 30,000 after east 4 (nan_iri).
   def test_a_tonpuu_game_chosen_in_the_lobby_ends_in_the_east
     t, toks = lobby(1, "over_ms" => 10**9)
     assert_equal "ok", t.set_rule(toks[0], GAME, 1)
@@ -189,7 +220,8 @@ class TestMahjongLocalRules < Minitest::Test
     end
     puts "\n  tonpuu: #{t.stats['rounds']} rounds, winds #{winds.keys.inspect}"
     assert_operator t.stats["rounds"], :>=, 4
-    assert_equal ["ton"], winds.keys, "every round in the east"
+    assert_includes [["ton"], %w[ton nan]], winds.keys, "every round in the east, or the south round after it"
+    assert_includes %w[normal_end tobi all_last_oya_agari all_last_oya_tenpai sudden_death], t.public_view(now)["fr"]
     assert_equal 4, t.public_view(now)["fin"].size
   end
 

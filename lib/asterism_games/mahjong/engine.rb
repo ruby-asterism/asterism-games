@@ -69,7 +69,24 @@ module AsterismGames
         "pao" => %w[daisangen daisuushii],
         "minkan_dora_after_discard" => true,
         "agari_yame" => true,
-        "tenpai_yame" => true
+        "tenpai_yame" => true,
+        # No swap-calling (the called tile, and after a chi the other end);
+        # a closed kan after riichi when the waits stay the same; the
+        # kokushi ron on a closed kan; the honba of a pao ron paid by the
+        # seat liable; a tenhou's winning tile the one that scores most.
+        "kuikae" => false,
+        "riichi_ankan" => true,
+        "kokushi_ankan_chankan" => true,
+        "pao_honba" => "liable",
+        "tenhou_best_tile" => true,
+        # The extra round: south for a tonpuu game (nan_iri), west for a
+        # hanchan (nishi_iri), when nobody has nishi_iri_threshold after
+        # the last round; sudden death in it (the game ends after the first
+        # round in which somebody has the threshold, and after its fourth
+        # round at the latest; a ron with several winners where the dealer
+        # keeps the deal goes on).
+        "nan_iri" => true,
+        "sudden_death" => true
       }.freeze
 
       def rule(overrides = {})

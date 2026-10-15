@@ -2,9 +2,10 @@
 
 require_relative "test_helper"
 
-# The rules of riichi_engine 0.1.1.fmrb3 the host turns on (README "Rules"):
-# nagashi mangan, pao, double yakuman, the abortive draws, and why a game
-# ended; and that tables saved before them still load.
+# The rules of riichi_engine 0.1.1.fmrb3 and fmrb4 the host turns on (README
+# "Rules"): nagashi mangan, pao (and its honba), double yakuman, the
+# abortive draws, no swap-calling, the sudden death of the extra round, and
+# why a game ended; and that tables saved before them still load.
 class TestMahjongRoundEnds < Minitest::Test
   include MahjongTestHelper
 
@@ -66,6 +67,10 @@ class TestMahjongRoundEnds < Minitest::Test
     assert_equal 4, r.renpuu_jantou_fu
     refute r.triple_ron_draw?, "three rons all win"
     assert_equal %w[daisangen daisuushii], r.pao
+    # the keys of 0.1.1.fmrb4
+    refute r.kuikae?, "no swap-calling"
+    %i[riichi_ankan? kokushi_ankan_chankan? tenhou_best_tile? nan_iri? sudden_death?].each { |m| assert r.public_send(m), m }
+    assert_equal "liable", r.pao_honba
   end
 
   # ------------------------------------------------------------ nagashi mangan
@@ -132,6 +137,33 @@ class TestMahjongRoundEnds < Minitest::Test
 
   def test_pao_on_a_ron_splits_the_yakuman_with_the_discarder
     t, seats, w, oya = daisangen_table
+    res, other = pao_ron(t, seats, w)
+    win = res["wn"][0]
+    assert_includes win["y"], "大三元"
+    assert_equal [[oya, "大三元"]], win["pa"]
+    # a child's yakuman by ron, 32000: half from the seat liable, half from the discarder
+    d = res["d"]
+    assert_equal 32_000, d[w]
+    assert_equal(-16_000, d[oya])
+    assert_equal(-16_000, d[other])
+    assert_operator reply_bytes(t.view(w, 0)), :<, 3800
+  end
+
+  # The honba of a pao ron are paid by the seat liable (pao_honba
+  # "liable"), not by the discarder.
+  def test_the_honba_of_a_pao_ron_go_to_the_seat_liable
+    t, seats, w, oya = daisangen_table
+    t.state.honba = 2
+    res, other = pao_ron(t, seats, w)
+    d = res["d"]
+    assert_equal 32_600, d[w]
+    assert_equal(-16_600, d[oya], "the seat liable pays the honba")
+    assert_equal(-16_000, d[other])
+  end
+
+  # The winner of daisangen_table discards 1s and waits on 9p; the seat
+  # across deals in 9p. [the result's view, the discarder]
+  def pao_ron(t, seats, w)
     st = t.state
     # the winner discards 1s and waits on 9p; the seat across deals in 9p
     give(st, w, %w[2m 3m 4m 9p 1s])
@@ -148,16 +180,7 @@ class TestMahjongRoundEnds < Minitest::Test
     ron = t.view(w, 0)["a"].find { |x, _| x == E::RON }
     assert ron, "the ron is offered"
     assert_equal "ok", t.act(seats[w], t.sv, E::RON, [], 0)
-    res = t.public_view(0)["res"]
-    win = res["wn"][0]
-    assert_includes win["y"], "大三元"
-    assert_equal [[oya, "大三元"]], win["pa"]
-    # a child's yakuman by ron, 32000: half from the seat liable, half from the discarder
-    d = res["d"]
-    assert_equal 32_000, d[w]
-    assert_equal(-16_000, d[oya])
-    assert_equal(-16_000, d[other])
-    assert_operator reply_bytes(t.view(w, 0)), :<, 3800
+    [t.public_view(0)["res"], other]
   end
 
   def test_pao_on_a_tsumo_the_seat_liable_pays_it_all
@@ -238,7 +261,77 @@ class TestMahjongRoundEnds < Minitest::Test
     assert_equal "play", t.status
   end
 
+  # ------------------------------------------------------------ kuikae
+
+  # No swap-calling: after a chi of 3m with 4m 5m the caller may not discard
+  # 3m or 6m (they are not offered, and a discard of them is refused).
+  def test_no_swap_calling_after_a_chi
+    t, seats = table4
+    oya = t.state.oya_seat
+    c = (oya + 1) % 4
+    st = at_discard(t, oya, NOTEN, "3m")
+    give(st, c, %w[3m 4m 5m 6m 7p 8p 9p 1s 2s 7s 8s 9s 9p])
+    assert_equal "ok", t.act(seats[oya], t.sv, E::DAHAI, ["3m"], 0)
+    chi = t.view(c, 0)["a"].find { |x, ts| x == E::CHI && M::Tiles.unpack(ts) == %w[4m 5m] }
+    assert chi, "the chi with 4m 5m is offered"
+    assert_equal "ok", t.act(seats[c], t.sv, E::CHI, %w[4m 5m], 0)
+    t.tick(0)
+    assert_equal c, t.state.current_seat
+    dahai = t.view(c, 0)["a"].find { |x, _| x == E::DAHAI }
+    names = M::Tiles.unpack(dahai[1])
+    refute_includes names, "3m", "the called tile"
+    refute_includes names, "6m", "the other end of the chi"
+    assert_includes names, "7p"
+    assert_equal "not offered", t.act(seats[c], t.sv, E::DAHAI, ["6m"], 0)
+    assert_equal "ok", t.act(seats[c], t.sv, E::DAHAI, ["7p"], 0)
+  end
+
   # ------------------------------------------------------------ the end of a game
+
+  # The sudden death of the west round: a child reaches 30,000 by a tsumo
+  # in west 1 and the game ends there, the reason in the view.
+  def test_the_west_round_ends_by_sudden_death
+    t, seats = table4
+    st = t.state
+    oya = st.oya_seat
+    s = (oya + 1) % 4
+    g = t.instance_variable_get(:@game)
+    g["bakaze"] = "sha"
+    g["kyoku"] = 1
+    g["oya"] = oya
+    st.bakaze = "sha"
+    scores = [25_000] * 4
+    scores[s] = 29_000
+    scores[(s + 2) % 4] = 21_000
+    4.times { |i| st.scores[i] = scores[i] }
+    g["scores"] = scores.dup
+    at_discard(t, s, %w[1m 2m 3m 4m 5m 6m 7p 8p 9p 2s 3s 4s 5p], "5p")
+    assert_equal "ok", t.act(seats[s], t.sv, E::TSUMO_AGARI, [], 0)
+    assert_operator t.state.scores[s], :>=, 30_000
+    assert t.instance_variable_get(:@flow)["end"], "the engine ends the game"
+    t.next_round(0)
+    assert_equal "over", t.status
+    assert_equal "sudden_death", t.public_view(0)["fr"]
+    assert_equal s, t.public_view(0)["fin"][0][0]
+  end
+
+  # A tonpuu game in which nobody has 30,000 after east 4 goes into the
+  # south round (nan_iri); without the extra round chosen it ends.
+  def test_a_tonpuu_game_goes_south_below_the_threshold
+    flow = lambda do |rules|
+      t, = table4(rules)
+      g = t.instance_variable_get(:@game)
+      g.merge!("bakaze" => "ton", "kyoku" => 4, "oya" => 3, "scores" => [26_000, 25_000, 25_000, 24_000])
+      res = { "kind" => "ron_agari", "wins" => [{ "winner" => 1 }], "from" => 2 }
+      E.next_round(g, t.state, res, t.rule)
+    end
+    f = flow.call(0 => 1)
+    refute f.game_end?
+    assert_equal ["nan", 1], [f.next_bakaze, f.next_kyoku]
+    f = flow.call(0 => 1, 9 => 0)
+    assert f.game_end?
+    assert_equal :normal_end, f.reason
+  end
 
   def test_the_view_says_why_the_game_ended
     t, seats = table4
