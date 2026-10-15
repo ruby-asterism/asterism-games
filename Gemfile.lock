@@ -1,5 +1,5 @@
 GIT
-  remote: ../riichi_engine
+  remote: https://github.com/kishima/riichi_engine.git
   revision: 0912a7af82dc8864001925ab2c064344db7bda87
   branch: fmrb
   specs:

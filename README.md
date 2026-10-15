@@ -26,9 +26,8 @@ network. Not published yet.
 
 ## Running
 
-CRuby 3.2 or newer and a C compiler (asterism-zenoh compiles its extension),
-and the riichi_engine fork cloned next to this repository as
-`../riichi_engine` with its `fmrb` branch (see "riichi_engine").
+CRuby 3.2 or newer and a C compiler (asterism-zenoh compiles its extension).
+Bundler fetches the riichi_engine fork from GitHub (see "riichi_engine").
 
 ```
 bundle config set --local path vendor/bundle
@@ -44,8 +43,7 @@ it goes on from the saved state (the same round, the same turn, the same
 seats and tokens). When the router goes away, it connects again every 3 s.
 
 asterism comes from rubygems at a fixed version (0.7.1); riichi_engine from
-the `fmrb` branch of a clone at `../riichi_engine` (see "riichi_engine"
-below).
+the `fmrb` branch of the fork on GitHub (see "riichi_engine" below).
 
 ## Settings
 
@@ -150,8 +148,8 @@ of them answers once: a CPU at once, a player by `act` (a call or pass), or a
 pass when `call_seconds` (counted from the discard, the same deadline for
 everybody) run out. An answer is final (the seat's list is empty after it).
 Once all have answered, riichi_engine's priority decides: ron over pon and
-open kan over chi; several rons by the rule (double ron; three rons are a
-draw, sanchahou), equal calls in turn order from the discarder. The players
+open kan over chi; several rons by the rule (by default every ron wins,
+two or three; `triple_ron_draw` makes three a draw, sanchahou), equal calls in turn order from the discarder. The players
 see the choices exactly as the engine lists them.
 
 ### Players that drop out
@@ -275,10 +273,10 @@ later. "Not sure" marks what could not be confirmed.
 
 The engine runs the rounds (wall, deal, draws, discards, calls, riichi, wins,
 yaku, points) and the CPUs. The host uses a fork of 0.1.0 with its errors
-fixed: the `fmrb` branch of a clone of
-[riichi_engine](https://github.com/HenrikStephensen/riichi_engine) next to
-this repository (`../riichi_engine`; `Gemfile` takes it as a local git
-source, so the lockfile pins a revision). Each fix is a branch of its own
+fixed: the `fmrb` branch of
+[kishima/riichi_engine](https://github.com/kishima/riichi_engine), a fork of
+[riichi_engine](https://github.com/HenrikStephensen/riichi_engine)
+(`Gemfile` takes it as a git source, so the lockfile pins a revision). Each fix is a branch of its own
 (`fix/*`, `feat/*`), written to be sent upstream; `fmrb` merges them (version
 `0.1.1.fmrb2`, not published). The host has no corrections of its own around
 the engine any more.
