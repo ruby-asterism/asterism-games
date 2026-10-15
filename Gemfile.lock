@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/kishima/riichi_engine.git
-  revision: 056e6592fa8ff7b17008e26d512ae8b42d74b8f0
+  revision: 19d7084cd9ca62024d60c519f60fd98614096bb0
   branch: fmrb
   specs:
     riichi_engine (0.1.1.fmrb4)
