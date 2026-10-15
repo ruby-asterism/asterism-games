@@ -42,8 +42,35 @@ module AsterismGames
         "away_wait_ms" => 2_000,  # an away seat's time to discard or call
         "cpu_level" => "normal",  # easy / normal / hard
         "humans" => 4,            # seats members may take (0: CPUs only, at once)
+        "spectators" => 12,       # members without a seat at most (a room lets 16 pages in: 4 seats + 12)
+        "spectator_delay_ms" => 0, # what spectators see is this old (README "Spectators")
         "rule" => {}              # riichi_engine rule keys over Engine::RULE_DEFAULTS
       }.freeze
+
+      # The local rules the owner chooses in the lobby (README "Local
+      # rules"): the view's "ru" has one value per item, in this order, and
+      # rule(token, item, value) changes one. Items 0-9 are riichi_engine rule
+      # keys, 10 is the host's own time to discard.
+      RULE_ITEMS = [
+        ["game", "game_type"],          # 0 hanchan, 1 tonpuu
+        ["kuitan", "kuitan"],           # 0 / 1
+        ["aka", "aka_dora"],            # red fives: 0, 3 (one each), 4 (two 5p)
+        ["double_ron", "double_ron"],
+        ["sanchahou", "triple_ron_draw"],
+        ["multiple_yakuman", "multiple_yakuman"],
+        ["kazoe", "kazoe_yakuman"],
+        ["kiriage", "kiriage_mangan"],
+        ["tobi", "tobi"],
+        ["nishi_iri", "nishi_iri"],     # the hanchan's west round (a tonpuu game has no south round)
+        ["turn", nil]                   # seconds to discard
+      ].freeze
+      RULE_GAMES = %w[hanchan tonpuu].freeze
+      RULE_AKA = { 0 => { "m" => 0, "p" => 0, "s" => 0 }, 3 => { "m" => 1, "p" => 1, "s" => 1 },
+                   4 => { "m" => 1, "p" => 2, "s" => 1 } }.freeze
+      RULE_TURNS = [10, 20, 30, 60].freeze
+      # The public view's keys that belong to the game (a spectator's delayed
+      # view takes them from the past, the rest is now).
+      GAME_KEYS = %w[st sv r sc ri dora kw fu hc ls ev dl res fin].freeze
 
       attr_reader :name, :ver, :sv, :status, :state, :opts, :stats, :rule
 
@@ -52,7 +79,9 @@ module AsterismGames
         @opts = DEFAULTS.merge(opts.transform_keys(&:to_s))
         @store = store
         @log = log
-        @rule = Engine.rule(@opts["rule"] || {})
+        @choice = {}         # the owner's local rules: riichi_engine keys
+        @turn_choice = nil   # the owner's time to discard (ms), nil: the setting's
+        @rule = effective_rule
         @ai = ai_for(@opts["cpu_level"])
         @stats = Hash.new(0)
         reset_all
@@ -68,6 +97,7 @@ module AsterismGames
         m = @members[node]
         if m.nil?
           return { "error" => "full" } if @members.size >= MAX_MEMBERS
+          return { "error" => "spectators" } if spectators_full?
           m = @members[node] = { "token" => SecureRandom.hex(16), "at" => @join_count += 1 }
         end
         m["name"] = clean_name(name, node)
@@ -81,6 +111,19 @@ module AsterismGames
       # The caller's membership, or nil (nothing is created).
       def mine(node)
         @members.key?(node.to_s) ? member_reply(node.to_s) : nil
+      end
+
+      # No room for another member without a seat: spectators at most
+      # opts["spectators"], and in the lobby as many more as there are seats
+      # a member could still take.
+      def spectators_full?
+        watching = @members.keys.count { |n| seat_index(n).nil? }
+        room = @opts["spectators"].to_i
+        if @status == "wait"
+          humans = @seats.count { |x| x && x["kind"] == "human" }
+          room += [@opts["humans"].to_i - humans, 0].max
+        end
+        watching >= room
       end
 
       def member_reply(node)
@@ -172,6 +215,84 @@ module AsterismGames
         "ok"
       end
 
+      # ------------------------------------------------------------ local rules
+
+      # The owner sets local rule item (RULE_ITEMS) to value, in the lobby
+      # only: the game is played by the rules it started with. Returns "ok"
+      # or why not ("no rule", "value").
+      def set_rule(token, item, value)
+        node = node_of(token)
+        return "token" unless node
+        return "not waiting" unless @status == "wait"
+        return "not owner" unless @owner == node
+        item = item.to_i
+        return "no rule" unless (0...RULE_ITEMS.size).cover?(item)
+        value = value.to_i
+        return "value" unless rule_choices(item).include?(value)
+        return "no change" if rule_values[item] == value
+        name, key = RULE_ITEMS[item]
+        base = base_rule
+        if name == "turn"
+          @turn_choice = value * 1000 == @opts["turn_ms"].to_i ? nil : value * 1000
+        else
+          v = case name
+              when "game" then RULE_GAMES[value]
+              when "aka" then value == aka_total(base["aka_dora"]) ? base["aka_dora"] : RULE_AKA[value]
+              else value == 1
+              end
+          if v == base[key] then @choice.delete(key) else @choice[key] = v end
+        end
+        @rule = effective_rule
+        changed
+        "ok"
+      end
+
+      # The rule values in RULE_ITEMS order (the view's "ru").
+      def rule_values
+        rule_values_of(@rule.to_h, turn_ms)
+      end
+
+      # The values an item may take: the screen's choices and the setting's.
+      def rule_choices(item)
+        name, = RULE_ITEMS[item]
+        own = rule_values_of(base_rule, @opts["turn_ms"].to_i)[item]
+        list = case name
+               when "aka" then RULE_AKA.keys
+               when "turn" then RULE_TURNS
+               else [0, 1]
+               end
+        (list + [own]).uniq.sort
+      end
+
+      def rule_values_of(r, turn)
+        RULE_ITEMS.map do |name, key|
+          case name
+          when "game" then r["game_type"].to_s.start_with?("tonpuu") ? 1 : 0
+          when "aka" then aka_total(r["aka_dora"])
+          when "turn" then turn / 1000
+          else r[key] ? 1 : 0
+          end
+        end
+      end
+
+      def aka_total(h)
+        h.is_a?(Hash) ? h.values.sum(&:to_i) : 0
+      end
+
+      # The host's rules (Engine::RULE_DEFAULTS and the table's "rule"
+      # setting), as riichi_engine keys.
+      def base_rule
+        Engine::RULE_DEFAULTS.merge((@opts["rule"] || {}).transform_keys(&:to_s))
+      end
+
+      def effective_rule
+        Engine.rule(base_rule.merge(@choice))
+      end
+
+      def turn_ms
+        @turn_choice || @opts["turn_ms"]
+      end
+
       # The owner starts the game: four seats taken, at least one human. The
       # seats are drawn (who sits where, so who deals first).
       def start(token, now)
@@ -184,7 +305,8 @@ module AsterismGames
         @seats = @seats.shuffle(random: Random.new(SecureRandom.random_number(2**32)))
         name_cpus
         start_game(now)
-        @log&.call("mahjong: #{@name}: game started (#{@seats.map { |s| s['name'] }.join(', ')})")
+        @log&.call("mahjong: #{@name}: game started (#{@seats.map { |s| s['name'] }.join(', ')}; " \
+                   "rules #{rule_values.inspect})")
         tick(now)
         "ok"
       end
@@ -286,6 +408,47 @@ module AsterismGames
         end
         expire_members(now)
         200.times { break unless step(now) }
+        note_for_spectators(now)
+      end
+
+      # ------------------------------------------------------------ spectators
+
+      # With a spectator delay, what the game looked like at every state
+      # version and status, kept for spectator_delay_ms: [[time, game part
+      # of the public view], ...]. The first entry is what spectators see
+      # (the newest one at least the delay old, or the oldest kept). When it
+      # moves on, the table counts as changed, so spectators ask again.
+      def note_for_spectators(now)
+        delay = @opts["spectator_delay_ms"].to_i
+        return if delay <= 0
+        key = [@sv, @status]
+        if @spec_key != key
+          @spec_key = key
+          @spec_hist << [now, game_part(public_view(now))]
+        end
+        @spec_hist.shift while @spec_hist.size > 1 && @spec_hist[1][0] <= now - delay
+        first = @spec_hist.first
+        return if first.nil? || first.equal?(@spec_shown)
+        @spec_shown = first
+        changed
+      end
+
+      def game_part(v)
+        out = {}
+        GAME_KEYS.each { |k| out[k] = v[k] if v.key?(k) }
+        out.delete("dl") # a deadline in the past says nothing
+        out
+      end
+
+      # What a spectator (and the public put, and table) sees: the people as
+      # they are now, the game as it was spectator_delay_ms ago. No hand
+      # but the winners' at a win, as public_view.
+      def spectator_view(now)
+        v = public_view(now)
+        e = @opts["spectator_delay_ms"].to_i.positive? && @spec_hist.first
+        return v unless e
+        GAME_KEYS.each { |k| v.delete(k) }
+        v.merge!(e[1])
       end
 
       # Spectators that are gone for long are forgotten (seated members stay).
@@ -326,7 +489,7 @@ module AsterismGames
         when :dahai
           seat = st.current_seat
           if human?(seat)
-            return set_deadline(1 << seat, now + @opts["turn_ms"], now) if @deadline.nil?
+            return set_deadline(1 << seat, now + turn_ms, now) if @deadline.nil?
             return false if now < turn_deadline(seat)
             @stats["timeouts"] += 1
             @stats["away_turns"] += 1 if away?(seat)
@@ -590,7 +753,7 @@ module AsterismGames
               "sk" => @seats.map { |s| s.nil? ? 0 : (s["kind"] == "human" ? 1 : 2) },
               "aw" => bits { |i| away?(i) },
               "ow" => (@owner && seat_index(@owner)) || -1,
-              "mb" => member_list }
+              "mb" => member_list, "ru" => rule_values }
         if @game
           v["sc"] = @game["scores"].dup
           v["r"] = [Engine::BAKAZE.index(@game["bakaze"]), @game["kyoku"], @game["honba"], @game["kyoutaku"], @game["oya"]]
@@ -643,7 +806,7 @@ module AsterismGames
       # hand, what it may do and the help its screen asked for (assist, the
       # level of README "Assist"; a screen that does not say gets 1).
       def view(seat, now, assist = ASSIST_DEFAULT)
-        v = public_view(now)
+        v = seat >= 0 ? public_view(now) : spectator_view(now)
         v["me"] = seat
         if seat >= 0 && @state && @status != "wait"
           st = @state
@@ -783,8 +946,11 @@ module AsterismGames
         v["f"] = r["from"] unless r["from"].nil?
         if r["wins"]
           v["wn"] = r["wins"].map do |w|
-            { "w" => w["winner"], "y" => w["yaku"], "pt" => w["points"],
-              "h" => Tiles.pack(Tiles.sort(w["hand"])).b, "ag" => Tiles.code(w["agari"]) }
+            x = { "w" => w["winner"], "y" => w["yaku"], "pt" => w["points"],
+                  "h" => Tiles.pack(Tiles.sort(w["hand"])).b, "ag" => Tiles.code(w["agari"]) }
+            # The han of each yaku (-1: a yakuman), in the order of "y".
+            x["yh"] = w["yaku_han"] if w["yaku_han"]
+            x
           end
         end
         v["tp"] = r["tenpai"] if r["tenpai"]
@@ -819,7 +985,8 @@ module AsterismGames
           "deadline_left" => @deadline && [@deadline - now, 0].max, "deadline_bits" => @deadline_bits,
           "wait_spent" => @deadline && @wait_from && [now - @wait_from, 0].max,
           "cpu_left" => @cpu_at && [@cpu_at - now, 0].max, "next_left" => @next_at && [@next_at - now, 0].max,
-          "result" => @result, "flow" => @flow, "final" => @final, "event" => @event }
+          "result" => @result, "flow" => @flow, "final" => @final, "event" => @event,
+          "rules" => { "choice" => @choice, "turn_ms" => @turn_choice } }
       end
 
       def saved_action(a)
@@ -847,6 +1014,10 @@ module AsterismGames
         @flow = d["flow"]
         @final = d["final"]
         @event = d["event"]
+        rules = d["rules"].is_a?(Hash) ? d["rules"] : {}
+        @choice = rules["choice"].is_a?(Hash) ? rules["choice"] : {}
+        @turn_choice = rules["turn_ms"]&.to_i
+        @rule = effective_rule
         resume_clock(now, d)
         @log&.call("mahjong: #{@name}: resumed (#{@status}, state #{@sv}, #{@members.size} members)")
       end
@@ -870,6 +1041,9 @@ module AsterismGames
         @sv = 0
         @assist = {}          # [seat, level] => [state version, [wt, uk]]
         @assist_ms = []
+        @spec_hist = []       # README "Spectators"
+        @spec_key = nil
+        @spec_shown = nil
         @now = 0
         @status = "wait"
         @seats = [nil] * 4

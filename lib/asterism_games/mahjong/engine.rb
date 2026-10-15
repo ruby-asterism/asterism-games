@@ -373,6 +373,7 @@ module AsterismGames
             ch = sr.score_changes(winner_seat: w, loser_seat: info[:loser_seat], oya_seat: state.oya_seat)
             4.times { |s| delta[s] += ch[s].to_i }
             { "winner" => w, "agari" => tile.to_s, "yaku" => winner[:yaku].map { |y| y[:display].to_s },
+              "yaku_han" => winner[:yaku].map { |y| y[:han].to_i },
               "han" => winner[:han], "fu" => winner[:fu], "points" => sr.display.to_s,
               "hand" => winner[:hand_tiles].map(&:to_s) }
           end

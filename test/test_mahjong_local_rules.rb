@@ -1,0 +1,297 @@
+# frozen_string_literal: true
+
+require_relative "test_helper"
+
+# The local rules the owner chooses in the lobby, the spectators (no hand,
+# the delay, how many) and the result's han per yaku (README "Local rules",
+# "Spectators").
+class TestMahjongLocalRules < Minitest::Test
+  include MahjongTestHelper
+
+  T = M::Table
+  GAME = 0
+  KUITAN = 1
+  AKA = 2
+  TURN = 10
+  AI = ::Mahjong::Cpu::Ai::NormalAi.new
+
+  # A lobby with n members seated (the first is the owner): [table, tokens].
+  def lobby(n = 1, store: nil, **opts)
+    t = human_table(store: store, **opts)
+    toks = (0...n).map do |i|
+      tok = t.join("wasm-aaaaa#{i}", "P#{i}", 0)["token"]
+      assert_equal "ok", t.sit(tok, -1, 0)
+      tok
+    end
+    [t, toks]
+  end
+
+  def start(t, toks)
+    t.cpu(toks[0], -1, true) if toks.size < 4
+    assert_equal "ok", t.start(toks[0], 0)
+    toks.to_h { |tok| [t.seat_of(tok), tok] }
+  end
+
+  def give(state, seat, names)
+    state.hands[seat] = Mahjong::State::Hand.new(names)
+  end
+
+  # ------------------------------------------------------------ the rules
+
+  def test_the_defaults_are_the_hosts
+    t, = lobby
+    assert_equal [0, 1, 3, 1, 0, 1, 1, 0, 1, 1, 1], t.public_view(0)["ru"],
+                 "hanchan, kuitan, three red fives, double ron, no sanchahou, multiple yakuman, kazoe, " \
+                 "no kiriage, tobi, west round, the setting's time (1 s in the test table)"
+    assert_equal T::RULE_ITEMS.size, t.public_view(0)["ru"].size
+    assert_equal [1, 10, 20, 30, 60], t.rule_choices(TURN), "the setting's own time is one of the choices"
+    assert_equal [0, 3, 4], t.rule_choices(AKA)
+  end
+
+  def test_only_the_owner_in_the_lobby_with_values_offered
+    t, toks = lobby(2)
+    assert_equal "not owner", t.set_rule(toks[1], GAME, 1)
+    assert_equal "token", t.set_rule("x" * 32, GAME, 1)
+    assert_equal "no rule", t.set_rule(toks[0], 99, 1)
+    assert_equal "value", t.set_rule(toks[0], AKA, 2)
+    assert_equal "value", t.set_rule(toks[0], TURN, 15)
+    assert_equal "no change", t.set_rule(toks[0], KUITAN, 1)
+    v0 = t.public_view(0)["v"]
+    assert_equal "ok", t.set_rule(toks[0], GAME, 1)
+    assert_operator t.public_view(0)["v"], :>, v0, "everybody sees the change"
+    assert_equal "ok", t.set_rule(toks[0], KUITAN, 0)
+    assert_equal "ok", t.set_rule(toks[0], AKA, 4)
+    assert_equal "ok", t.set_rule(toks[0], TURN, 30)
+    assert_equal "tonpuu", t.rule.game_type
+    refute t.rule.kuitan?
+    assert_equal({ "m" => 1, "p" => 2, "s" => 1 }, t.rule.aka_dora_config)
+    assert_equal 30_000, t.turn_ms
+    assert_equal [1, 0, 4, 1, 0, 1, 1, 0, 1, 1, 30], t.public_view(0)["ru"]
+    # back to the host's value: no choice is kept for it
+    assert_equal "ok", t.set_rule(toks[0], AKA, 3)
+    refute t.instance_variable_get(:@choice).key?("aka_dora")
+    start(t, toks)
+    assert_equal "not waiting", t.set_rule(toks[0], GAME, 0), "fixed once the game has started"
+    assert_equal [1, 0, 3, 1, 0, 1, 1, 0, 1, 1, 30], t.view(0, 0)["ru"], "the rules are in every view"
+  end
+
+  def test_every_engine_item_reaches_the_engine
+    t, toks = lobby
+    { 3 => :double_ron?, 4 => :triple_ron_draw?, 5 => :multiple_yakuman?, 6 => :kazoe_yakuman?,
+      7 => :kiriage_mangan?, 8 => :tobi?, 9 => :nishi_iri? }.each do |item, m|
+      was = t.rule.public_send(m)
+      assert_equal "ok", t.set_rule(toks[0], item, was ? 0 : 1)
+      assert_equal !was, t.rule.public_send(m), "item #{item}"
+    end
+  end
+
+  def test_the_time_to_discard_is_the_chosen_one
+    t, toks = lobby(1, "turn_ms" => 20_000)
+    assert_equal "ok", t.set_rule(toks[0], TURN, 10)
+    seats = start(t, toks)
+    seat = seats.keys.first
+    now = run_until(t, 0) { t.state.phase == :dahai && t.state.current_seat == seat }
+    assert_equal [1 << seat, 10_000], t.public_view(now)["dl"]
+  end
+
+  def test_the_rules_are_saved_and_stay_for_the_next_game
+    Dir.mktmpdir do |dir|
+      store = AsterismGames::Store.new(dir)
+      t, toks = lobby(1, store: store)
+      t.set_rule(toks[0], GAME, 1)
+      t.set_rule(toks[0], KUITAN, 0)
+      t.set_rule(toks[0], TURN, 60)
+      start(t, toks)
+      t.save(0)
+      u = human_table(store: store)
+      u.resume_clock(0)
+      assert_equal t.public_view(0)["ru"], u.public_view(0)["ru"]
+      assert_equal "tonpuu", u.rule.game_type
+      refute u.rule.kuitan?
+      assert_equal 60_000, u.turn_ms
+      u.instance_variable_set(:@flow, { "end" => true })
+      u.next_round(0)
+      assert_equal "ok", u.act(toks[0], u.sv, E::NEXT, [], 0)
+      assert_equal "wait", u.status
+      assert_equal t.public_view(0)["ru"], u.public_view(0)["ru"], "back in the lobby, the same rules"
+    end
+  end
+
+  # One human (played as the engine's CPU would) and three CPUs, a tonpuu
+  # game chosen in the lobby: it ends in the east round.
+  def test_a_tonpuu_game_chosen_in_the_lobby_ends_in_the_east
+    t, toks = lobby(1, "over_ms" => 10**9)
+    assert_equal "ok", t.set_rule(toks[0], GAME, 1)
+    seat, tok = start(t, toks).first
+    now = 0
+    winds = {}
+    steps = 0
+    until t.status == "over"
+      g = t.instance_variable_get(:@game)
+      winds[g["bakaze"]] = true if g
+      a = t.view(seat, now)["a"]
+      pick = if (w = a.find { |x, _| [E::TSUMO_AGARI, E::RON, E::NEXT].include?(x) }) then [w[0], []]
+             elsif a.any? { |x, _| x == E::SKIP } then [E::SKIP, []]
+             elsif a.any? { |x, _| x == E::DAHAI }
+               c = E.cpu_choice(t.state, seat, t.rule, AI)
+               d = a.find { |x, _| x == E::DAHAI }
+               names = M::Tiles.unpack(d[1])
+               c && c[:type].to_sym == :dahai && names.include?(c[:tile]) ? [E::DAHAI, [c[:tile]]] : [E::DAHAI, [names.last]]
+             end
+      if pick
+        t.act(tok, t.sv, pick[0], pick[1], now)
+      else
+        now += 10
+      end
+      t.tick(now)
+      steps += 1
+      flunk "too many steps" if steps > 400_000
+    end
+    puts "\n  tonpuu: #{t.stats['rounds']} rounds, winds #{winds.keys.inspect}"
+    assert_operator t.stats["rounds"], :>=, 4
+    assert_equal ["ton"], winds.keys, "every round in the east"
+    assert_equal 4, t.public_view(now)["fin"].size
+  end
+
+  # A tanyao-only open hand (a pon of 2p): with kuitan off the engine offers
+  # no ron on its wait, with kuitan on it does.
+  def open_tanyao_table(kuitan)
+    t, toks = lobby(4, "result_ms" => 60_000)
+    assert_equal "ok", t.set_rule(toks[0], KUITAN, 0) unless kuitan
+    seats = start(t, toks)
+    st = t.state
+    E.apply(st, { type: :tsumo }, t.rule) while st.phase == :tsumo
+    4.times { |i| st.first_turn_flags[i] = false }
+    4.times { |i| give(st, i, %w[1z 1z 2z 2z 3z 3z 4z 4z 5z 5z 6z 6z 7z]) }
+    give(st, 1, %w[2m 3m 4m 5p 6p 7p 4s 4s 6s 7s])
+    p2 = Mahjong::Tiles::Tile.new("2p")
+    st.fuuros[1] = [Mahjong::State::Fuuro.new(type: :pon, tiles: [p2] * 3, called_tile: p2, from_seat: 0)]
+    st.menzen_flags[1] = false
+    give(st, 2, %w[8s 1z 1z 2z 2z 3z 3z 4z 4z 5z 5z 6z 6z 7z])
+    st.current_seat = 2
+    st.phase = :dahai
+    st.last_tsumo = Mahjong::Tiles::Tile.new("8s")
+    st.dora_hyouji = [Mahjong::Tiles::Tile.new("1z")]
+    assert_equal "ok", t.act(seats[2], t.sv, E::DAHAI, ["8s"], 0)
+    t
+  end
+
+  def test_no_kuitan_no_ron_on_an_open_tanyao
+    on = open_tanyao_table(true)
+    assert(on.view(1, 0)["a"].any? { |x, _| x == E::RON }, "kuitan on: the ron is offered")
+    off = open_tanyao_table(false)
+    refute(off.view(1, 0)["a"].any? { |x, _| x == E::RON }, "kuitan off: no ron")
+    refute off.rule.kuitan?
+  end
+
+  def test_red_fives_by_the_lobby
+    [[0, 0], [3, 3], [4, 4]].each do |value, reds|
+      t, toks = lobby
+      t.set_rule(toks[0], AKA, value) unless value == 3
+      start(t, toks)
+      # the wall is built from this (riichi_engine RoundFlow: Wall.build(aka_config:))
+      all = Mahjong::Tiles::Tile.all_tiles(t.rule.aka_dora_config).map(&:to_s).select { |n| n.start_with?("0") }
+      assert_equal reds, all.size, "aka #{value}"
+    end
+  end
+
+  # ------------------------------------------------------------ spectators
+
+  def spectator(t, i = 0)
+    t.join("wasm-cccc#{format('%02d', i)}", "W#{i}", 0)["token"]
+  end
+
+  # Over a whole tonpuu game (one human played through act), a spectator's
+  # view, the put and table never carry a hand (except the winners' at a
+  # win), a draw, an offer or the help.
+  def test_spectators_never_see_a_hand
+    t, toks = lobby(1, "over_ms" => 10**9)
+    t.set_rule(toks[0], GAME, 1)
+    sp = spectator(t)
+    seat, tok = start(t, toks).first
+    now = 0
+    checks = 0
+    until t.status == "over"
+      v = t.member_view(sp, now, 3)
+      [v, t.spectator_view(now)].each do |x|
+        %w[h dt wt uk].each { |k| refute x.key?(k), "a spectator's view has #{k}" }
+        assert_equal [], x["a"] if x.key?("a")
+        assert_equal(-1, x["me"]) if x.key?("me")
+      end
+      checks += 1
+      a = t.view(seat, now)["a"]
+      o = a.find { |x, _| [E::TSUMO_AGARI, E::RON, E::NEXT, E::SKIP].include?(x) } || a.find { |x, _| x == E::DAHAI }
+      if o
+        tiles = o[0] == E::DAHAI ? [M::Tiles.unpack(o[1]).last] : []
+        t.act(tok, t.sv, o[0], tiles, now)
+      else
+        now += 10
+      end
+      t.tick(now)
+      flunk "too many steps" if checks > 400_000
+    end
+    assert_operator checks, :>, 100
+  end
+
+  def test_spectators_see_the_game_as_it_was_the_delay_ago
+    t, toks = lobby(1, "spectator_delay_ms" => 5000, "cpu_ms" => 300)
+    sp = spectator(t)
+    seat, = start(t, toks).first
+    seen = {} # time => state version
+    now = 0
+    while now < 30_000 && t.status == "play"
+      t.act(toks[0], t.sv, E::DAHAI, [M::Tiles.unpack(t.view(seat, now)["a"].find { |x, _| x == E::DAHAI }[1]).last], now) if
+        t.view(seat, now)["a"].any? { |x, _| x == E::DAHAI }
+      seen[now] = t.sv # after what happened at now
+      now += 10
+      t.tick(now)
+      next if now < 5000
+      want = seen[now - 5000]
+      v = t.member_view(sp, now)
+      assert_operator v["sv"], :<=, want, "at #{now} ms a spectator is no later than 5 s ago"
+      assert_operator v["sv"], :>=, seen[now - 5020], "and not earlier" if seen[now - 5020]
+      assert_equal t.spectator_view(now)["sv"], v["sv"], "the put and table are as late"
+      assert_nil v["dl"], "no deadline in a delayed view"
+      assert_equal t.sv, t.view(seat, now)["sv"], "a seated player is not delayed"
+      assert_equal t.public_view(now)["v"], v["v"], "the version is now's (the screens ask when it moves)"
+    end
+    assert_operator now, :>=, 5000
+    assert_operator t.member_view(sp, now)["sv"], :<, t.sv
+  end
+
+  def test_no_delay_by_default
+    t, toks = lobby
+    sp = spectator(t)
+    start(t, toks)
+    now = run_until(t, 0) { t.sv > 5 }
+    assert_equal t.sv, t.member_view(sp, now)["sv"]
+    assert_equal 0, T::DEFAULTS["spectator_delay_ms"]
+  end
+
+  def test_how_many_spectators
+    t, toks = lobby(1, "spectators" => 2)
+    # In the lobby the seats still free count too: 2 + 3.
+    5.times { |i| refute t.join("wasm-dddd#{i}", "D", 0)["error"], "joiner #{i}" }
+    assert_equal({ "error" => "spectators" }, t.join("wasm-ddddx", "D", 0))
+    assert_equal "ok", t.sit(t.mine("wasm-dddd0")["token"], -1, 0)
+    t.leave(t.mine("wasm-dddd1")["token"])
+    t.leave(t.mine("wasm-dddd2")["token"])
+    start(t, toks)
+    assert_equal({ "error" => "spectators" }, t.join("wasm-ddddy", "D", 0), "in a game: two at most")
+    refute t.join("wasm-dddd3", "D", 0)["error"], "a member gets its place back"
+    assert_equal 12, T::DEFAULTS["spectators"]
+  end
+
+  # ------------------------------------------------------------ the result
+
+  def test_the_han_of_each_yaku_is_in_the_result
+    t = open_tanyao_table(true)
+    tok1 = t.instance_variable_get(:@seats)[1]["token"]
+    assert_equal "ok", t.act(tok1, t.sv, E::RON, [], 10)
+    w = t.public_view(10)["res"]["wn"][0]
+    assert_equal w["y"].size, w["yh"].size
+    assert_equal ["断么九"], w["y"]
+    assert_equal [1], w["yh"]
+    assert_operator reply_bytes(t.view(1, 10)), :<, 3800
+  end
+end

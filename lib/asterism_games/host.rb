@@ -144,7 +144,8 @@ module AsterismGames
       @put_at[name] = now
       return unless @session && !::Asterism.reconnecting?
       key = "asterism/#{@config['node']}/#{@config['app']}/#{name}/state"
-      payload = ::Asterism::Codec.pack(game.public_view(now))
+      # What everybody may see, as a spectator sees it (README "Spectators").
+      payload = ::Asterism::Codec.pack(game.respond_to?(:spectator_view) ? game.spectator_view(now) : game.public_view(now))
       note_size("put #{name}/state", key.bytesize + payload.bytesize)
       @session.put(key, payload)
     rescue ::Asterism::Error => e

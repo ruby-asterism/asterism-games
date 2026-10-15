@@ -77,7 +77,9 @@ A mahjong table takes (the environment applies to every table):
 | `cpu_ms` | `MAHJONG_CPU_MS` | 700 | a CPU's pause before it acts |
 | `cpu_level` | `MAHJONG_CPU_LEVEL` | `normal` | `easy` / `normal` / `hard` (riichi_engine's CPU levels) |
 | `humans` | | 4 | seats members may take (0: four CPUs that play at once, for tests) |
-| `rule` | | (below) | riichi_engine rule keys over the host's defaults ("Rules") |
+| `spectators` | `MAHJONG_SPECTATORS` | 12 | members without a seat at most ("Spectators") |
+| `spectator_delay_seconds` | `MAHJONG_SPECTATOR_DELAY_SECONDS` | 0 | spectators see the game this much later ("Spectators") |
+| `rule` | | (below) | riichi_engine rule keys over the host's defaults ("Rules"); the owner's local rules go over them ("Local rules") |
 
 ## Rooms
 
@@ -145,15 +147,16 @@ code with the supervisor at first).
 
 | Method | Arguments | Returns |
 |---|---|---|
-| `join` | name | `{"token", "seat" (-1: none), "owner"}`, or `{"error" => "full"}` (16 members) |
+| `join` | name | `{"token", "seat" (-1: none), "owner"}`, or `{"error" => "full"}` (16 members) or `{"error" => "spectators"}` ("Spectators") |
 | `mine` | none | the same for a node that joined, or nil (nothing is created) |
 | `sit` | token, seat | `"ok"` or why not (`"taken"`, `"not waiting"`, ...); seat -1: the first free one. In the lobby only; a seated member moves |
 | `stand` | token | `"ok"` or why not (lobby only) |
 | `cpu` | token, seat, on | the owner: a CPU into an empty seat (on) or out of it; seat -1 with on fills every empty seat |
 | `start` | token | the owner, once the four seats are taken and one is a member: the seats are drawn (who deals first) and the game starts |
+| `rule` | token, item, value | the owner, in the lobby: a local rule ("Local rules"); `"ok"` or why not (`"not owner"`, `"not waiting"`, `"no rule"`, `"value"`, `"no change"`) |
 | `view` | token[, assist] | the member's view (below), or `{"error" => "token"}`; assist: the help its screen shows (Assist, 0-3; without it 1) |
 | `act` | token, sv, type, tiles | `"ok"`, or why not: `"token"`, `"not seated"`, `"stale"` (sv is not the current one), `"not offered"`, `"not playing"` |
-| `table` | none | the public view (no hand) |
+| `table` | none | the public view (no hand), as a spectator sees it |
 | `leave` | token | `true` / `false`; in the lobby the seat empties, during a game it goes to a CPU |
 
 - People join a table and wait in its lobby (`"st" => "wait"`): a member
@@ -206,6 +209,68 @@ from what that seat can see, and only for a seat that asks.
   most 30 ms (the first ones, before the suit patterns are known; `rake
   test` prints the `assist:` line).
 
+### Local rules
+
+The owner chooses the table's rules in the lobby, before the start; every
+member sees them there (the view's `ru`), and the game is played by the
+rules it started with (`rule` answers `"not waiting"` once it has started).
+They are saved with the table and stay for the next game at the table. The
+host's rules ("Rules": `Engine::RULE_DEFAULTS` and the table's `rule`
+setting) are where they start, and choosing a host's value again drops the
+choice. A new room (a slot used again) starts from the host's rules.
+
+`ru` has one number per item, in this order; `rule(token, item, value)`
+takes one of the values listed (or the host's own value for the item):
+
+| Item | | riichi_engine key | Values |
+|---|---|---|---|
+| 0 | the game | `game_type` | 0 hanchan, 1 tonpuu (east round only; riichi_engine has no south round for a tonpuu game) |
+| 1 | open tanyao | `kuitan` | 0 / 1 |
+| 2 | red fives | `aka_dora` | 0 none, 3 one each of 5m 5p 5s, 4 two of 5p |
+| 3 | double ron | `double_ron` | 0 (the head bump) / 1 |
+| 4 | three rons a draw | `triple_ron_draw` | 0 (all three win) / 1 (sanchahou) |
+| 5 | several yakuman added up | `multiple_yakuman` | 0 / 1 |
+| 6 | kazoe yakuman | `kazoe_yakuman` | 0 / 1 |
+| 7 | kiriage mangan | `kiriage_mangan` | 0 / 1 |
+| 8 | tobi | `tobi` | 0 / 1 |
+| 9 | the west round of a hanchan | `nishi_iri` | 0 / 1 |
+| 10 | the time to discard, seconds | (the host's `turn_seconds`) | 10, 20, 30, 60 |
+
+Left out: the keys riichi_engine has but does not use (`atozuke`,
+`double_yakuman`), the starting points, the first place target and the uma
+(they change the final points, not the play: the table's `rule` setting
+still sets them), and `renpuu_jantou_fu` (the fu of a pair of the double
+wind; it is not sure what Mahjong Soul does).
+
+### Spectators
+
+A member without a seat watches: its view is the public one (no hand but
+the winners' at a win, no offers, no help), and so are the put on
+`.../state` and `table`.
+
+- **How many.** At most `spectators` members without a seat (12: a room
+  of an Asterism console lets 16 pages in, four of them at the seats; the
+  host itself connects to the router directly). In the lobby a member that
+  could still sit counts in addition, so people can come in and sit. A
+  member beyond that gets `{"error" => "spectators"}`; a member gets its
+  place back as before.
+- **The delay.** With `spectator_delay_seconds` above 0, the spectators'
+  view, the put and `table` show the game as it was that long ago: the host
+  keeps the game's part of the public view (`st sv r sc ri dora kw fu hc ls
+  ev res fin`) at every change for that long, and the people's part (`nm
+  hu sk aw ow mb ru`) and `v` are now's (so a screen asks again when the
+  delayed picture moves on). There is no deadline (`dl`) in a delayed
+  view. The seated players' own views are never delayed. Counted in time,
+  not in actions: a round's result then stays as long for the spectators
+  as for the players, and an action every 0.7 s (a CPU) or every 20 s (a
+  person) does not change how far behind the spectators are. A host
+  started again starts the delay over (the past is not saved).
+- **The default is 0.** The spectators see no hand and nothing the players
+  do not see, so a delay keeps nothing from anybody; it would only put the
+  spectators out of step with the people they talk to. Set it when the
+  table is shown to an audience, or if the spectators' view ever shows
+  hands.
+
 ### Calls on a discard
 
 When several seats may call a discard (ron, pon, chi, open kan), every one
@@ -253,7 +318,8 @@ A Hash (MessagePack); tiles are one byte each in binary strings (bin).
 | `hc` | the four hand sizes |
 | `ls`, `ev` | the last discard `[seat, tile]`; the last action `[type, seat]` |
 | `dl` | `[seats as bits, ms]`: whom the host waits for (one seat's turn, or every seat that may still call) and how long it still waits |
-| `res` | at a round's end: `k` (`tsumo_agari`, `ron_agari`, `ryuukyoku`, `kyuushu_kyuuhai`, `sanchahou`), `d` (the four score changes), `f` (who dealt in), `wn` (one entry per winner, in turn order from the discarder: `w` seat, `y` the yaku as riichi_engine names them, in Japanese, `pt` fu, han and points, `h` and `ag` the hand and the winning tile), `tp` (tenpai seats at a draw), `rs` (the seats of the three rons at a sanchahou) |
+| `res` | at a round's end: `k` (`tsumo_agari`, `ron_agari`, `ryuukyoku`, `kyuushu_kyuuhai`, `sanchahou`), `rd` (the round: `[bakaze, kyoku, honba]`), `d` (the four score changes), `f` (who dealt in), `wn` (one entry per winner, in turn order from the discarder: `w` seat, `y` the yaku as riichi_engine names them, in Japanese, `yh` the han of each (-1: a yakuman), `pt` fu, han and points, `h` and `ag` the hand and the winning tile), `tp` (tenpai seats at a draw), `rs` (the seats of the three rons at a sanchahou) |
+| `ru` | the local rules ("Local rules"), one number per item |
 | `fin` | at the end: `[[seat, rank, score, point x 10], ...]` |
 | `me`, `h`, `dt`, `a` | the member's view only: its seat (-1: watching), its hand (sorted, without the drawn tile), the drawn tile (-1 none), what it may do: `[[type, tiles], ...]` |
 | `wt` | the member's view only, the help (Assist, levels 1-3): one binary string, per discard the tile, the number of waits n and n pairs `[wait, left]` (the waits as riichi_engine's wait judge gives them; left: 4 less what the seat can see of the tile: its own hand, the rivers, every meld, the dora indicators) |
@@ -305,7 +371,10 @@ under 3800 B.
 The host's defaults follow Mahjong Soul's default rules (its four-player
 ranked games and the defaults of a friends' room) wherever riichi_engine can
 choose; the engine's own defaults stay as they are and the host passes its
-values (`Engine::RULE_DEFAULTS`). A table's `rule` setting goes over them.
+values (`Engine::RULE_DEFAULTS`). A table's `rule` setting goes over them,
+and the owner's choices in the lobby go over that ("Local rules": the game,
+open tanyao, red fives, double ron, three rons, several yakuman, kazoe
+yakuman, kiriage mangan, tobi, the west round, the time to discard).
 Where the engine cannot choose, the table says so: those rules are left for
 later. "Not sure" marks what could not be confirmed.
 
@@ -419,6 +488,15 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   yakuman on and off, the host's rule defaults, the riichi help (the waits
   after each riichi discard and what is left of them, only in the seat's
   own view), and the engine fixes the host relies on.
+- `test_mahjong_local_rules.rb`: the local rules (the host's values to
+  start from, the owner only, the lobby only, the values offered, each item
+  reaching the engine, the time to discard, saved and kept for the next
+  game; a tonpuu game chosen in the lobby ends in the east round, open
+  tanyao off offers no ron on an open tanyao-only hand, the red fives in
+  the wall), the spectators (over a whole game no hand, draw, offer or help
+  in a spectator's view, the put or `table`; with a delay they see the
+  game as it was that long ago while the players do not wait; none by
+  default; how many) and the han of each yaku in a result.
 - `test_rooms.rb`: the rooms' supervisor with stand-in host processes: which
   rooms get a host (the app, closed, ended), the child's settings (the
   slot's certificate, the namespace), a new room on the slot starting from
@@ -432,7 +510,10 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
 `bin/mahjong-bots` fills a table with players over the network (to try a
 second table, or the host under load): `bundle exec bin/mahjong-bots
 --table games/games/mahjong2`. In a room: `--credentials room-01.tar
---namespace room/01 --table games/games/mahjong1`.
+--namespace room/01 --table games/games/mahjong1`. `--rules 0=1,1=0` sets
+local rules before the start (a tonpuu game without open tanyao),
+`--start-ms` waits in the lobby (for spectators), `--result-ms` looks at
+each result that long.
 
 ## License
 

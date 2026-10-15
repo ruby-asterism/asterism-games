@@ -10,6 +10,7 @@
 #
 #   bundle exec bin/mahjong-bots [--router tcp/127.0.0.1:7447] [--table games/games/mahjong2]
 #                                [--players 4] [--think-ms 500] [--games 1] [--prefix bot-NAME]
+#                                [--rules 0=1,1=0] [--result-ms 0] [--start-ms 0]
 #                                [--credentials room-01.tar --namespace room/01]   # in a room
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 require "asterism"
@@ -17,7 +18,7 @@ require "asterism_games/mahjong/engine"
 
 E = AsterismGames::Mahjong::Engine
 opts = { router: "tcp/127.0.0.1:7447", table: "games/games/mahjong2", players: 4, think: 500, games: 1,
-         prefix: "bot-#{Process.pid}" }
+         prefix: "bot-#{Process.pid}", rules: [], result_ms: 0, start_ms: 0 }
 ARGV.each_slice(2) do |k, v|
   case k
   when "--router" then opts[:router] = v
@@ -28,6 +29,9 @@ ARGV.each_slice(2) do |k, v|
   when "--prefix" then opts[:prefix] = v
   when "--credentials" then opts[:credentials] = v
   when "--namespace" then opts[:namespace] = v
+  when "--rules" then opts[:rules] = v.split(",").map { |kv| kv.split("=").map(&:to_i) }
+  when "--result-ms" then opts[:result_ms] = v.to_i
+  when "--start-ms" then opts[:start_ms] = v.to_i
   else abort "unknown option #{k}"
   end
 end
@@ -50,7 +54,12 @@ def play(i, opts)
   loop do
     if i.zero? && t.view(tok)["st"] == "wait"
       sleep 0.5 * opts[:players] + 0.5
+      opts[:rules].each { |item, value| puts "#{node}: rule #{item}=#{value} #{t.rule(tok, item, value)}" }
       t.cpu(tok, -1, true)
+      (opts[:start_ms] / 2000).times do # still here (a view every 2 s)
+        sleep 2
+        t.view(tok)
+      end
       puts "#{node}: start #{t.start(tok)}"
     end
     sleep opts[:think] / 1000.0
@@ -66,6 +75,7 @@ def play(i, opts)
       next
     end
     next if a.empty?
+    sleep opts[:result_ms] / 1000.0 if v["st"] == "result" && opts[:result_ms].positive?
     types = a.map(&:first)
     pick = if (w = a.find { |x, _| [E::TSUMO_AGARI, E::RON, E::NEXT].include?(x) }) then w
            elsif types.include?(E::PON) && rng.rand < 0.3 then a.find { |x, _| x == E::PON }

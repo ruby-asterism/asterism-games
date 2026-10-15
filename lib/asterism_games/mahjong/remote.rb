@@ -11,12 +11,14 @@ module AsterismGames
     #   stand(token)                -> "ok" or why not
     #   cpu(token, seat, on)        -> "ok" or why not (the owner; seat -1: every empty seat)
     #   start(token)                -> "ok" or why not (the owner, four seats taken)
+    #   rule(token, item, value)    -> "ok" or why not (the owner, in the lobby:
+    #                                  a local rule, README "Local rules")
     #   view(token[, assist])       -> the member's view (Hash) or {"error" => "token"};
     #                                  assist: the level of help its screen
     #                                  shows (README "Assist", 0-3; default 1)
     #   act(token, sv, type, tiles) -> "ok" or why not ("token", "stale",
     #                                  "not offered", "not playing", "not seated")
-    #   table                       -> the public view (no hand)
+    #   table                       -> the public view (no hand; as a spectator sees it)
     #   leave(token)                -> true / false
     #
     # The caller is Asterism.current_call.from (the node ID in the call's
@@ -24,7 +26,7 @@ module AsterismGames
     # call by a member counts as a sign that it is there (away_ms).
     class Remote
       # view takes one or two arguments (-1: the arguments are not counted).
-      METHODS = { join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, view: -1, act: 4, table: 0, leave: 1 }.freeze
+      METHODS = { join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, rule: 3, view: -1, act: 4, table: 0, leave: 1 }.freeze
 
       def initialize(table, clock)
         @table = table
@@ -65,6 +67,11 @@ module AsterismGames
         @table.start(token, @clock.call)
       end
 
+      def rule(token, item, value)
+        mark(token)
+        @table.set_rule(token, item.to_i, value.to_i)
+      end
+
       def view(token, assist = nil)
         mark(token)
         lv = assist.nil? ? Table::ASSIST_DEFAULT : assist.to_i.clamp(Table::ASSIST_LEVELS.min, Table::ASSIST_LEVELS.max)
@@ -81,7 +88,7 @@ module AsterismGames
       end
 
       def table
-        @table.public_view(@clock.call)
+        @table.spectator_view(@clock.call)
       end
 
       def leave(token)
