@@ -12,4 +12,4 @@ tables:
     call_seconds: 8          # a player's time to call a discard
     result_seconds: 8        # a round's result stays this long (or until "next")
     cpu_ms: 700              # a CPU's pause before it acts
-    cpu_level: normal        # easy / normal / hard / engine (riichi_engine's own discards)
+    cpu_level: normal        # easy / normal / hard (riichi_engine's CPU levels)

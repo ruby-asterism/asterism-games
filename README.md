@@ -5,7 +5,8 @@ CRuby process that joins a Zenoh network as an Asterism node, holds the
 state of the games and lets players on boards (Family mruby), browsers and
 PCs play through Asterism calls. The first game is riichi mahjong (four
 players; seats nobody takes are played by CPUs), built on the
-[riichi_engine](https://rubygems.org/gems/riichi_engine) gem.
+[riichi_engine](https://github.com/HenrikStephensen/riichi_engine) gem (a
+fork with fixes, see "riichi_engine" below).
 
 Status: Step 1 of the mahjong plan: one human and three CPUs at a table, on
 a local network. Not published yet.
@@ -16,13 +17,15 @@ a local network. Not published yet.
 | `lib/asterism_games/host.rb` | the connection, the loop, the puts, the game registry (`Host::GAMES`) |
 | `lib/asterism_games/config.rb` | the settings (file and environment) |
 | `lib/asterism_games/store.rb` | saved states, one JSON file per table |
-| `lib/asterism_games/mahjong/` | the mahjong table: `table.rb` (seats, rounds, views, time), `engine.rb` (the calls into riichi_engine and the corrections around it), `remote.rb` (the exposed object), `tiles.rb` (tile numbers) |
+| `lib/asterism_games/mahjong/` | the mahjong table: `table.rb` (seats, rounds, views, time), `engine.rb` (the calls into riichi_engine), `remote.rb` (the exposed object), `tiles.rb` (tile numbers) |
 | `config/example.yml` | settings to copy |
 | `test/` | the tests (`rake test`) |
 
 ## Running
 
-CRuby 3.2 or newer and a C compiler (asterism-zenoh compiles its extension).
+CRuby 3.2 or newer and a C compiler (asterism-zenoh compiles its extension),
+and the riichi_engine fork cloned next to this repository as
+`../riichi_engine` with its `fmrb` branch (see "riichi_engine").
 
 ```
 bundle config set --local path vendor/bundle
@@ -37,8 +40,9 @@ application `games`, and exposes each table as an object:
 it goes on from the saved state (the same round, the same turn, the same
 seats and tokens). When the router goes away, it connects again every 3 s.
 
-The gems come from rubygems at fixed versions (`Gemfile`: asterism 0.7.1,
-riichi_engine 0.1.0): the host runs what anyone can install.
+asterism comes from rubygems at a fixed version (0.7.1); riichi_engine from
+the `fmrb` branch of a clone at `../riichi_engine` (see "riichi_engine"
+below).
 
 ## Settings
 
@@ -62,7 +66,7 @@ A mahjong table takes (the environment applies to every table):
 | `call_seconds` | `MAHJONG_CALL_SECONDS` | 8 | a player's time to call a discard; after it the call is passed |
 | `result_seconds` | `MAHJONG_RESULT_SECONDS` | 8 | a round's result stays this long (or until a player presses next) |
 | `cpu_ms` | `MAHJONG_CPU_MS` | 700 | a CPU's pause before it acts |
-| `cpu_level` | `MAHJONG_CPU_LEVEL` | `normal` | `easy` / `normal` / `hard`, or `engine` for riichi_engine's own discards (see below) |
+| `cpu_level` | `MAHJONG_CPU_LEVEL` | `normal` | `easy` / `normal` / `hard` (riichi_engine's CPU levels) |
 | `humans` | | 1 | seats players can take (Step 1: one) |
 
 ## The mahjong table
@@ -141,56 +145,55 @@ view under 3800 B.
   time left; a host stopped with SIGTERM saves the time left at that moment,
   a host killed gives the player the time left at the last change.
 
-## riichi_engine 0.1.0
+## riichi_engine
 
 The engine runs the rounds (wall, deal, draws, discards, calls, riichi, wins,
-yaku, points) and the CPUs. Around it, this host corrects what goes wrong
-for it in 0.1.0 (each is marked `engine 0.1.0:` in `engine.rb`; the tests
-that check the engine's own behaviour say "if this fails, the engine was
-fixed"):
+yaku, points) and the CPUs. The host uses a fork of 0.1.0 with its errors
+fixed: the `fmrb` branch of a clone of
+[riichi_engine](https://github.com/HenrikStephensen/riichi_engine) next to
+this repository (`../riichi_engine`; `Gemfile` takes it as a local git
+source, so the lockfile pins a revision). Each fix is a branch of its own
+(`fix/*`), written to be sent upstream; `fmrb` merges them (version
+`0.1.1.fmrb1`, not published). The host has no corrections of its own around
+the engine any more.
 
-1. `evaluate_win` counts the dora on the indicators instead of the tiles
-   they point to (and the uradora likewise). The host evaluates with the
-   dora tiles.
-2. A ron on the last discard never has houtei: the phase is already
-   `round_end` when the win is evaluated. The host evaluates with the phase
-   of the win.
-3. A seat in riichi gets no discard from `available_round_actions` (only a
-   tsumo win when it has one), so its turn cannot go on. The host offers the
-   drawn tile.
-4. The ippatsu chance of a riichi is never cleared by the player's own next
-   discard. The host clears it.
-5. `Hand#remove` takes the first tile of the same kind: discarding a 5m from
-   a hand with the red 0m and a 5m may take the red one (the red five leaves
-   the game), and a chi or a pon may move the wrong one. The host puts the
-   exact tiles first.
-6. A closed or open kan records four copies of the tile named, so a red five
-   in it disappears. The host records the tiles that left the hand.
-7. The priority check for a call looks at the seat's own other options, so a
-   seat that could ron cannot pon instead. The host leaves only the chosen
-   action pending.
-8. `resolve_pending_action` breaks ties by seat number, not by turn order
-   from the discarder (double ron, the "head bump"). The host decides by
-   turn order. Double ron itself is not supported (the rule's `double_ron`
-   has no effect); the first in turn order wins.
-9. `Wall.build` reads the seed with `String#to_i(36)`, which stops at the
-   first character outside `0-9a-z`: `"round-001"` and `"round-002"` (the
-   README's own example) give the same wall. The host's seeds are 24
-   characters of `0-9a-z`.
-10. The CPU's discard (normal and hard) sorts the candidates by acceptance
-    ascending and takes the first, so it keeps the hand that accepts the
-    fewest tiles; in a CPU-only hanchan 8 rounds of 9 ended in a draw. The
-    host's CPU (`cpu_level` normal / hard) keeps the most acceptance;
-    `engine` uses the engine's choice as it is.
+What 0.1.0 got wrong, and what this host did about it before the fork:
 
-Also seen, not corrected: the README's game type `"tonpuu"` is
-`"tonpuusen"` in the code (with `"tonpuu"` the game never ends); a kan does
-not shorten the live wall; tobi ends the game below 0 points, not at 0;
-`RiichiEngine.loader.eager_load` fails (`riichi_engine/api.rb` defines `API`,
-`version.rb` defines `VERSION`, which Zeitwerk expects as `Api` / `Version`);
-`tsumo_agari` and `ron_agari` leave the points to the host (the engine's
-API says so). A CPU decision takes about 50 ms of CRuby time (the
-acceptance count runs the shanten calculation for every tile).
+| | In 0.1.0 | Fork branch | The host's correction (removed) |
+|---|---|---|---|
+| 1 | `evaluate_win` counts dora (and uradora) on the indicators | `fix/dora-indicators` | evaluated with the dora tiles |
+| 2 | no houtei: the phase is already `round_end` (and a houtei-only hand is not offered the ron) | `fix/houtei` | evaluated in the phase of the win |
+| 3 | a seat in riichi gets no discard, its turn cannot go on | `fix/riichi-discard` | offered the drawn tile |
+| 4 | ippatsu is not cleared by the player's own next discard | `fix/ippatsu` | cleared it |
+| 5 | a red five is swapped or lost in a discard, chi, pon or kan | `fix/red-five` | put the exact tiles first, recorded the kan's tiles |
+| 6 | a seat that could ron cannot pon instead | `fix/call-own-options` | left only the chosen action pending |
+| 7 | ties between rons by seat number (no head bump) | `fix/ron-turn-order` | decided by turn order; now `resolve_pending_action(..., from_seat:)` |
+| 8 | seeds are read up to the first non-base-36 character | `fix/wall-seed` | used only base-36 seeds |
+| 9 | the normal/hard CPU keeps the shape with the least acceptance | `fix/cpu-discard-ukeire` | its own CPU (`Engine::CpuAi`); now the engine's |
+| 10 | `game_type` `"tonpuu"` (the documented name) never ends | `fix/tonpuu-game-type` | (not used) |
+| 11 | `RiichiEngine.loader.eager_load` fails | `fix/zeitwerk-eager-load` | (not used) |
+| 12 | no tanyao with a red five | `fix/tanyao-red-five` | none (found by the comparison below) |
+| 13 | a triplet completed by ron on a shanpon wait has the concealed fu | `fix/shanpon-ron-fu` | none (comparison) |
+| 14 | only the first wait of the winning tile is scored (pinfu, higher fu missed) | `fix/machi-interpretation` | none (comparison) |
+| 15 | four identical sequences are iipeiko, not ryanpeiko | `fix/ryanpeiko-four-sequences` | none (comparison) |
+
+The fork compares its win evaluation with the Python package `mahjong`
+(PyPI) on 30 000 random winning hands and one or more hands per yaku
+(`spec/compat/`): the yaku, han, fu and payments agree except where a rule
+differs (two yakuman in one hand score as one yakuman in riichi_engine, as
+two in the Python package).
+
+Exhaustive draws in CPU-only hanchan: with 0.1.0, 341 of 452 rounds (75 %)
+with the engine's own CPU, 127 of 496 (26 %) with the host's corrected CPU;
+with the fork's own CPU, 85 of 488 (17 %) at normal and 97 of 496 (20 %) at
+hard over 40 hanchan each, and 72 of 282 (26 %) in the 20 normal hanchan of
+one `rake test`.
+
+Still as in 0.1.0: a kan does not shorten the live wall; tobi ends the game
+below 0 points, not at 0; several yakuman in one hand score as one;
+`tsumo_agari` and `ron_agari` leave the points to the host (the engine's API
+says so). A CPU decision takes about 50 ms of CRuby time (the acceptance count
+runs the shanten calculation for every tile).
 
 ## Tests
 
@@ -207,7 +210,8 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
 - `test_mahjong_rules.rb`: seats and tokens, refusals (no token, a wrong
   token, an action not offered, a stale state), the timeout, saving and
   reading back mid-round (the same view, the same play after), the deadline
-  across a restart, and the corrections above.
+  across a restart, and the engine fixes the host relies on (dora, houtei,
+  red fives, a riichi seat's discard, pon over ron, head bump, seeds).
 - `test_network.rb`: the same refusals through a router, with the host in a
   child process (skipped without `ASTERISM_TEST_ROUTER`).
 

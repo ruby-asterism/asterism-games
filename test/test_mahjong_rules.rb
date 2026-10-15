@@ -2,8 +2,8 @@
 
 require_relative "test_helper"
 
-# Seats, tokens, refusals, the timeout, saving and the corrections made
-# around riichi_engine 0.1.0.
+# Seats, tokens, refusals, the timeout, saving, and the engine behaviour
+# the host relies on (the fixes of the riichi_engine fork).
 class TestMahjongRules < Minitest::Test
   include MahjongTestHelper
 
@@ -125,7 +125,7 @@ class TestMahjongRules < Minitest::Test
     end
   end
 
-  # ------------------------------------------------------------ engine 0.1.0
+  # ------------------------------------------------------------ the engine
 
   def round_state
     E.setup({ "bakaze" => "ton", "kyoku" => 1, "honba" => 0, "kyoutaku" => 0, "oya" => 0,
@@ -166,18 +166,45 @@ class TestMahjongRules < Minitest::Test
     s.dora_hyouji = w.dora_hyouji.dup
     winner, = E.evaluate(s, 0, false, s.last_tsumo, E.rule)
     assert_includes winner[:yaku].map { |y| y[:display] }, "ドラ 1", "1m points to 2m, one in the hand"
-    assert_equal "1m", s.dora_hyouji[0].to_s, "the state is left as it was"
-    plain, = E::API.evaluate_win(state: s, seat: 0, agari_type: :tsumo, agari_tile: s.last_tsumo, rule: E.rule,
-                                 extra_flags: {}, snapshot: Mahjong::Snapshots::WinEvaluationSnapshot.new(
-                                   bakaze: "ton", oya_index: 0, honba: 0, kyoutaku: 0, jikaze: "ton"))
-    refute_includes plain[:yaku].map { |y| y[:display] }, "ドラ 1", "the engine alone counts the indicator (if this fails, the engine was fixed)"
   end
 
-  def test_seed_is_only_base36
-    10.times { assert_match(/\A[0-9a-z]{24}\z/, E.new_seed) }
+  def test_seeds_give_different_walls
+    10.times { assert_match(/\A[0-9A-Za-z]{24}\z/, E.new_seed) }
     a = Mahjong::Tiles::Wall.build(seed: "round-001").to_a
     b = Mahjong::Tiles::Wall.build(seed: "round-002").to_a
-    assert_equal a, b, "the engine reads only the part before '-' (if this fails, the engine was fixed)"
+    refute_equal a, b, "the whole seed counts, not only the part before '-'"
+  end
+
+  def test_houtei_on_the_last_discard
+    s = round_state
+    4.times { |i| give(s, i, []) }
+    give(s, 0, %w[3s])
+    give(s, 1, %w[1m 2m 3m 4p 5p 6p 7s 8s 9s 9m 9m 2s 4s])
+    4.times { |i| s.first_turn_flags[i] = false }
+    s.wall = Mahjong::Tiles::Wall.new([])
+    s.phase = :dahai
+    s.last_tsumo = Mahjong::Tiles::Tile.new("3s")
+    E.apply(s, { type: :dahai, seat: 0, tile: "3s" }, E.rule)
+    assert_includes E.offers(s, 1, E.rule).map(&:first), E::RON, "houtei is the only yaku"
+    r = E.apply(s, { type: :ron_agari, seat: 1 }, E.rule)
+    res = E.score(s, r.round_end_info, E.rule)
+    assert_includes res["yaku"], "河底撈魚"
+  end
+
+  def test_a_seat_that_could_ron_may_pon
+    s = round_state
+    4.times { |i| give(s, i, []) }
+    give(s, 0, %w[5p])
+    give(s, 1, %w[2m 3m 4m 6s 7s 8s 3p 4p 5p 5p 5p 8m 8m])
+    4.times { |i| s.first_turn_flags[i] = false }
+    s.phase = :dahai
+    s.last_tsumo = Mahjong::Tiles::Tile.new("5p")
+    E.apply(s, { type: :dahai, seat: 0, tile: "5p" }, E.rule)
+    o = E.offers(s, 1, E.rule).map(&:first)
+    assert_includes o, E::RON
+    pon = E.offers(s, 1, E.rule).find { |t, _| t == E::PON }
+    E.apply(s, E.match([pon], E::PON, pon[1]).merge(seat: 1), E.rule)
+    assert_equal :pon, s.fuuros[1].last.type
   end
 
   def test_call_winner_goes_by_turn_order

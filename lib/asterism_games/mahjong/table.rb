@@ -511,9 +511,8 @@ module AsterismGames
       def ai_for(level)
         case level.to_s
         when "easy" then ::Mahjong::Cpu::Ai::EasyAi.new
-        when "engine" then ::Mahjong::Cpu::Ai::NormalAi.new # the engine's own, as it is
-        when "hard" then Engine::CpuAi.new(3)
-        else Engine::CpuAi.new(2)
+        when "hard" then ::Mahjong::Cpu::Ai::HardAi.new
+        else ::Mahjong::Cpu::Ai::NormalAi.new
         end
       end
 

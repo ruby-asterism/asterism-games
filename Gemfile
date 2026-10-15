@@ -2,9 +2,11 @@
 
 source "https://rubygems.org"
 
-# The released gems, pinned: the host runs what anyone can install.
+# asterism: the released gem, pinned. riichi_engine: the fork with the
+# fixes (branch fmrb of the clone next to this repository; README
+# "riichi_engine").
 gem "asterism", "0.7.1"
-gem "riichi_engine", "0.1.0"
+gem "riichi_engine", git: "../riichi_engine", branch: "fmrb"
 gem "msgpack", "~> 1.7"
 
 group :test do
