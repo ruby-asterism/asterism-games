@@ -253,6 +253,7 @@ class TestMahjongRules < Minitest::Test
     now = run_until(t, 0) { t.state.phase == :dahai && t.state.current_seat == seat }
     drawn = t.state.last_tsumo.to_s
     kawa = t.state.kawas[seat].count
+    timeouts = t.stats["timeouts"] # a call passed for the seat before its turn counts too
     t.tick(now + 990)
     assert_equal kawa, t.state.kawas[seat].count, "not before the time"
     v = t.public_view(now + 990)
@@ -261,7 +262,7 @@ class TestMahjongRules < Minitest::Test
     t.tick(now + 1001)
     assert_equal kawa + 1, t.state.kawas[seat].count
     assert_equal drawn, t.state.kawas[seat].tiles.last.tile.to_s
-    assert_equal 1, t.stats["timeouts"]
+    assert_equal timeouts + 1, t.stats["timeouts"]
   end
 
   def test_saved_and_read_back_mid_round

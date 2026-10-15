@@ -191,12 +191,14 @@ class TestMahjongGames < Minitest::Test
     win = { "agari" => "1z",
             "yaku" => %w[立直 一発 門前清自摸和 平和 断幺九 一盃口 三色同順 一気通貫 混全帯幺九 ドラ 裏ドラ 赤ドラ 海底摸月 嶺上開花].map { |y| "#{y} 13" },
             "yaku_han" => [13] * 14, # the han of each (README "Views": yh)
-            "points" => "数え役満 48000点オール", "hand" => %w[1m 1m 1m 2m 3m 4m 5m 6m 7m 8m 9m 9m 9m] }
+            "points" => "数え役満 48000点オール", "hand" => %w[1m 1m 1m 2m 3m 4m 5m 6m 7m 8m 9m 9m 9m],
+            "pao" => [[0, "大三元"], [0, "大四喜"]] } # pao (README "Views": pa), more than a hand has
     res = { "kind" => "ron_agari", "delta" => [-99_000, 33_000, 33_000, 33_000], "round" => [1, 4, 9], "from" => 0,
             "wins" => [1, 2, 3].map { |w| win.merge("winner" => w) } }
     t.instance_variable_set(:@result, res)
     t.instance_variable_set(:@status, "result")
     t.instance_variable_set(:@final, [[0, 1, 99_999, 999], [1, 2, 99_999, 999], [2, 3, 99_999, 999], [3, 4, 99_999, 999]])
+    t.instance_variable_set(:@final_reason, "all_last_oya_tenpai")
     v = t.view(seat, 0)
     bytes = reply_bytes(v)
     puts "\n  worst case view: #{bytes} B"

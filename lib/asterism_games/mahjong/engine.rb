@@ -51,9 +51,22 @@ module AsterismGames
         "double_ron" => true,
         "triple_ron_draw" => false,
         "multiple_yakuman" => true,
+        "double_yakuman" => true,
         "tobi" => true,
         "nishi_iri" => true,
-        "nishi_iri_threshold" => 30_000
+        "nishi_iri_threshold" => 30_000,
+        # Abortive draws besides nine kinds (four winds, four kans, four
+        # riichi), nagashi mangan, pao (liability), when the kan dora of an
+        # open or added kan shows (after the discard), agari-yame and
+        # tenpai-yame for the last dealer in the lead.
+        "suufon_renda" => true,
+        "suukaikan" => true,
+        "suucha_riichi" => true,
+        "nagashi_mangan" => true,
+        "pao" => %w[daisangen daisuushii],
+        "minkan_dora_after_discard" => true,
+        "agari_yame" => true,
+        "tenpai_yame" => false
       }.freeze
 
       def rule(overrides = {})
@@ -145,125 +158,13 @@ module AsterismGames
       end
 
       # The shanten of a concealed hand (34 counts) next to melds melds
-      # (0: tenpai). Seven pairs and kokushi (closed hands only) are
-      # riichi_engine's own counts (the CPU's Cpu::Analysis::Shanten). The
-      # regular form is counted here: riichi_engine's search takes the hand
-      # as all there is (four sets to make, wrong once there are melds) and
-      # takes tens of ms a turn for the acceptance (34 counts per discard).
-      # This one counts each suit apart, once per suit pattern, and gives the
-      # engine's number for a closed hand (the tests compare them).
+      # (0: tenpai): riichi_engine's own count (Cpu::Analysis::Shanten, the
+      # fork's fix/shanten-melds), which takes the melds as sets already
+      # made, counts seven pairs and kokushi for a closed hand only, and
+      # works out each suit once per pattern (the tests compare it with the
+      # wait judge).
       def shanten(t34, melds)
-        r = regular_shanten(t34, melds)
-        return r unless melds.zero?
-        sh = ::Mahjong::Cpu::Analysis::Shanten
-        c = sh.chiitoitsu_shanten(t34)
-        k = sh.kokushi_shanten(t34)
-        [r, c, k].min
-      end
-
-      # 8 - 2 x sets - partial sets - pair, with at most four sets and
-      # partial sets together (the melds are sets already made).
-      def regular_shanten(t34, melds)
-        opts = [suit_options(t34, 0), suit_options(t34, 9), suit_options(t34, 18), honor_options(t34)]
-        cap = 4 - melds
-        best = 8
-        combine = lambda do |k, m, ta, pr|
-          if k == 4
-            ta = cap - m if ta > cap - m
-            v = 8 - 2 * (m + melds) - ta - pr
-            best = v if v < best
-            return
-          end
-          opts[k].each do |om, ot, op|
-            next if pr + op > 1 || m + om > cap
-            combine.call(k + 1, m + om, ta + ot, pr + op)
-          end
-        end
-        combine.call(0, 0, 0, 0)
-        best
-      end
-
-      SUIT_MEMO = {}
-      SUIT_MEMO_MAX = 50_000 # patterns kept (a few MB); then it starts again
-
-      # A suit's ways to split into sets, partial sets and a pair, as
-      # [[sets, partial sets, pair], ...] (only those no other way beats).
-      def suit_options(t34, base)
-        c = t34[base, 9]
-        SUIT_MEMO.clear if SUIT_MEMO.size >= SUIT_MEMO_MAX
-        SUIT_MEMO[c] ||= begin
-          found = {}
-          suit_search(c.dup, 0, 0, 0, 0, found)
-          pareto(found.keys)
-        end
-      end
-
-      def suit_search(c, i, m, ta, pr, found)
-        i += 1 while i < 9 && c[i].zero?
-        if i >= 9
-          found[[m, ta, pr]] = true
-          return
-        end
-        if c[i] >= 3
-          c[i] -= 3
-          suit_search(c, i, m + 1, ta, pr, found)
-          c[i] += 3
-        end
-        if i <= 6 && c[i + 1].positive? && c[i + 2].positive?
-          c[i] -= 1
-          c[i + 1] -= 1
-          c[i + 2] -= 1
-          suit_search(c, i, m + 1, ta, pr, found)
-          c[i] += 1
-          c[i + 1] += 1
-          c[i + 2] += 1
-        end
-        if c[i] >= 2
-          c[i] -= 2
-          suit_search(c, i, m, ta, 1, found) if pr.zero?
-          suit_search(c, i, m, ta + 1, pr, found)
-          c[i] += 2
-        end
-        if i <= 7 && c[i + 1].positive?
-          c[i] -= 1
-          c[i + 1] -= 1
-          suit_search(c, i, m, ta + 1, pr, found)
-          c[i] += 1
-          c[i + 1] += 1
-        end
-        if i <= 6 && c[i + 2].positive?
-          c[i] -= 1
-          c[i + 2] -= 1
-          suit_search(c, i, m, ta + 1, pr, found)
-          c[i] += 1
-          c[i + 2] += 1
-        end
-        c[i] -= 1
-        suit_search(c, i, m, ta, pr, found)
-        c[i] += 1
-      end
-
-      # Honours make sets and pairs of one kind only.
-      def honor_options(t34)
-        m = 0
-        pairs = 0
-        (27...34).each do |i|
-          n = t34[i]
-          m += 1 if n >= 3
-          pairs += 1 if n == 2
-        end
-        out = [[m, pairs, 0]]
-        out << [m, pairs - 1, 1] if pairs.positive?
-        # a triplet kept as a pair (for the head)
-        out << [m - 1, pairs + 1, 0] << [m - 1, pairs, 1] if m.positive?
-        out
-      end
-
-      # Drops the ways another way beats (no fewer of each, same pair).
-      def pareto(list)
-        list.reject do |a|
-          list.any? { |b| b != a && b[2] == a[2] && b[0] >= a[0] && b[1] >= a[1] }
-        end
+        ::Mahjong::Cpu::Analysis::Shanten.calculate(t34, melds: melds)
       end
 
       # For each discard, the shanten after it and the tiles that would bring
@@ -372,17 +273,32 @@ module AsterismGames
             winner, sr = evaluate(state, w, ron, tile, rule, honba: honba, kyoutaku: sticks)
             ch = sr.score_changes(winner_seat: w, loser_seat: info[:loser_seat], oya_seat: state.oya_seat)
             4.times { |s| delta[s] += ch[s].to_i }
-            { "winner" => w, "agari" => tile.to_s, "yaku" => winner[:yaku].map { |y| y[:display].to_s },
-              "yaku_han" => winner[:yaku].map { |y| y[:han].to_i },
-              "han" => winner[:han], "fu" => winner[:fu], "points" => sr.display.to_s,
-              "hand" => winner[:hand_tiles].map(&:to_s) }
+            win = { "winner" => w, "agari" => tile.to_s, "yaku" => winner[:yaku].map { |y| y[:display].to_s },
+                    "yaku_han" => winner[:yaku].map { |y| y[:han].to_i },
+                    "han" => winner[:han], "fu" => winner[:fu], "points" => sr.display.to_s,
+                    "hand" => winner[:hand_tiles].map(&:to_s) }
+            # Pao: who pays for which yakuman ([[seat, the yaku's name], ...]).
+            unless Array(winner[:pao]).empty?
+              names = winner[:yaku].to_h { |y| [y[:name].to_s, y[:display].to_s] }
+              win["pao"] = winner[:pao].map { |p| [p[:seat], names[p[:yaku].to_s] || p[:yaku].to_s] }
+            end
+            win
           end
           state.kyoutaku = 0
         when :ryuukyoku
+          # Nagashi mangan (the rule's, a seat whose river is all terminals
+          # and honours, none called) is paid in place of the no-ten payments;
+          # tenpai still decides whether the dealer keeps the seat.
           tp = API.tenpai_seats(state)
-          pay = API.calculate_tenpai_payments(tp)
+          ng = Array(info[:nagashi_seats])
+          pay = if ng.empty?
+                  API.calculate_tenpai_payments(tp)
+                else
+                  API.calculate_nagashi_mangan_payments(ng, oya_seat: state.oya_seat)
+                end
           4.times { |s| delta[s] = pay[s].to_i }
           res["tenpai"] = tp
+          res["nagashi"] = ng unless ng.empty?
         when :sanchahou
           res["ron_seats"] = Array(info[:ron_seats])
         else

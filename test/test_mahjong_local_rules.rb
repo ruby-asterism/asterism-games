@@ -13,6 +13,10 @@ class TestMahjongLocalRules < Minitest::Test
   KUITAN = 1
   AKA = 2
   TURN = 10
+  ABORTIVE = 11
+  NAGASHI = 12
+  DOUBLE_YAKUMAN = 13
+  TENPAI_YAME = 14
   AI = ::Mahjong::Cpu::Ai::NormalAi.new
 
   # A lobby with n members seated (the first is the owner): [table, tokens].
@@ -43,7 +47,10 @@ class TestMahjongLocalRules < Minitest::Test
     assert_equal [0, 1, 3, 1, 0, 1, 1, 0, 1, 1, 1], t.public_view(0)["ru"],
                  "hanchan, kuitan, three red fives, double ron, no sanchahou, multiple yakuman, kazoe, " \
                  "no kiriage, tobi, west round, the setting's time (1 s in the test table)"
-    assert_equal T::RULE_ITEMS.size, t.public_view(0)["ru"].size
+    assert_equal [1, 1, 1, 0], t.public_view(0)["rx"],
+                 "the abortive draws, nagashi mangan, double yakuman, no tenpai-yame"
+    assert_equal T::RULE_ITEMS.size, t.public_view(0)["ru"].size + t.public_view(0)["rx"].size
+    assert_equal 11, t.public_view(0)["ru"].size, "the items a table app of MJ3b knows"
     assert_equal [1, 10, 20, 30, 60], t.rule_choices(TURN), "the setting's own time is one of the choices"
     assert_equal [0, 3, 4], t.rule_choices(AKA)
   end
@@ -83,6 +90,39 @@ class TestMahjongLocalRules < Minitest::Test
       assert_equal "ok", t.set_rule(toks[0], item, was ? 0 : 1)
       assert_equal !was, t.rule.public_send(m), "item #{item}"
     end
+  end
+
+  def test_the_new_items_reach_the_engine
+    t, toks = lobby
+    abortive = %i[suufon_renda? suukaikan? suucha_riichi?]
+    assert(abortive.all? { |m| t.rule.public_send(m) })
+    assert_equal "ok", t.set_rule(toks[0], ABORTIVE, 0)
+    assert(abortive.none? { |m| t.rule.public_send(m) }, "one item, the three keys")
+    assert_equal 0, t.public_view(0)["rx"][0]
+    assert_equal "ok", t.set_rule(toks[0], ABORTIVE, 1)
+    assert(abortive.all? { |m| t.rule.public_send(m) })
+    assert_empty t.instance_variable_get(:@choice), "back to the host's values"
+    { NAGASHI => :nagashi_mangan?, DOUBLE_YAKUMAN => :double_yakuman?, TENPAI_YAME => :tenpai_yame? }.each do |item, m|
+      was = t.rule.public_send(m)
+      assert_equal "ok", t.set_rule(toks[0], item, was ? 0 : 1)
+      assert_equal !was, t.rule.public_send(m), "item #{item}"
+    end
+    assert_equal [1, 0, 0, 1], t.public_view(0)["rx"]
+    assert_equal "value", t.set_rule(toks[0], NAGASHI, 2)
+  end
+
+  # A table whose setting has only some of the abortive draws shows the
+  # item as off; choosing it sets all three, choosing off again goes back
+  # to the setting's.
+  def test_the_abortive_draws_item_over_a_mixed_setting
+    t, toks = lobby(1, "rule" => { "suukaikan" => false })
+    assert_equal 0, t.public_view(0)["rx"][0]
+    assert_equal "ok", t.set_rule(toks[0], ABORTIVE, 1)
+    assert t.rule.suukaikan?
+    assert_equal "ok", t.set_rule(toks[0], ABORTIVE, 0)
+    refute t.rule.suukaikan?
+    assert t.rule.suufon_renda?
+    assert_empty t.instance_variable_get(:@choice)
   end
 
   def test_the_time_to_discard_is_the_chosen_one
@@ -230,7 +270,7 @@ class TestMahjongLocalRules < Minitest::Test
       t.tick(now)
       flunk "too many steps" if checks > 400_000
     end
-    assert_operator checks, :>, 100
+    assert_operator checks, :>, 20 # a tonpuu game may end in four short rounds
   end
 
   def test_spectators_see_the_game_as_it_was_the_delay_ago

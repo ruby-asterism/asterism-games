@@ -48,9 +48,11 @@ module AsterismGames
       }.freeze
 
       # The local rules the owner chooses in the lobby (README "Local
-      # rules"): the view's "ru" has one value per item, in this order, and
-      # rule(token, item, value) changes one. Items 0-9 are riichi_engine rule
-      # keys, 10 is the host's own time to discard.
+      # rules"): one value per item, in this order, and rule(token, item,
+      # value) changes one. Items 0-9 and 11-14 are riichi_engine rule keys
+      # (11 sets three keys together), 10 is the host's own time to discard.
+      # The view's "ru" has items 0-10 and "rx" the rest: a table app that
+      # knows 11 items reads "ru" as before and does not see the others.
       RULE_ITEMS = [
         ["game", "game_type"],          # 0 hanchan, 1 tonpuu
         ["kuitan", "kuitan"],           # 0 / 1
@@ -62,15 +64,20 @@ module AsterismGames
         ["kiriage", "kiriage_mangan"],
         ["tobi", "tobi"],
         ["nishi_iri", "nishi_iri"],     # the hanchan's west round (a tonpuu game has no south round)
-        ["turn", nil]                   # seconds to discard
+        ["turn", nil],                  # seconds to discard
+        ["abortive", %w[suufon_renda suukaikan suucha_riichi]], # the abortive draws besides nine kinds
+        ["nagashi", "nagashi_mangan"],
+        ["double_yakuman", "double_yakuman"],
+        ["tenpai_yame", "tenpai_yame"]
       ].freeze
+      RULE_RU = 11 # the items in "ru" (the rest go in "rx")
       RULE_GAMES = %w[hanchan tonpuu].freeze
       RULE_AKA = { 0 => { "m" => 0, "p" => 0, "s" => 0 }, 3 => { "m" => 1, "p" => 1, "s" => 1 },
                    4 => { "m" => 1, "p" => 2, "s" => 1 } }.freeze
       RULE_TURNS = [10, 20, 30, 60].freeze
       # The public view's keys that belong to the game (a spectator's delayed
       # view takes them from the past, the rest is now).
-      GAME_KEYS = %w[st sv r sc ri dora kw fu hc ls ev dl res fin].freeze
+      GAME_KEYS = %w[st sv r sc ri dora kw fu hc ls ev dl res fin fr].freeze
 
       attr_reader :name, :ver, :sv, :status, :state, :opts, :stats, :rule
 
@@ -235,19 +242,24 @@ module AsterismGames
         if name == "turn"
           @turn_choice = value * 1000 == @opts["turn_ms"].to_i ? nil : value * 1000
         else
-          v = case name
-              when "game" then RULE_GAMES[value]
-              when "aka" then value == aka_total(base["aka_dora"]) ? base["aka_dora"] : RULE_AKA[value]
-              else value == 1
-              end
-          if v == base[key] then @choice.delete(key) else @choice[key] = v end
+          own = rule_values_of(base, @opts["turn_ms"].to_i)[item]
+          Array(key).each do |k|
+            v = case name
+                when "game" then RULE_GAMES[value]
+                when "aka" then value == aka_total(base["aka_dora"]) ? base["aka_dora"] : RULE_AKA[value]
+                else value == 1
+                end
+            # Back to the host's value: no choice is kept (for the three
+            # abortive draws, all three as the host has them).
+            if value == own || v == base[k] then @choice.delete(k) else @choice[k] = v end
+          end
         end
         @rule = effective_rule
         changed
         "ok"
       end
 
-      # The rule values in RULE_ITEMS order (the view's "ru").
+      # The rule values in RULE_ITEMS order (the view's "ru" and "rx").
       def rule_values
         rule_values_of(@rule.to_h, turn_ms)
       end
@@ -270,6 +282,7 @@ module AsterismGames
           when "game" then r["game_type"].to_s.start_with?("tonpuu") ? 1 : 0
           when "aka" then aka_total(r["aka_dora"])
           when "turn" then turn / 1000
+          when "abortive" then key.all? { |k| r[k] } ? 1 : 0
           else r[key] ? 1 : 0
           end
         end
@@ -652,7 +665,7 @@ module AsterismGames
         @game["kyoutaku"] = @state.kyoutaku
         flow = Engine.next_round(@game, @state, res, @rule)
         @flow = { "end" => flow.game_end?, "bakaze" => flow.next_bakaze, "kyoku" => flow.next_kyoku,
-                  "honba" => flow.next_honba, "oya" => flow.next_oya_index }
+                  "honba" => flow.next_honba, "oya" => flow.next_oya_index, "reason" => flow.reason.to_s }
         @result = res
         @status = "result"
         @next_at = now + @opts["result_ms"]
@@ -688,6 +701,13 @@ module AsterismGames
         # west 4 as on Mahjong Soul.
         west_over = @game["bakaze"] == "sha" && f["bakaze"] == "sha" && f["kyoku"].to_i < @game["kyoku"].to_i
         if f["end"] || west_over || @game["rounds"] >= MAX_ROUNDS
+          # Why the game ended (the view's "fr"): the engine's reason (tobi,
+          # normal_end, all_last_oya_agari, all_last_oya_tenpai), "west"
+          # after west 4, "rounds" at MAX_ROUNDS.
+          @final_reason = if f["end"] then f["reason"]
+                          elsif west_over then "west"
+                          else "rounds"
+                          end
           scores = (0..3).to_h { |s| [s, @game["scores"][s]] }
           @final = Engine::API.calculate_ranked_results(scores: scores, rule: @rule).map do |r|
             [r.seat, r.rank, r.score, (r.point * 10).round]
@@ -695,7 +715,7 @@ module AsterismGames
           @status = "over"
           @next_at = now + @opts["over_ms"]
           @stats["games"] += 1
-          @log&.call("mahjong: #{@name}: game over: #{@final.inspect}")
+          @log&.call("mahjong: #{@name}: game over (#{@final_reason}): #{@final.inspect}")
         else
           @game.merge!("bakaze" => f["bakaze"], "kyoku" => f["kyoku"], "honba" => f["honba"], "oya" => f["oya"])
           new_round
@@ -712,6 +732,7 @@ module AsterismGames
         @result = nil
         @flow = nil
         @final = nil
+        @final_reason = nil
         @event = nil
         @deadline = nil
         @deadline_bits = 0
@@ -725,6 +746,7 @@ module AsterismGames
         @game = { "bakaze" => "ton", "kyoku" => 1, "honba" => 0, "kyoutaku" => 0, "oya" => 0,
                   "scores" => [@rule.initial_score] * 4, "rounds" => 0 }
         @final = nil
+        @final_reason = nil
         new_round
         changed
       end
@@ -753,7 +775,10 @@ module AsterismGames
               "sk" => @seats.map { |s| s.nil? ? 0 : (s["kind"] == "human" ? 1 : 2) },
               "aw" => bits { |i| away?(i) },
               "ow" => (@owner && seat_index(@owner)) || -1,
-              "mb" => member_list, "ru" => rule_values }
+              "mb" => member_list }
+        ru = rule_values
+        v["ru"] = ru[0, RULE_RU]
+        v["rx"] = ru[RULE_RU..]
         if @game
           v["sc"] = @game["scores"].dup
           v["r"] = [Engine::BAKAZE.index(@game["bakaze"]), @game["kyoku"], @game["honba"], @game["kyoutaku"], @game["oya"]]
@@ -774,6 +799,7 @@ module AsterismGames
         end
         v["res"] = result_view if @result && (@status == "result" || @status == "over")
         v["fin"] = @final if @final
+        v["fr"] = @final_reason if @final && @final_reason
         v
       end
 
@@ -950,10 +976,13 @@ module AsterismGames
                   "h" => Tiles.pack(Tiles.sort(w["hand"])).b, "ag" => Tiles.code(w["agari"]) }
             # The han of each yaku (-1: a yakuman), in the order of "y".
             x["yh"] = w["yaku_han"] if w["yaku_han"]
+            # Pao: [[the seat that pays, the yakuman], ...].
+            x["pa"] = w["pao"] if w["pao"]
             x
           end
         end
         v["tp"] = r["tenpai"] if r["tenpai"]
+        v["ng"] = r["nagashi"] if r["nagashi"]
         v["rs"] = r["ron_seats"] if r["ron_seats"]
         v
       end
@@ -985,7 +1014,7 @@ module AsterismGames
           "deadline_left" => @deadline && [@deadline - now, 0].max, "deadline_bits" => @deadline_bits,
           "wait_spent" => @deadline && @wait_from && [now - @wait_from, 0].max,
           "cpu_left" => @cpu_at && [@cpu_at - now, 0].max, "next_left" => @next_at && [@next_at - now, 0].max,
-          "result" => @result, "flow" => @flow, "final" => @final, "event" => @event,
+          "result" => @result, "flow" => @flow, "final" => @final, "final_reason" => @final_reason, "event" => @event,
           "rules" => { "choice" => @choice, "turn_ms" => @turn_choice } }
       end
 
@@ -1013,6 +1042,7 @@ module AsterismGames
         @result = d["result"]
         @flow = d["flow"]
         @final = d["final"]
+        @final_reason = d["final_reason"]
         @event = d["event"]
         rules = d["rules"].is_a?(Hash) ? d["rules"] : {}
         @choice = rules["choice"].is_a?(Hash) ? rules["choice"] : {}
@@ -1062,6 +1092,7 @@ module AsterismGames
         @result = nil
         @flow = nil
         @final = nil
+        @final_reason = nil
         @event = nil
         @dirty = true
         return unless @opts["humans"].to_i.zero?
