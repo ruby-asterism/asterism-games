@@ -1,0 +1,36 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    asterism (0.7.1)
+      asterism-zenoh (~> 0.4, >= 0.4.1)
+      msgpack (~> 1.7)
+    asterism-zenoh (0.4.1)
+    minitest (5.27.0)
+    msgpack (1.8.5)
+    rake (13.4.2)
+    riichi_engine (0.1.0)
+      zeitwerk
+    zeitwerk (2.8.3)
+
+PLATFORMS
+  ruby
+  x86_64-linux
+
+DEPENDENCIES
+  asterism (= 0.7.1)
+  minitest (~> 5.0)
+  msgpack (~> 1.7)
+  rake (~> 13.0)
+  riichi_engine (= 0.1.0)
+
+CHECKSUMS
+  asterism (0.7.1) sha256=e9ce706899463f50685e5711a80428fefd32c4c8495e865fb4a899776cebb415
+  asterism-zenoh (0.4.1) sha256=8dd399f6f1c1d9b20f983163782b2791f8151e5c41d93b9daae1a636cced15b1
+  minitest (5.27.0) sha256=2d3b17f8a36fe7801c1adcffdbc38233b938eb0b4966e97a6739055a45fa77d5
+  msgpack (1.8.5) sha256=97419eaa7b35dfe3e462c0e6c1a3dfdcbfc8756605c09e46e4c6daef127517ba
+  rake (13.4.2) sha256=cb825b2bd5f1f8e91ca37bddb4b9aaf345551b4731da62949be002fa89283701
+  riichi_engine (0.1.0) sha256=93a62b3ef48c7f4639bb0f96109429cee84fb37afc4680ae2025759743420498
+  zeitwerk (2.8.3) sha256=2c85125a8467ce069e20123d1e709a08955c9d29c118c25b46b7b7fafdbb92e5
+
+BUNDLED WITH
+  4.0.6

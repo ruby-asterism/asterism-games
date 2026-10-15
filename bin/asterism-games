@@ -1,0 +1,17 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# The game host. Settings: README "Settings" (a YAML file given by --config
+# or ASTERISM_GAMES_CONFIG, and the environment).
+$LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+require "asterism_games/host"
+
+path = ENV["ASTERISM_GAMES_CONFIG"]
+if (i = ARGV.index("--config"))
+  path = ARGV[i + 1]
+end
+$stdout.sync = true
+host = AsterismGames::Host.new(AsterismGames::Config.load(path), log: ->(m) { puts "#{Time.now.strftime('%H:%M:%S')} #{m}" })
+%w[INT TERM].each { |s| trap(s) { host.stop! } }
+host.run
+puts "games: stopped (state saved)"

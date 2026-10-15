@@ -1,0 +1,15 @@
+# Settings of the game host (README "Settings"). Copy and change; the
+# environment overrides these (ASTERISM_GAMES_ROUTER and the rest).
+router: tcp/127.0.0.1:7447   # the Zenoh router
+node: games                  # this host's node ID
+app: games                   # the Asterism application all games live under
+# credentials: /path/to/games.tar   # a console's .tar for a router over mutual TLS
+state_dir: var/state         # one JSON file per table, written after every change
+tables:
+  - name: mahjong1
+    game: mahjong
+    turn_seconds: 20         # a player's time to discard
+    call_seconds: 8          # a player's time to call a discard
+    result_seconds: 8        # a round's result stays this long (or until "next")
+    cpu_ms: 700              # a CPU's pause before it acts
+    cpu_level: normal        # easy / normal / hard / engine (riichi_engine's own discards)
