@@ -12,7 +12,7 @@ module AsterismGames
       "app" => "games",
       "credentials" => nil,
       "state_dir" => "var/state",
-      "tables" => [{ "name" => "mahjong1", "game" => "mahjong" }]
+      "tables" => [{ "name" => "mahjong1", "game" => "mahjong" }, { "name" => "mahjong2", "game" => "mahjong" }]
     }.freeze
 
     # Environment variable => [key, kind]; the table ones apply to every
@@ -28,13 +28,16 @@ module AsterismGames
       "MAHJONG_TURN_SECONDS" => ["turn_ms", 1000],
       "MAHJONG_CALL_SECONDS" => ["call_ms", 1000],
       "MAHJONG_RESULT_SECONDS" => ["result_ms", 1000],
+      "MAHJONG_OVER_SECONDS" => ["over_ms", 1000],
+      "MAHJONG_AWAY_SECONDS" => ["away_ms", 1000],
       "MAHJONG_CPU_MS" => ["cpu_ms", 1],
       "MAHJONG_CPU_LEVEL" => ["cpu_level", nil]
     }.freeze
     # Table keys in the file, in seconds, and the table's own (ms) names.
     TABLE_FILE_KEYS = {
       "turn_seconds" => ["turn_ms", 1000], "call_seconds" => ["call_ms", 1000],
-      "result_seconds" => ["result_ms", 1000], "cpu_ms" => ["cpu_ms", 1],
+      "result_seconds" => ["result_ms", 1000], "over_seconds" => ["over_ms", 1000],
+      "away_seconds" => ["away_ms", 1000], "cpu_ms" => ["cpu_ms", 1],
       "cpu_level" => ["cpu_level", nil], "humans" => ["humans", 1]
     }.freeze
 
@@ -62,6 +65,7 @@ module AsterismGames
         next unless t.key?(k)
         out[key] = mul ? (t[k].to_f * mul).round : t[k].to_s
       end
+      out["rule"] = t["rule"].to_h if t["rule"]
       TABLE_ENV_KEYS.each do |k, (key, mul)|
         v = env[k]
         next if v.nil? || v.empty?

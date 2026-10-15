@@ -9,7 +9,20 @@ tables:
   - name: mahjong1
     game: mahjong
     turn_seconds: 20         # a player's time to discard
-    call_seconds: 8          # a player's time to call a discard
+    call_seconds: 8          # every player's time to call a discard
     result_seconds: 8        # a round's result stays this long (or until "next")
+    over_seconds: 60         # the end of a game stays this long (or until the owner's "next")
+    away_seconds: 10         # a player not heard from this long is shown as away
     cpu_ms: 700              # a CPU's pause before it acts
     cpu_level: normal        # easy / normal / hard (riichi_engine's CPU levels)
+    humans: 4                # seats players may take
+    # rule: riichi_engine's rule keys over the host's defaults (README "Rules"):
+    #   game_type: hanchan    # or tonpuu
+    #   double_ron: true
+    #   triple_ron_draw: true
+    #   multiple_yakuman: true
+    #   nishi_iri: true
+    #   nishi_iri_threshold: 30000
+    #   uma: [15000, 5000, -5000, -15000]
+  - name: mahjong2
+    game: mahjong

@@ -66,6 +66,7 @@ module AsterismGames
         sleep RECONNECT_S unless @stop
       end
       save_all
+      @log.call("games: largest message #{@stats['max_bytes']} B (#{@stats['max_what']})")
     end
 
     def connect

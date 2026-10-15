@@ -23,10 +23,23 @@ module MahjongTestHelper
   end
 
   def human_table(store: nil, **opts)
-    M::Table.new("t", { "humans" => 1, "cpu_ms" => 0, "result_ms" => 0, "turn_ms" => 1000,
+    M::Table.new("t", { "cpu_ms" => 0, "result_ms" => 0, "turn_ms" => 1000,
                         "call_ms" => 1000 }.merge(opts.transform_keys(&:to_s)), store: store)
   end
 
+  # A game with n human members seated (nodes "wasm-aaaaa0".. ), the other
+  # seats CPUs, started by the first. Returns [table, {seat => token}].
+  def seated_table(n = 1, store: nil, now: 0, **opts)
+    t = human_table(store: store, **opts)
+    tokens = (0...n).map do |i|
+      tok = t.join("wasm-aaaaa#{i}", "P#{i}", now)["token"]
+      assert_equal "ok", t.sit(tok, -1, now)
+      tok
+    end
+    t.cpu(tokens[0], -1, true) if n < 4
+    assert_equal "ok", t.start(tokens[0], now)
+    [t, tokens.to_h { |tok| [t.seat_of(tok), tok] }]
+  end
   # Advances a table until the block is true (or the steps run out).
   def run_until(table, now, limit: 200_000)
     limit.times do

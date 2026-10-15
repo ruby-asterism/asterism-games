@@ -7,80 +7,223 @@ require_relative "engine"
 
 module AsterismGames
   module Mahjong
-    # One mahjong table: four seats, the game (a hanchan) and the round being
-    # played. It holds the wall and the hands; players see what view(seat)
-    # gives them. Time is passed in (milliseconds) so tests can drive it.
+    # One mahjong table: the people at it, four seats, the game (a hanchan)
+    # and the round being played. It holds the wall and the hands; players
+    # see what view(seat) gives them. Time is passed in (milliseconds) so
+    # tests can drive it.
     #
-    # Seats are "human" (a player who sat with sit and holds its token) or
-    # "cpu" (riichi_engine's player). A human that does not decide in time is
-    # played for: the drawn tile is discarded, a call is passed.
+    # People join the table (join: a member, with a token) and wait in the
+    # lobby (status "wait"); a member sits in a seat or stays a spectator.
+    # The first member who sat is the table's owner: the owner fills empty
+    # seats with CPUs and starts the game once the four seats are taken. At
+    # the end of a game the table goes back to the lobby with its seats.
+    #
+    # Seats are nil (empty, in the lobby only), "human" (a member) or "cpu"
+    # (riichi_engine's player). A human who does not decide in time is played
+    # for: the drawn tile is discarded, a call is passed. A member that has
+    # not called the table for away_ms is shown as away; its seat goes on
+    # being played for by the same timeouts until it comes back.
     class Table
-      SAVE_FORMAT = 1
+      SAVE_FORMAT = 2
       MAX_ROUNDS = 40 # a hanchan has far fewer; a guard against a loop
+      MAX_MEMBERS = 16
 
       DEFAULTS = {
         "turn_ms" => 20_000,      # a human's time to discard
-        "call_ms" => 8_000,       # a human's time to call a discard
+        "call_ms" => 8_000,       # every human's time to call a discard
         "cpu_ms" => 700,          # a CPU waits this long before it acts
         "result_ms" => 8_000,     # the result of a round stays this long
+        "over_ms" => 60_000,      # the end of a game stays this long (then the lobby)
+        "away_ms" => 10_000,      # a member not heard from this long is away
         "cpu_level" => "normal",  # easy / normal / hard
-        "humans" => 1,            # human seats (Step 1: one)
-        "game_type" => "hanchan"
+        "humans" => 4,            # seats members may take (0: CPUs only, at once)
+        "rule" => {}              # riichi_engine rule keys over Engine::RULE_DEFAULTS
       }.freeze
 
-      attr_reader :name, :ver, :sv, :status, :state, :opts, :stats
+      attr_reader :name, :ver, :sv, :status, :state, :opts, :stats, :rule
 
       def initialize(name, opts = {}, store: nil, log: nil)
         @name = name
         @opts = DEFAULTS.merge(opts.transform_keys(&:to_s))
         @store = store
         @log = log
-        @rule = Engine.rule(game_type: @opts["game_type"])
+        @rule = Engine.rule(@opts["rule"] || {})
         @ai = ai_for(@opts["cpu_level"])
         @stats = Hash.new(0)
         reset_all
         load_saved(0)
       end
 
-      # ------------------------------------------------------------ seats
+      # ------------------------------------------------------------ members
 
-      # A player takes a seat. The same node gets its own seat back (and the
-      # same token); a new node gets a free human seat. Returns
-      # {"seat", "token"} or {"error"}.
-      def sit(node, name, now)
+      # A node joins the table (or gets its membership back). Returns
+      # {"token", "seat" (-1: none), "owner"} or {"error" => "full"}.
+      def join(node, name, now)
         node = node.to_s
-        i = @seats.index { |s| s["kind"] == "human" && s["node"] == node }
-        if i.nil?
-          return { "error" => "full" } if @seats.count { |s| s["kind"] == "human" } >= @opts["humans"]
-          i = @status == "wait" ? SecureRandom.random_number(4) : @seats.index { |s| s["kind"] == "cpu" }
-          @seats[i] = { "kind" => "human", "node" => node, "token" => SecureRandom.hex(16) }
+        m = @members[node]
+        if m.nil?
+          return { "error" => "full" } if @members.size >= MAX_MEMBERS
+          m = @members[node] = { "token" => SecureRandom.hex(16), "at" => @join_count += 1 }
         end
-        @seats[i]["name"] = clean_name(name, node)
-        name_cpus
-        start_game(now) if @status == "wait"
+        m["name"] = clean_name(name, node)
+        m["seen"] = now
+        i = seat_index(node)
+        @seats[i]["name"] = m["name"] if i
         changed
-        { "seat" => i, "token" => @seats[i]["token"] }
+        member_reply(node)
       end
 
-      # The seat goes back to a CPU.
-      def leave(token)
-        i = seat_of(token)
-        return false unless i
-        @seats[i] = cpu_seat
+      # The caller's membership, or nil (nothing is created).
+      def mine(node)
+        @members.key?(node.to_s) ? member_reply(node.to_s) : nil
+      end
+
+      def member_reply(node)
+        { "token" => @members[node]["token"], "seat" => seat_index(node) || -1, "owner" => @owner == node }
+      end
+
+      # A call from a node: it is there.
+      def touch(node, now)
+        m = @members[node.to_s]
+        m["seen"] = now if m
+      end
+
+      def node_of(token)
+        return nil unless token.is_a?(String) && !token.empty?
+        @members.each { |node, m| return node if m["token"] == token }
+        nil
+      end
+
+      def seat_index(node)
+        @seats.index { |s| s && s["kind"] == "human" && s["node"] == node }
+      end
+
+      # The member sits (seat -1: the first free one). In the lobby only; a
+      # seated member moves. Returns "ok" or why not.
+      def sit(token, seat, now)
+        node = node_of(token)
+        return "token" unless node
+        return "not waiting" unless @status == "wait"
+        seat = seat.to_i
+        if seat.negative?
+          return "ok" if seat_index(node)
+          seat = (0..3).find { |i| @seats[i].nil? } || (0..3).find { |i| @seats[i]["kind"] == "cpu" }
+          return "taken" unless seat
+        end
+        return "no seat" unless (0..3).cover?(seat)
+        cur = seat_index(node)
+        return "ok" if cur == seat
+        s = @seats[seat]
+        return "taken" if s && s["kind"] == "human"
+        return "humans" if cur.nil? && @seats.count { |x| x && x["kind"] == "human" } >= @opts["humans"]
+        sat = cur ? @seats[cur]["sat"] : (@sit_count += 1)
+        @seats[cur] = nil if cur
+        m = @members[node]
+        @seats[seat] = { "kind" => "human", "node" => node, "token" => m["token"], "name" => m["name"], "sat" => sat }
+        @owner ||= node
+        m["seen"] = now
         name_cpus
-        @decl.delete(i)
-        @deadline = nil if @deadline_seat == i
+        changed
+        "ok"
+      end
+
+      # The member stands up (lobby only). The owner's role passes on.
+      def stand(token)
+        node = node_of(token)
+        return "token" unless node
+        return "not waiting" unless @status == "wait"
+        i = seat_index(node)
+        return "not seated" unless i
+        @seats[i] = nil
+        pass_owner if @owner == node
+        changed
+        "ok"
+      end
+
+      # The owner puts a CPU in an empty seat (on) or takes one out (off);
+      # seat -1 with on fills every empty seat.
+      def cpu(token, seat, on)
+        node = node_of(token)
+        return "token" unless node
+        return "not waiting" unless @status == "wait"
+        return "not owner" unless @owner == node
+        seat = seat.to_i
+        targets = seat.negative? ? (0..3).to_a : [seat]
+        return "no seat" unless targets.all? { |i| (0..3).cover?(i) }
+        n = 0
+        targets.each do |i|
+          s = @seats[i]
+          if on && s.nil?
+            @seats[i] = cpu_seat
+            n += 1
+          elsif !on && s && s["kind"] == "cpu"
+            @seats[i] = nil
+            n += 1
+          end
+        end
+        return "no change" if n.zero?
+        name_cpus
+        changed
+        "ok"
+      end
+
+      # The owner starts the game: four seats taken, at least one human. The
+      # seats are drawn (who sits where, so who deals first).
+      def start(token, now)
+        node = node_of(token)
+        return "token" unless node
+        return "not waiting" unless @status == "wait"
+        return "not owner" unless @owner == node
+        return "seats" unless @seats.all?
+        return "no human" if @seats.none? { |s| s["kind"] == "human" }
+        @seats = @seats.shuffle(random: Random.new(SecureRandom.random_number(2**32)))
+        name_cpus
+        start_game(now)
+        @log&.call("mahjong: #{@name}: game started (#{@seats.map { |s| s['name'] }.join(', ')})")
+        tick(now)
+        "ok"
+      end
+
+      # The member leaves the table. In the lobby its seat empties; during a
+      # game its seat goes to a CPU.
+      def leave(token)
+        node = node_of(token)
+        return false unless node
+        i = seat_index(node)
+        if i
+          if @status == "wait"
+            @seats[i] = nil
+          else
+            @seats[i] = cpu_seat
+            @decl.delete(i)
+          end
+        end
+        @members.delete(node)
+        pass_owner if @owner == node
+        name_cpus
         changed
         true
       end
 
       def seat_of(token)
         return nil unless token.is_a?(String) && !token.empty?
-        @seats.index { |s| s["kind"] == "human" && s["token"] == token }
+        @seats.index { |s| s && s["kind"] == "human" && s["token"] == token }
       end
 
       def human?(seat)
-        @seats[seat]["kind"] == "human"
+        s = @seats[seat]
+        s && s["kind"] == "human"
+      end
+
+      def away?(seat)
+        s = @seats[seat]
+        return false unless s && s["kind"] == "human"
+        member_away?(s["node"])
+      end
+
+      def member_away?(node)
+        m = @members[node]
+        m.nil? || m["seen"].nil? || @now - m["seen"] > @opts["away_ms"]
       end
 
       # ------------------------------------------------------------ actions
@@ -89,10 +232,10 @@ module AsterismGames
       # the state version the player saw. Returns "ok" or why not.
       def act(token, sv, type, tiles, now)
         seat = seat_of(token)
-        return "token" unless seat
+        return (node_of(token) ? "not seated" : "token") unless seat
         return "stale" unless sv == @sv
         if type == Engine::NEXT
-          return next_now(now) ? "ok" : "not offered"
+          return next_now(seat, now) ? "ok" : "not offered"
         end
         return "not playing" unless @status == "play"
         a = Engine.match(offers(seat), type, tiles)
@@ -103,7 +246,6 @@ module AsterismGames
         a[:seat] = seat
         if @state.phase == :naki_wait
           @decl[seat] = a
-          @deadline = nil if @deadline_seat == seat
           changed
         else
           @deadline = nil
@@ -115,9 +257,10 @@ module AsterismGames
 
       # What a seat may do now ([[type, [tile names]], ...]).
       def offers(seat)
+        return [] if seat.nil? || seat.negative?
         case @status
-        when "result", "over"
-          return human?(seat) ? [[Engine::NEXT, []]] : []
+        when "result" then return human?(seat) ? [[Engine::NEXT, []]] : []
+        when "over" then return human?(seat) && @seats[seat]["node"] == @owner ? [[Engine::NEXT, []]] : []
         when "play" then nil
         else return []
         end
@@ -129,7 +272,29 @@ module AsterismGames
 
       # Moves the game on: draws, CPU turns, timeouts, the next round.
       def tick(now)
+        @now = now
+        aw = bits { |i| away?(i) }
+        if aw != @away_bits
+          @log&.call("mahjong: #{@name}: away seats #{(0..3).select { |i| aw[i] == 1 }.inspect}") if @status != "wait"
+          @away_bits = aw
+          changed
+        end
+        expire_members(now)
         200.times { break unless step(now) }
+      end
+
+      # Spectators that are gone for long are forgotten (seated members stay).
+      def expire_members(now)
+        return if @members.empty? || now - @expire_at.to_i < 1000
+        @expire_at = now
+        gone = @members.keys.select do |node|
+          seat_index(node).nil? && member_away?(node) && now - @members[node]["seen"].to_i > @opts["away_ms"] * 6
+        end
+        gone.each do |node|
+          @members.delete(node)
+          pass_owner if @owner == node
+        end
+        changed unless gone.empty?
       end
 
       def step(now)
@@ -137,6 +302,10 @@ module AsterismGames
         when "result"
           return false if now < @next_at
           next_round(now)
+          true
+        when "over"
+          return false if @opts["humans"].to_i.zero? || @next_at.nil? || now < @next_at
+          to_lobby
           true
         when "play" then step_play(now)
         else false
@@ -152,9 +321,10 @@ module AsterismGames
         when :dahai
           seat = st.current_seat
           if human?(seat)
-            return set_deadline(seat, now + @opts["turn_ms"]) if @deadline.nil?
+            return set_deadline(1 << seat, now + @opts["turn_ms"]) if @deadline.nil?
             return false if now < @deadline
             @stats["timeouts"] += 1
+            @stats["away_turns"] += 1 if away?(seat)
             auto_discard(seat, now)
             true
           else
@@ -169,28 +339,43 @@ module AsterismGames
         end
       end
 
+      # The calls on a discard. Every seat the engine offers something gets
+      # one answer: the CPUs at once, the humans by their own act or a pass
+      # at the common deadline (call_ms from the discard). Once all have
+      # answered, the engine's priority decides (ron over pon and kan over
+      # chi; several rons by the rule: double ron, three rons a draw).
       def step_calls(now)
         st = @state
-        humans_waiting = false
-        st.pending_actions.keys.sort.each do |seat|
-          next if @decl.key?(seat)
-          if human?(seat)
-            if @deadline.nil?
-              set_deadline(seat, now + @opts["call_ms"])
-              humans_waiting = true
-            elsif now >= @deadline
-              @stats["timeouts"] += 1
-              @decl[seat] = { type: :skip, seat: seat }
-              @deadline = nil
-            else
-              humans_waiting = true
+        seats = st.pending_actions.keys.sort
+        humans = seats.select { |s| human?(s) }
+        if @deadline.nil? && humans.any? { |s| !@decl.key?(s) }
+          if humans.size >= 2
+            @stats["multi_human_calls"] += 1
+            @log&.call("mahjong: #{@name}: calls: humans #{humans.inspect} may call (cpus #{(seats - humans).inspect})")
+          end
+          set_deadline(bits { |i| humans.include?(i) && !@decl.key?(i) }, now + @opts["call_ms"])
+        end
+        seats.each do |seat|
+          next if @decl.key?(seat) || human?(seat)
+          @decl[seat] = Engine.cpu_choice(st, seat, @rule, @ai) || { type: :skip, seat: seat }
+        end
+        waiting = humans.reject { |s| @decl.key?(s) }
+        unless waiting.empty?
+          if now < @deadline
+            mask = bits { |i| waiting.include?(i) }
+            if mask != @deadline_bits
+              @deadline_bits = mask
+              changed
             end
-          else
-            @decl[seat] = Engine.cpu_choice(st, seat, @rule, @ai) || { type: :skip, seat: seat }
+            return false
+          end
+          waiting.each do |s|
+            @stats["timeouts"] += 1
+            @stats["away_calls"] += 1 if away?(s)
+            @decl[s] = { type: :skip, seat: s }
           end
         end
-        return false if humans_waiting
-        human_called = @decl.keys.any? { |s| human?(s) }
+        human_called = @decl.any? { |s, a| human?(s) && a[:type].to_sym != :skip }
         return wait_cpu(now) if !human_called && !cpu_ready?(now)
         resolve_calls(now)
         true
@@ -201,13 +386,19 @@ module AsterismGames
         decl = @decl
         @decl = {}
         @deadline = nil
+        @deadline_bits = 0
         @cpu_at = nil
-        win = Engine.call_winner(decl, st.last_dahai[:seat])
+        won = Engine.resolve_calls(decl, st.last_dahai[:seat], @rule)
+        keep = won ? Engine.winners_of(won) : []
+        if won && keep.size >= 2
+          @stats["multi_ron_#{won[:type]}"] += 1
+          @log&.call("mahjong: #{@name}: #{won[:type]} by #{keep.inspect}")
+        end
         st.pending_actions.keys.sort.each do |seat|
-          next if win && seat == win[0]
+          next if keep.include?(seat)
           apply({ type: :skip, seat: seat }, now)
         end
-        apply(win[1], now) if win
+        apply(won, now) if won
       end
 
       def cpu_ready?(now)
@@ -221,9 +412,10 @@ module AsterismGames
         @opts["cpu_ms"] <= 0
       end
 
-      def set_deadline(seat, at)
+      # The deadline of the seats in mask (bits).
+      def set_deadline(mask, at)
         @deadline = at
-        @deadline_seat = seat
+        @deadline_bits = mask
         changed
         false
       end
@@ -258,6 +450,7 @@ module AsterismGames
         @stats["actions"] += 1
         ev = r.events.last
         @event = ev ? [Engine::TYPE_OF[ev[:type].to_sym] || 0, ev[:seat] || -1] : nil
+        @deadline = nil unless @state.phase == :naki_wait
         finish_round(r.round_end_info, now) if r.round_end?
         changed
       end
@@ -278,14 +471,19 @@ module AsterismGames
         @decl = {}
         @stats["rounds"] += 1
         @stats["round_#{res['kind']}"] += 1
-        @log&.call("mahjong: #{@name}: round over: #{res['kind']} #{res['points']} #{@game['scores'].inspect}")
+        @stats["double_ron"] += 1 if Array(res["wins"]).size >= 2
+        pts = Array(res["wins"]).map { |w| w["points"] }
+        @log&.call("mahjong: #{@name}: round over: #{res['kind']} #{pts.inspect} #{@game['scores'].inspect}")
       end
 
-      # The "next" button: on a round's result or a finished game.
-      def next_now(now)
+      # The "next" button: on a round's result (any seated human) or a
+      # finished game (the owner: back to the lobby).
+      def next_now(seat, now)
         case @status
         when "result" then next_round(now)
-        when "over" then start_game(now)
+        when "over"
+          return false unless offers(seat).any?
+          to_lobby
         else return false
         end
         tick(now)
@@ -295,12 +493,17 @@ module AsterismGames
       def next_round(now)
         f = @flow
         @game["rounds"] += 1
-        if f["end"] || @game["rounds"] >= MAX_ROUNDS
+        # riichi_engine plays the west round on until somebody reaches the
+        # threshold (west 4 is followed by west 1 again); the game ends after
+        # west 4 as on Mahjong Soul.
+        west_over = @game["bakaze"] == "sha" && f["bakaze"] == "sha" && f["kyoku"].to_i < @game["kyoku"].to_i
+        if f["end"] || west_over || @game["rounds"] >= MAX_ROUNDS
           scores = (0..3).to_h { |s| [s, @game["scores"][s]] }
           @final = Engine::API.calculate_ranked_results(scores: scores, rule: @rule).map do |r|
             [r.seat, r.rank, r.score, (r.point * 10).round]
           end
           @status = "over"
+          @next_at = now + @opts["over_ms"]
           @stats["games"] += 1
           @log&.call("mahjong: #{@name}: game over: #{@final.inspect}")
         else
@@ -310,9 +513,27 @@ module AsterismGames
         changed
       end
 
+      # The end of a game: back to the lobby, the seats as they were (the
+      # CPUs stay; members that left during the game were replaced by CPUs).
+      def to_lobby
+        @status = "wait"
+        @state = nil
+        @game = nil
+        @result = nil
+        @flow = nil
+        @final = nil
+        @event = nil
+        @deadline = nil
+        @deadline_bits = 0
+        @next_at = nil
+        @decl = {}
+        @sv += 1
+        changed
+      end
+
       def start_game(now)
         @game = { "bakaze" => "ton", "kyoku" => 1, "honba" => 0, "kyoutaku" => 0, "oya" => 0,
-                  "scores" => [25_000] * 4, "rounds" => 0 }
+                  "scores" => [@rule.initial_score] * 4, "rounds" => 0 }
         @final = nil
         new_round
         changed
@@ -325,6 +546,7 @@ module AsterismGames
         @flow = nil
         @decl = {}
         @deadline = nil
+        @deadline_bits = 0
         @cpu_at = nil
         @event = nil
         @sv += 1
@@ -332,10 +554,16 @@ module AsterismGames
 
       # ------------------------------------------------------------ views
 
-      # What everybody may see: no hand but the winner's at a win.
+      # What everybody may see: no hand but the winners' at a win.
       def public_view(now)
+        @now = now
         v = { "v" => @ver, "sv" => @sv, "t" => @name, "st" => @status,
-              "nm" => @seats.map { |s| s["name"].to_s }, "hu" => bits { |i| human?(i) } }
+              "nm" => @seats.map { |s| s ? s["name"].to_s : "" },
+              "hu" => bits { |i| human?(i) },
+              "sk" => @seats.map { |s| s.nil? ? 0 : (s["kind"] == "human" ? 1 : 2) },
+              "aw" => bits { |i| away?(i) },
+              "ow" => (@owner && seat_index(@owner)) || -1,
+              "mb" => member_list }
         if @game
           v["sc"] = @game["scores"].dup
           v["r"] = [Engine::BAKAZE.index(@game["bakaze"]), @game["kyoku"], @game["honba"], @game["kyoutaku"], @game["oya"]]
@@ -352,18 +580,27 @@ module AsterismGames
           v["hc"] = (0..3).map { |s| st.hands[s].count }
           v["ls"] = st.last_dahai ? [st.last_dahai[:seat], Tiles.code(st.last_dahai[:tile].to_s)] : nil
           v["ev"] = @event
-          v["dl"] = @deadline ? [@deadline_seat, [@deadline - now, 0].max] : nil
+          v["dl"] = @deadline ? [@deadline_bits, [@deadline - now, 0].max] : nil
         end
         v["res"] = result_view if @result && (@status == "result" || @status == "over")
         v["fin"] = @final if @final
         v
       end
 
-      # One seat's view: the public one, its hand and what it may do.
+      # The members in the order they joined: [name, seat (-1 none), flags]
+      # (flags: 1 away, 2 owner).
+      def member_list
+        @members.sort_by { |_n, m| m["at"].to_i }.map do |node, m|
+          [m["name"].to_s, seat_index(node) || -1, (member_away?(node) ? 1 : 0) | (@owner == node ? 2 : 0)]
+        end
+      end
+
+      # One seat's view (seat -1: a spectator member): the public one, the
+      # hand and what it may do.
       def view(seat, now)
         v = public_view(now)
         v["me"] = seat
-        if @state && @status != "wait"
+        if seat >= 0 && @state && @status != "wait"
           st = @state
           hand = st.hands[seat].tiles.map(&:to_s)
           drawn = nil
@@ -376,6 +613,13 @@ module AsterismGames
         end
         v["a"] = offers(seat).map { |t, ts| [t, Tiles.pack(ts).b] }
         v
+      end
+
+      # A member's view by its token (nil: not a member).
+      def member_view(token, now)
+        node = node_of(token)
+        return nil unless node
+        view(seat_index(node) || -1, now)
       end
 
       def bits
@@ -405,11 +649,15 @@ module AsterismGames
       def result_view
         r = @result
         v = { "k" => r["kind"], "d" => r["delta"], "rd" => r["round"] }
-        if r["winner"]
-          v.merge!("w" => r["winner"], "f" => r["from"], "y" => r["yaku"], "pt" => r["points"],
-                   "h" => Tiles.pack(Tiles.sort(r["hand"])).b, "ag" => Tiles.code(r["agari"]))
+        v["f"] = r["from"] unless r["from"].nil?
+        if r["wins"]
+          v["wn"] = r["wins"].map do |w|
+            { "w" => w["winner"], "y" => w["yaku"], "pt" => w["points"],
+              "h" => Tiles.pack(Tiles.sort(w["hand"])).b, "ag" => Tiles.code(w["agari"]) }
+          end
         end
         v["tp"] = r["tenpai"] if r["tenpai"]
+        v["rs"] = r["ron_seats"] if r["ron_seats"]
         v
       end
 
@@ -432,11 +680,18 @@ module AsterismGames
 
       def to_saved(now)
         { "format" => SAVE_FORMAT, "name" => @name, "ver" => @ver, "sv" => @sv, "status" => @status,
-          "seats" => @seats, "game" => @game, "round" => @state&.to_json,
-          "decl" => @decl.to_h { |k, a| [k.to_s, a.transform_keys(&:to_s).transform_values { |x| x.is_a?(Symbol) ? x.to_s : x }] },
-          "deadline_left" => @deadline && [@deadline - now, 0].max, "deadline_seat" => @deadline_seat,
+          "seats" => @seats, "owner" => @owner,
+          "members" => @members.to_h { |n, m| [n, m.reject { |k, _| k == "seen" }] },
+          "counts" => [@join_count, @sit_count],
+          "game" => @game, "round" => @state&.to_json,
+          "decl" => @decl.to_h { |k, a| [k.to_s, saved_action(a)] },
+          "deadline_left" => @deadline && [@deadline - now, 0].max, "deadline_bits" => @deadline_bits,
           "cpu_left" => @cpu_at && [@cpu_at - now, 0].max, "next_left" => @next_at && [@next_at - now, 0].max,
           "result" => @result, "flow" => @flow, "final" => @final, "event" => @event }
+      end
+
+      def saved_action(a)
+        a.transform_keys(&:to_s).transform_values { |x| x.is_a?(Symbol) ? x.to_s : x }
       end
 
       def load_saved(now)
@@ -446,31 +701,33 @@ module AsterismGames
         @sv = d["sv"].to_i
         @status = d["status"]
         @seats = d["seats"]
+        @owner = d["owner"]
+        @members = d["members"] || {}
+        @join_count, @sit_count = d["counts"] || [0, 0]
         name_cpus
         @game = d["game"]
         @state = d["round"] ? Engine::API.deserialize_round_state(d["round"]) : nil
         @decl = (d["decl"] || {}).to_h do |k, a|
           [k.to_i, a.to_h { |kk, x| [kk.to_sym, kk == "type" ? x.to_sym : x] }]
         end
-        @deadline = d["deadline_left"] && now + d["deadline_left"]
-        @deadline_seat = d["deadline_seat"]
-        @cpu_at = d["cpu_left"] && now + d["cpu_left"]
-        @next_at = d["next_left"] && now + d["next_left"]
+        @deadline_bits = d["deadline_bits"].to_i
         @result = d["result"]
         @flow = d["flow"]
         @final = d["final"]
         @event = d["event"]
-        @log&.call("mahjong: #{@name}: resumed (#{@status}, state #{@sv})")
+        resume_clock(now, d)
+        @log&.call("mahjong: #{@name}: resumed (#{@status}, state #{@sv}, #{@members.size} members)")
       end
 
       # Times read back are relative to when they were saved; a host started
-      # again calls this with its own clock.
-      def resume_clock(now)
-        d = @store&.read(@name)
-        return unless d
+      # again calls this with its own clock. Members count as just seen.
+      def resume_clock(now, d = @store&.read(@name))
+        return unless d && d["format"] == SAVE_FORMAT
         @deadline = d["deadline_left"] && now + d["deadline_left"]
         @cpu_at = d["cpu_left"] && now + d["cpu_left"]
         @next_at = d["next_left"] && now + d["next_left"]
+        @members.each_value { |m| m["seen"] = now }
+        @now = now
       end
 
       # ------------------------------------------------------------ setup
@@ -478,14 +735,19 @@ module AsterismGames
       def reset_all
         @ver = 1
         @sv = 0
-        @status = @opts["humans"].to_i.zero? ? "play" : "wait"
-        @seats = (0..3).map { cpu_seat }
-        name_cpus
+        @now = 0
+        @status = "wait"
+        @seats = [nil] * 4
+        @members = {}
+        @owner = nil
+        @join_count = 0
+        @sit_count = 0
+        @away_bits = 0
         @game = nil
         @state = nil
         @decl = {}
         @deadline = nil
-        @deadline_seat = nil
+        @deadline_bits = 0
         @cpu_at = nil
         @next_at = nil
         @result = nil
@@ -493,19 +755,28 @@ module AsterismGames
         @final = nil
         @event = nil
         @dirty = true
-        start_game(0) if @status == "play"
+        return unless @opts["humans"].to_i.zero?
+        @seats = (0..3).map { cpu_seat }
+        name_cpus
+        start_game(0)
+      end
+
+      # The owner's role goes to the seated member who sat first (none: the
+      # next to sit).
+      def pass_owner
+        seated = @seats.compact.select { |s| s["kind"] == "human" }
+        @owner = seated.min_by { |s| s["sat"].to_i }&.fetch("node")
       end
 
       def cpu_seat
         { "kind" => "cpu" }
       end
 
-      # The CPUs are numbered among themselves in seat order, so they are
-      # CPU1, CPU2, CPU3 whichever seat a player drew (numbered by seat they
-      # skipped the player's number: CPU1, CPU2, CPU4).
+      # The CPUs are numbered among themselves in seat order (CPU1, CPU2,
+      # CPU3 whichever seats the players took).
       def name_cpus
         n = 0
-        @seats.each { |s| s["name"] = "CPU#{n += 1}" if s["kind"] == "cpu" }
+        @seats.each { |s| s["name"] = "CPU#{n += 1}" if s && s["kind"] == "cpu" }
       end
 
       def ai_for(level)

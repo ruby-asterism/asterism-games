@@ -5,36 +5,71 @@ module AsterismGames
     # The table as an Asterism object (<node>/<app>/<table>). Its methods run
     # from Asterism.poll on the host's loop and never wait.
     #
-    #   sit(name)                  -> {"seat", "token"} or {"error" => "full"}
-    #   view(token)                -> the seat's view (Hash) or {"error" => "token"}
+    #   join(name)                  -> {"token", "seat", "owner"} or {"error" => "full"}
+    #   mine                        -> the same for a node that joined, or nil
+    #   sit(token, seat)            -> "ok" or why not (seat -1: any free seat)
+    #   stand(token)                -> "ok" or why not
+    #   cpu(token, seat, on)        -> "ok" or why not (the owner; seat -1: every empty seat)
+    #   start(token)                -> "ok" or why not (the owner, four seats taken)
+    #   view(token)                 -> the member's view (Hash) or {"error" => "token"}
     #   act(token, sv, type, tiles) -> "ok" or why not ("token", "stale",
-    #                                  "not offered", "not playing")
-    #   table                      -> the public view (no hand)
-    #   leave(token)               -> true / false
+    #                                  "not offered", "not playing", "not seated")
+    #   table                       -> the public view (no hand)
+    #   leave(token)                -> true / false
     #
-    # The caller of sit is Asterism.current_call.from (the node ID in the
-    # call's key); the same node gets its seat and token back. Everything
-    # about a hand needs the token sit returned.
+    # The caller is Asterism.current_call.from (the node ID in the call's
+    # key); the same node gets its membership and token back from join. Every
+    # call by a member counts as a sign that it is there (away_ms).
     class Remote
-      METHODS = { sit: 1, view: 1, act: 4, table: 0, leave: 1 }.freeze
+      METHODS = { join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, view: 1, act: 4, table: 0, leave: 1 }.freeze
 
       def initialize(table, clock)
         @table = table
         @clock = clock
       end
 
-      def sit(name)
+      def caller_node
         c = ::Asterism.current_call
-        @table.sit(c ? c.from.to_s : "", name.to_s, @clock.call)
+        c ? c.from.to_s : ""
+      end
+
+      def join(name)
+        @table.join(caller_node, name.to_s, @clock.call)
+      end
+
+      def mine
+        @table.touch(caller_node, @clock.call)
+        @table.mine(caller_node)
+      end
+
+      def sit(token, seat)
+        mark(token)
+        @table.sit(token, seat.to_i, @clock.call)
+      end
+
+      def stand(token)
+        mark(token)
+        @table.stand(token)
+      end
+
+      def cpu(token, seat, on)
+        mark(token)
+        @table.cpu(token, seat.to_i, on ? true : false)
+      end
+
+      def start(token)
+        mark(token)
+        @table.start(token, @clock.call)
       end
 
       def view(token)
-        seat = @table.seat_of(token)
-        return { "error" => "token" } unless seat
-        @table.view(seat, @clock.call)
+        mark(token)
+        v = @table.member_view(token, @clock.call)
+        v || { "error" => "token" }
       end
 
       def act(token, sv, type, tiles)
+        mark(token)
         names = tiles.is_a?(String) ? Tiles.unpack(tiles) : Array(tiles).map(&:to_s)
         @table.act(token, sv.to_i, type.to_i, names, @clock.call)
       rescue KeyError, IndexError
@@ -47,6 +82,14 @@ module AsterismGames
 
       def leave(token)
         @table.leave(token)
+      end
+
+      private
+
+      # A call with a member's token from that member's own node.
+      def mark(token)
+        node = @table.node_of(token)
+        @table.touch(node, @clock.call) if node && node == caller_node
       end
     end
   end

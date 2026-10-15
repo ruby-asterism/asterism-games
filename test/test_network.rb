@@ -45,9 +45,14 @@ class TestNetwork < Minitest::Test
   end
 
   def test_tokens_and_refusals_over_the_network
-    r = @t.sit("Tester")
+    assert_nil @t.mine, "not a member yet"
+    r = @t.join("Tester")
     token = r["token"]
     assert_equal 32, token.size
+    assert_equal r, @t.mine
+    assert_equal "ok", @t.sit(token, -1)
+    assert_equal "ok", @t.cpu(token, -1, true)
+    assert_equal "ok", @t.start(token)
     assert_equal({ "error" => "token" }, @t.view("wrong"))
     assert_equal({ "error" => "token" }, @t.view(""))
     assert_equal "token", @t.act("wrong", 0, E::DAHAI, "\x00".b)

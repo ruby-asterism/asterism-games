@@ -24,10 +24,12 @@ module AsterismGames
       SKIP = 10
       KYUUSHU = 11
       NEXT = 12
+      SANCHAHOU = 13 # an event only: three rons, a draw (never offered)
 
       TYPE_OF = {
         dahai: DAHAI, riichi: RIICHI, tsumo_agari: TSUMO_AGARI, ankan: ANKAN, kakan: KAKAN,
-        pon: PON, chi: CHI, daiminkan: DAIMINKAN, ron_agari: RON, skip: SKIP, kyuushu_kyuuhai: KYUUSHU
+        pon: PON, chi: CHI, daiminkan: DAIMINKAN, ron_agari: RON, skip: SKIP, kyuushu_kyuuhai: KYUUSHU,
+        sanchahou: SANCHAHOU
       }.freeze
       SYM_OF = TYPE_OF.invert.freeze
 
@@ -35,8 +37,29 @@ module AsterismGames
 
       module_function
 
-      def rule(game_type: "hanchan")
-        ::Mahjong::Config::RuleConfig.new("game_type" => game_type)
+      # The host's rule defaults: Mahjong Soul's defaults where riichi_engine
+      # can choose (README "Rules"), except triple_ron_draw (three rons are a
+      # draw, the user's decision of 2026-10-15). A table's "rule" settings go
+      # over these.
+      RULE_DEFAULTS = {
+        "game_type" => "hanchan",
+        "initial_score" => 25_000,
+        "oka_origin" => 30_000,
+        "uma" => [15_000, 5_000, -5_000, -15_000],
+        "aka_dora" => { "m" => 1, "p" => 1, "s" => 1 },
+        "kuitan" => true,
+        "kazoe_yakuman" => true,
+        "kiriage_mangan" => false,
+        "double_ron" => true,
+        "triple_ron_draw" => true,
+        "multiple_yakuman" => true,
+        "tobi" => true,
+        "nishi_iri" => true,
+        "nishi_iri_threshold" => 30_000
+      }.freeze
+
+      def rule(overrides = {})
+        ::Mahjong::Config::RuleConfig.new(RULE_DEFAULTS.merge(overrides.transform_keys(&:to_s)))
       end
 
       # A seed for the wall, long enough to be unguessable.
@@ -128,40 +151,56 @@ module AsterismGames
         API.apply_round_action(state: state, action: action, rule: rule)
       end
 
-      # Who wins a discard that several seats called (decisions: seat =>
-      # action, skips included): the engine's priority, and between equals
-      # the first in turn order after the discarder. [seat, action] or nil.
-      def call_winner(decisions, discarder)
+      # What a discard that several seats called comes to (decisions: seat =>
+      # action, skips included): the engine's priority with the rule's double
+      # ron and three-ron draw, equals in turn order after the discarder. The
+      # engine action to apply (a ron with :seats for several winners,
+      # :sanchahou for three rons) or nil when everybody passed.
+      def resolve_calls(decisions, discarder, rule)
         pending = decisions.reject { |_s, a| a[:type].to_sym == :skip }.to_h { |s, a| [s, [a]] }
-        won = API.resolve_pending_action(pending, from_seat: discarder)
-        won && [won[:seat], won]
+        API.resolve_pending_action(pending, from_seat: discarder, rule: rule)
+      end
+
+      # The seats an action resolved by resolve_calls keeps (the winners).
+      def winners_of(action)
+        Array(action[:seats] || action[:seat])
       end
 
       # Scores a finished round. Returns the result for the screen and the
-      # data for the next round: {"kind", "winner", "from", "yaku", "han",
-      # "fu", "points", "delta" => [4], "tenpai", "hand", "agari"}.
+      # data for the next round: {"kind", "delta" => [4], "from", "wins" =>
+      # [{"winner", "yaku", "han", "fu", "points", "hand", "agari"}, ...],
+      # "tenpai", "ron_seats"}. A double ron has a win for each winner, in
+      # turn order from the discarder; only the first takes the honba and the
+      # riichi sticks (README "Rules").
       def score(state, info, rule)
         kind = info[:result_type].to_sym
         delta = [0, 0, 0, 0]
         res = { "kind" => kind.to_s, "delta" => delta }
         case kind
         when :tsumo_agari, :ron_agari
-          w = info[:winner_seat]
           ron = kind == :ron_agari
           tile = ron ? (state.chankan_tile || state.last_dahai[:tile]) : state.last_tsumo
-          winner, sr = evaluate(state, w, ron, tile, rule)
-          ch = sr.score_changes(winner_seat: w, loser_seat: info[:loser_seat], oya_seat: state.oya_seat)
-          4.times { |s| delta[s] = ch[s].to_i }
-          res.merge!("winner" => w, "from" => info[:loser_seat], "agari" => tile.to_s,
-                     "yaku" => winner[:yaku].map { |y| y[:display].to_s },
-                     "han" => winner[:han], "fu" => winner[:fu], "points" => sr.display.to_s,
-                     "hand" => winner[:hand_tiles].map(&:to_s))
+          seats = Array(info[:winners]).map { |w| w[:seat] }
+          seats = [info[:winner_seat]] if seats.empty?
+          res["from"] = info[:loser_seat]
+          res["wins"] = seats.each_with_index.map do |w, i|
+            honba = i.zero? ? state.honba : 0
+            sticks = i.zero? ? state.kyoutaku : 0
+            winner, sr = evaluate(state, w, ron, tile, rule, honba: honba, kyoutaku: sticks)
+            ch = sr.score_changes(winner_seat: w, loser_seat: info[:loser_seat], oya_seat: state.oya_seat)
+            4.times { |s| delta[s] += ch[s].to_i }
+            { "winner" => w, "agari" => tile.to_s, "yaku" => winner[:yaku].map { |y| y[:display].to_s },
+              "han" => winner[:han], "fu" => winner[:fu], "points" => sr.display.to_s,
+              "hand" => winner[:hand_tiles].map(&:to_s) }
+          end
           state.kyoutaku = 0
         when :ryuukyoku
           tp = API.tenpai_seats(state)
           pay = API.calculate_tenpai_payments(tp)
           4.times { |s| delta[s] = pay[s].to_i }
           res["tenpai"] = tp
+        when :sanchahou
+          res["ron_seats"] = Array(info[:ron_seats])
         else
           res["tenpai"] = []
         end
@@ -170,10 +209,10 @@ module AsterismGames
       end
 
       # The engine's evaluation of a win by seat (after the winning action).
-      def evaluate(state, seat, ron, tile, rule)
+      def evaluate(state, seat, ron, tile, rule, honba: state.honba, kyoutaku: state.kyoutaku)
         snap = ::Mahjong::Snapshots::WinEvaluationSnapshot.new(
-          bakaze: state.bakaze, oya_index: state.oya_seat, honba: state.honba,
-          kyoutaku: state.kyoutaku, jikaze: BAKAZE[(seat - state.oya_seat) % 4]
+          bakaze: state.bakaze, oya_index: state.oya_seat, honba: honba,
+          kyoutaku: kyoutaku, jikaze: BAKAZE[(seat - state.oya_seat) % 4]
         )
         flags = ron ? { chankan: !state.chankan_tile.nil? } : { rinshan: state.rinshan_flag == true }
         API.evaluate_win(state: state, seat: seat, agari_type: ron ? :ron : :tsumo, agari_tile: tile,
@@ -185,7 +224,7 @@ module AsterismGames
         kind = res["kind"]
         info = {
           result_type: kind.to_sym,
-          winners: res["winner"].nil? ? [] : [{ seat: res["winner"] }],
+          winners: Array(res["wins"]).map { |w| { seat: w["winner"] } },
           losers: res["from"].nil? ? [] : [{ seat: res["from"] }],
           tenpai_seats: res["tenpai"] || []
         }
