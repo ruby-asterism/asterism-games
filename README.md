@@ -69,7 +69,7 @@ A mahjong table takes (the environment applies to every table):
 | Key | Environment | Default | |
 |---|---|---|---|
 | `turn_seconds` | `MAHJONG_TURN_SECONDS` | 5 | a player's time for a move (a discard, riichi, a kan, a win); a move that takes longer goes on into the bank ("Time") |
-| `bank_seconds` | `MAHJONG_BANK_SECONDS` | 20 | each player's bank for a game; when the move's time and the bank are used up, the drawn tile is discarded (0: no bank, `turn_seconds` a move and no more) |
+| `bank_seconds` | `MAHJONG_BANK_SECONDS` | 20 | each player's bank, full again every round; when the move's time and the bank are used up, the drawn tile is discarded (0: no bank, `turn_seconds` a move and no more) |
 | `call_seconds` | `MAHJONG_CALL_SECONDS` | 8 | the time to call a discard, the same for every player who may; after it the call is passed |
 | `result_seconds` | `MAHJONG_RESULT_SECONDS` | 8 | a round's result stays this long (or until a player presses next) |
 | `over_seconds` | `MAHJONG_OVER_SECONDS` | 60 | the end of a game stays this long (or until the owner presses next), then the table is back in its lobby |
@@ -244,7 +244,7 @@ host's own value among them):
 | 7 | kiriage mangan | `kiriage_mangan` | 0 / 1 |
 | 8 | tobi | `tobi` | 0 / 1 |
 | 9 | the extra round ("延長"): west for a hanchan, south for a tonpuu game | `nishi_iri`, `nan_iri` together | 0 / 1 (the value is the key of the game chosen; a table app that calls the item the west round sets both) |
-| 10 | the time for a move and the bank ("持ち時間") | (the host's `turn_seconds`, `bank_seconds`) | `tc`: 5+20 (20005), 3+5 (5003), 10+30 (30010), a fixed 20 s (20) and 60 s (60), and the host's own; also 10, 20, 30, 60 (fixed, the choices of a table app before MJ-E3) |
+| 10 | the time for a move and the bank ("持ち時間") | (the host's `turn_seconds`, `bank_seconds`) | `tc`: 5+20 (20005), 5+0 (5), a fixed 30 s (30), 60 s (60) and 600 s (600), and the host's own; also 10, 20, 30, 60 (fixed, the choices of a table app before MJ-E3) |
 | 11 | the abortive draws besides nine kinds (four winds, four kans, four riichi) | `suufon_renda`, `suukaikan`, `suucha_riichi` together | 0 / 1 (1 only when all three are on; a host setting with some of them shows 0, and 0 chosen again goes back to it) |
 | 12 | nagashi mangan | `nagashi_mangan` | 0 / 1 |
 | 13 | double yakuman (suuankou tanki, kokushi 13-wait, junsei chuuren) | `double_yakuman` | 0 / 1 |
@@ -304,9 +304,8 @@ Mahjong Soul's "5+20" by default: a move (a discard, riichi, a kan, a win,
 nine kinds) has `turn_seconds` (5), and each player has a bank of
 `bank_seconds` (20). What a move takes beyond its 5 s comes off the bank;
 when the 5 s and the bank are both used up, the move is played for (the
-drawn tile is discarded). The bank is full at the start of a game and lasts
-it out: it is not filled again at a new round (Mahjong Soul's rule text
-says only "5+20"; when the bank fills is the host's choice). A bank of 0 is
+drawn tile is discarded). The bank is full again at the start of every
+round. A bank of 0 is
 a fixed time a move (`turn_seconds` and no more). The calls on a discard
 keep `call_seconds` and do not touch the bank. An away player keeps its
 short wait ("Players that drop out"; it takes nothing off the bank while
@@ -452,7 +451,7 @@ later. "Not sure" marks what could not be confirmed.
 | Honba at a pao ron | paid by the seat liable | `pao_honba` (`"discarder"`) | key only | `"liable"` |
 | The winning tile of a tenhou | the one that scores most | `tenhou_best_tile` (false: the tile drawn) | key only | true |
 | Kan ura dora | yes | always (`fix/kan-uradora`) | no | yes |
-| Thinking time | 5+20: 5 s a move plus a 20 s bank | none (the host's timers) | yes (item 10) | 5 s a move, a 20 s bank for the game, 8 s a call (`turn_seconds`, `bank_seconds`, `call_seconds`; "Time") |
+| Thinking time | 5+20: 5 s a move plus a 20 s bank | none (the host's timers) | yes (item 10) | 5 s a move, a 20 s bank every round, 8 s a call (`turn_seconds`, `bank_seconds`, `call_seconds`; "Time") |
 | Same-turn furiten | after passing a winning tile (robbing a kan too), until one's next draw | on a pass of a ron offered, and on a winning tile with no ron offered (no yaku on it, or furiten already; `fix/dojun-furiten-no-yaku`) | no | as the engine |
 | Formal tenpai (karaten) | yes, except a single wait on a tile the hand holds four of | the wait judge leaves out only a tile the hand holds four of (a single wait on the fourth tile of a pon is tenpai; `test/karaten-tenpai`) | no | as the engine |
 
@@ -593,8 +592,8 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   these rules read back and played on.
 - `test_mahjong_time.rb`: the time ("Time"): 5+20 by default and from the
   settings, a move beyond its 5 s taking the rest off the bank, the move
-  played for when the bank is used up (then 5 s a move), the bank lasting
-  the game (not filled at a new round, full at the next game), an away
+  played for when the bank is used up (then 5 s a move), the bank filled
+  again at every round, an away
   player's short wait leaving the bank, the calls keeping their time, the
   owner's choice (a bank, a fixed time, the old app's values) reaching the
   table, the banks saved, and a table saved before the bank read back.

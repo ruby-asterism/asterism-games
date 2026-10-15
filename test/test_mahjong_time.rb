@@ -45,7 +45,7 @@ class TestMahjongTime < Minitest::Test
     assert_equal 7000, c["tables"][0]["turn_ms"]
     assert_equal 15_000, c["tables"][0]["bank_ms"]
     t = T.new("t", c["tables"][0])
-    assert_equal [20_005, 5003, 30_010, 20, 60, 15_007], t.rule_choices(TURN), "the host's own time is a choice"
+    assert_equal [20_005, 5, 30, 60, 600, 15_007], t.rule_choices(TURN), "the host's own time is a choice"
   end
 
   def test_a_move_beyond_its_time_takes_the_rest_from_the_bank
@@ -92,9 +92,8 @@ class TestMahjongTime < Minitest::Test
     assert_equal kawa + 1, t.state.kawas[seat].count, "5 s and no more"
   end
 
-  # The banks last a game (README "Time"): not filled at a new round, full
-  # again at the next game.
-  def test_the_bank_lasts_the_game
+  # The banks are full again at every round (README "Time").
+  def test_the_bank_fills_at_every_round
     t, toks = soul_table(1, "over_ms" => 10**9)
     seat, token = toks.first
     now = to_move(t, seat, 0)
@@ -107,7 +106,7 @@ class TestMahjongTime < Minitest::Test
     t.next_round(now + 15_000)
     assert_equal "play", t.status
     assert_equal [1, 2], [M::Engine::BAKAZE.index(t.state.bakaze) + 1, t.state.kyoku]
-    assert_equal 10_000, banks(t)[seat], "a new round does not fill the bank"
+    assert_equal 20_000, banks(t)[seat], "a new round fills the bank"
     # the end of the game, the lobby, the next game
     t.instance_variable_set(:@flow, { "end" => true, "reason" => "normal_end" })
     t.instance_variable_set(:@status, "result")
@@ -160,18 +159,22 @@ class TestMahjongTime < Minitest::Test
     t = human_table("turn_ms" => 5000, "bank_ms" => 20_000)
     tok = t.join("wasm-aaaaa0", "P0", 0)["token"]
     t.sit(tok, -1, 0)
-    assert_equal [20_005, 5003, 30_010, 20, 60], t.public_view(0)["tc"], "the host's 5+20 is the first choice"
+    assert_equal [20_005, 5, 30, 60, 600], t.public_view(0)["tc"], "the host's 5+20 is the first choice"
     assert_equal "value", t.set_rule(tok, TURN, 7)
-    assert_equal "ok", t.set_rule(tok, TURN, 5003)
+    assert_equal "value", t.set_rule(tok, TURN, 5003), "3+5 is not a choice any more"
+    assert_equal "ok", t.set_rule(tok, TURN, 600)
     v = t.public_view(0)
-    assert_equal [3, 5], [v["ru"][TURN], v["tb"]]
+    assert_equal [600, 0], [v["ru"][TURN], v["tb"]]
+    assert_equal "ok", t.set_rule(tok, TURN, 5)
+    v = t.public_view(0)
+    assert_equal [5, 0], [v["ru"][TURN], v["tb"]]
     t.cpu(tok, -1, true)
     assert_equal "ok", t.start(tok, 0)
     refute t.public_view(0).key?("tc"), "the choices are for the lobby"
     seat = t.seat_of(tok)
     now = to_move(t, seat, 0)
-    assert_equal [1 << seat, 8000, 5000], t.public_view(now)["dl"], "3 s and a bank of 5 s"
-    assert_equal [5000] * 4, banks(t)
+    assert_equal [1 << seat, 5000], t.public_view(now)["dl"], "5 s and no bank"
+    assert_equal [0] * 4, banks(t)
   end
 
   def test_a_fixed_time_has_no_bank

@@ -52,8 +52,8 @@ class TestMahjongLocalRules < Minitest::Test
                  "the abortive draws, nagashi mangan, double yakuman, tenpai-yame"
     assert_equal T::RULE_ITEMS.size, t.public_view(0)["ru"].size + t.public_view(0)["rx"].size
     assert_equal 11, t.public_view(0)["ru"].size, "the items a table app of MJ3b knows"
-    assert_equal [20_005, 5003, 30_010, 20, 60, 1], t.rule_choices(TURN),
-                 "5+20, 3+5, 10+30, 20 s, 60 s and the setting's own time (1 s, no bank)"
+    assert_equal [20_005, 5, 30, 60, 600, 1], t.rule_choices(TURN),
+                 "5+20, 5+0, 30 s, 60 s, 600 s and the setting's own time (1 s, no bank)"
     assert_equal 0, t.public_view(0)["tb"], "no bank"
     assert_equal t.rule_choices(TURN), t.public_view(0)["tc"]
     assert_equal [0, 3, 4], t.rule_choices(AKA)

@@ -21,7 +21,7 @@ module AsterismGames
     # Seats are nil (empty, in the lobby only), "human" (a member) or "cpu"
     # (riichi_engine's player). A human who does not decide in time is played
     # for: the drawn tile is discarded, a call is passed. A human's time for
-    # a move is turn_ms, and each seat has a bank of bank_ms for the game
+    # a move is turn_ms, and each seat has a bank of bank_ms for the round
     # (README "Time"): a move that takes longer than turn_ms takes the rest
     # from the bank, and the move is played for when both are used up (bank
     # 0: a fixed time per move). A member that has
@@ -38,7 +38,7 @@ module AsterismGames
 
       DEFAULTS = {
         "turn_ms" => 5_000,       # a human's time for a move (a discard, riichi, a kan, a win)
-        "bank_ms" => 20_000,      # and the bank a move may go on into, one per seat for the game (0: none)
+        "bank_ms" => 20_000,      # and the bank a move may go on into, one per seat, full again every round (0: none)
         "call_ms" => 8_000,       # every human's time to call a discard
         "cpu_ms" => 700,          # a CPU waits this long before it acts
         "result_ms" => 8_000,     # the result of a round stays this long
@@ -84,7 +84,7 @@ module AsterismGames
       # a fixed time per move): Mahjong Soul's default 5+20 first. The
       # value of the item is time_code: the seconds for a move plus 1000
       # times the bank, so a fixed time is just its seconds.
-      RULE_TIMES = [[5, 20], [3, 5], [10, 30], [20, 0], [60, 0]].freeze
+      RULE_TIMES = [[5, 20], [5, 0], [30, 0], [60, 0], [600, 0]].freeze
       # The fixed times a table app before MJ-E3 offers (it shows the seconds
       # for a move and steps through these); the host takes them too.
       RULE_TURNS = [10, 20, 30, 60].freeze
@@ -815,8 +815,6 @@ module AsterismGames
       def start_game(now)
         @game = { "bakaze" => "ton", "kyoku" => 1, "honba" => 0, "kyoutaku" => 0, "oya" => 0,
                   "scores" => [@rule.initial_score] * 4, "rounds" => 0 }
-        # The banks are full at the start of a game and last it out.
-        @banks = [bank_ms] * 4
         @final = nil
         @final_reason = nil
         new_round
@@ -824,6 +822,8 @@ module AsterismGames
       end
 
       def new_round
+        # The banks are full again at the start of every round.
+        @banks = [bank_ms] * 4
         @state = Engine.setup(@game, @rule)
         @status = "play"
         @result = nil
