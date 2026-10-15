@@ -11,7 +11,9 @@ module AsterismGames
     #   stand(token)                -> "ok" or why not
     #   cpu(token, seat, on)        -> "ok" or why not (the owner; seat -1: every empty seat)
     #   start(token)                -> "ok" or why not (the owner, four seats taken)
-    #   view(token)                 -> the member's view (Hash) or {"error" => "token"}
+    #   view(token[, assist])       -> the member's view (Hash) or {"error" => "token"};
+    #                                  assist: the level of help its screen
+    #                                  shows (README "Assist", 0-3; default 1)
     #   act(token, sv, type, tiles) -> "ok" or why not ("token", "stale",
     #                                  "not offered", "not playing", "not seated")
     #   table                       -> the public view (no hand)
@@ -21,7 +23,8 @@ module AsterismGames
     # key); the same node gets its membership and token back from join. Every
     # call by a member counts as a sign that it is there (away_ms).
     class Remote
-      METHODS = { join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, view: 1, act: 4, table: 0, leave: 1 }.freeze
+      # view takes one or two arguments (-1: the arguments are not counted).
+      METHODS = { join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, view: -1, act: 4, table: 0, leave: 1 }.freeze
 
       def initialize(table, clock)
         @table = table
@@ -62,9 +65,10 @@ module AsterismGames
         @table.start(token, @clock.call)
       end
 
-      def view(token)
+      def view(token, assist = nil)
         mark(token)
-        v = @table.member_view(token, @clock.call)
+        lv = assist.nil? ? Table::ASSIST_DEFAULT : assist.to_i.clamp(Table::ASSIST_LEVELS.min, Table::ASSIST_LEVELS.max)
+        v = @table.member_view(token, @clock.call, lv)
         v || { "error" => "token" }
       end
 

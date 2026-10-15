@@ -51,12 +51,12 @@ module MahjongTestHelper
   end
 
   # The keys a seat's view may have beyond the public view.
-  SEAT_KEYS = %w[me h dt a wt].freeze
+  SEAT_KEYS = %w[me h dt a wt uk].freeze
 
   # Checks one seat's view against the state: its own hand and nothing of
   # any other hand.
-  def check_secrecy(table, seat, now)
-    v = table.view(seat, now)
+  def check_secrecy(table, seat, now, assist = M::Table::ASSIST_DEFAULT)
+    v = table.view(seat, now, assist)
     pub = table.public_view(now)
     assert_equal [], (v.keys - pub.keys - SEAT_KEYS), "unexpected keys in a seat's view"
     assert_nil pub["h"], "a hand in the public view"

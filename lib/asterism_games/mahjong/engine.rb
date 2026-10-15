@@ -110,15 +110,12 @@ module AsterismGames
         out
       end
 
-      # The waits after each discard that declares riichi, for the screen's
-      # help (README "Views", "wt"): [[discard, [[wait, left], ...]], ...] in
-      # tile names, the waits as riichi_engine's wait judge gives them
-      # (MachiJudge, the same judge that offers the riichi). left is what the
-      # seat cannot see of the wait: 4 less the tiles in its own hand (the
-      # discard among them, it goes to the river), in the rivers, in every
-      # meld and among the dora indicators. Only what the seat sees is
-      # counted, so it tells nothing of the other hands.
-      def riichi_waits(state, seat, discards)
+      # The screen's help (README "Views", "Assist"): what the seat can see
+      # of each tile kind, 34 counts: its own hand (a discard among them goes
+      # to the river), the rivers (a called tile is counted in its meld),
+      # every meld and the dora indicators. Only what the seat sees, so the
+      # help tells nothing of the other hands.
+      def seen_counts(state, seat)
         set = ::Mahjong::Tiles::TileSet
         seen = Array.new(34, 0)
         state.hands[seat].tiles.each { |t| seen[set.tile_index(t)] += 1 }
@@ -127,11 +124,174 @@ module AsterismGames
           state.fuuros[s].each { |f| f.tiles.each { |t| seen[set.tile_index(t)] += 1 } }
         end
         state.dora_hyouji.each { |t| seen[set.tile_index(t)] += 1 }
+        seen
+      end
+
+      # The waits after each discard: [[discard, [[wait, left], ...]], ...]
+      # in tile names, the waits as riichi_engine's wait judge gives them
+      # (MachiJudge, the same judge that offers the riichi; it takes a
+      # concealed hand of any size, so a hand with melds too). left is 4 less
+      # what the seat can see of the wait (seen_counts). Whether a wait has a
+      # yaku is not judged.
+      def waits_after(state, seat, discards)
+        set = ::Mahjong::Tiles::TileSet
+        seen = seen_counts(state, seat)
         hand = state.hands[seat]
         discards.map do |name|
           rest = hand.remove(name).to_34
           waits = ::Mahjong::Scoring::Judges::MachiJudge.machi_tile_indices(rest).sort
           [name, waits.map { |i| [set.from_index(i), [4 - seen[i], 0].max] }]
+        end
+      end
+
+      # The shanten of a concealed hand (34 counts) next to melds melds
+      # (0: tenpai). Seven pairs and kokushi (closed hands only) are
+      # riichi_engine's own counts (the CPU's Cpu::Analysis::Shanten). The
+      # regular form is counted here: riichi_engine's search takes the hand
+      # as all there is (four sets to make, wrong once there are melds) and
+      # takes tens of ms a turn for the acceptance (34 counts per discard).
+      # This one counts each suit apart, once per suit pattern, and gives the
+      # engine's number for a closed hand (the tests compare them).
+      def shanten(t34, melds)
+        r = regular_shanten(t34, melds)
+        return r unless melds.zero?
+        sh = ::Mahjong::Cpu::Analysis::Shanten
+        c = sh.chiitoitsu_shanten(t34)
+        k = sh.kokushi_shanten(t34)
+        [r, c, k].min
+      end
+
+      # 8 - 2 x sets - partial sets - pair, with at most four sets and
+      # partial sets together (the melds are sets already made).
+      def regular_shanten(t34, melds)
+        opts = [suit_options(t34, 0), suit_options(t34, 9), suit_options(t34, 18), honor_options(t34)]
+        cap = 4 - melds
+        best = 8
+        combine = lambda do |k, m, ta, pr|
+          if k == 4
+            ta = cap - m if ta > cap - m
+            v = 8 - 2 * (m + melds) - ta - pr
+            best = v if v < best
+            return
+          end
+          opts[k].each do |om, ot, op|
+            next if pr + op > 1 || m + om > cap
+            combine.call(k + 1, m + om, ta + ot, pr + op)
+          end
+        end
+        combine.call(0, 0, 0, 0)
+        best
+      end
+
+      SUIT_MEMO = {}
+      SUIT_MEMO_MAX = 50_000 # patterns kept (a few MB); then it starts again
+
+      # A suit's ways to split into sets, partial sets and a pair, as
+      # [[sets, partial sets, pair], ...] (only those no other way beats).
+      def suit_options(t34, base)
+        c = t34[base, 9]
+        SUIT_MEMO.clear if SUIT_MEMO.size >= SUIT_MEMO_MAX
+        SUIT_MEMO[c] ||= begin
+          found = {}
+          suit_search(c.dup, 0, 0, 0, 0, found)
+          pareto(found.keys)
+        end
+      end
+
+      def suit_search(c, i, m, ta, pr, found)
+        i += 1 while i < 9 && c[i].zero?
+        if i >= 9
+          found[[m, ta, pr]] = true
+          return
+        end
+        if c[i] >= 3
+          c[i] -= 3
+          suit_search(c, i, m + 1, ta, pr, found)
+          c[i] += 3
+        end
+        if i <= 6 && c[i + 1].positive? && c[i + 2].positive?
+          c[i] -= 1
+          c[i + 1] -= 1
+          c[i + 2] -= 1
+          suit_search(c, i, m + 1, ta, pr, found)
+          c[i] += 1
+          c[i + 1] += 1
+          c[i + 2] += 1
+        end
+        if c[i] >= 2
+          c[i] -= 2
+          suit_search(c, i, m, ta, 1, found) if pr.zero?
+          suit_search(c, i, m, ta + 1, pr, found)
+          c[i] += 2
+        end
+        if i <= 7 && c[i + 1].positive?
+          c[i] -= 1
+          c[i + 1] -= 1
+          suit_search(c, i, m, ta + 1, pr, found)
+          c[i] += 1
+          c[i + 1] += 1
+        end
+        if i <= 6 && c[i + 2].positive?
+          c[i] -= 1
+          c[i + 2] -= 1
+          suit_search(c, i, m, ta + 1, pr, found)
+          c[i] += 1
+          c[i + 2] += 1
+        end
+        c[i] -= 1
+        suit_search(c, i, m, ta, pr, found)
+        c[i] += 1
+      end
+
+      # Honours make sets and pairs of one kind only.
+      def honor_options(t34)
+        m = 0
+        pairs = 0
+        (27...34).each do |i|
+          n = t34[i]
+          m += 1 if n >= 3
+          pairs += 1 if n == 2
+        end
+        out = [[m, pairs, 0]]
+        out << [m, pairs - 1, 1] if pairs.positive?
+        # a triplet kept as a pair (for the head)
+        out << [m - 1, pairs + 1, 0] << [m - 1, pairs, 1] if m.positive?
+        out
+      end
+
+      # Drops the ways another way beats (no fewer of each, same pair).
+      def pareto(list)
+        list.reject do |a|
+          list.any? { |b| b != a && b[2] == a[2] && b[0] >= a[0] && b[1] >= a[1] }
+        end
+      end
+
+      # For each discard, the shanten after it and the tiles that would bring
+      # it down (the acceptance): [[discard, shanten, [[tile, left], ...]],
+      # ...], left as in waits_after; a tile the seat can see all four of is
+      # left out (riichi_engine's CPU counts the acceptance the same way).
+      def ukeire_after(state, seat, discards)
+        set = ::Mahjong::Tiles::TileSet
+        seen = seen_counts(state, seat)
+        melds = state.fuuros[seat].size
+        hand = state.hands[seat]
+        done = {}
+        discards.map do |name|
+          rest = hand.remove(name).to_34
+          key = rest.join(",")
+          done[key] ||= begin
+            sh = shanten(rest, melds)
+            list = []
+            34.times do |i|
+              left = 4 - seen[i]
+              next if rest[i] >= 4 || left <= 0
+              rest[i] += 1
+              list << [set.from_index(i), left] if shanten(rest, melds) < sh
+              rest[i] -= 1
+            end
+            [sh, list]
+          end
+          [name, done[key][0], done[key][1]]
         end
       end
 

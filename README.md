@@ -88,7 +88,7 @@ A mahjong table takes (the environment applies to every table):
 | `stand` | token | `"ok"` or why not (lobby only) |
 | `cpu` | token, seat, on | the owner: a CPU into an empty seat (on) or out of it; seat -1 with on fills every empty seat |
 | `start` | token | the owner, once the four seats are taken and one is a member: the seats are drawn (who deals first) and the game starts |
-| `view` | token | the member's view (below), or `{"error" => "token"}` |
+| `view` | token[, assist] | the member's view (below), or `{"error" => "token"}`; assist: the help its screen shows (Assist, 0-3; without it 1) |
 | `act` | token, sv, type, tiles | `"ok"`, or why not: `"token"`, `"not seated"`, `"stale"` (sv is not the current one), `"not offered"`, `"not playing"` |
 | `table` | none | the public view (no hand) |
 | `leave` | token | `true` / `false`; in the lobby the seat empties, during a game it goes to a CPU |
@@ -114,6 +114,34 @@ A mahjong table takes (the environment applies to every table):
   `asterism/<node>/<app>/<table>/state` (and every 5 s anyway). A player
   that sees a newer `"v"` there asks its view again; a screen also asks every
   3 s, which tells the host it is still there.
+
+### Assist
+
+The help the table screen shows its player, chosen by the player and sent
+with each `view` (a screen's setting, not the table's: every seat may ask
+for another level). Worked out once per state version, seat and level, only
+from what that seat can see, and only for a seat that asks.
+
+| Level | Help |
+|---|---|
+| 0 | none |
+| 1 (default) | when the seat may declare riichi: `wt` for each discard that declares it |
+| 2 | at the seat's discard: `wt` for each discard that leaves the hand tenpai, with or without riichi (an open hand, a hand that stays dama). Whether a wait has a yaku is not judged |
+| 3 | as 2; when no discard leaves the hand tenpai, `uk` for every discard |
+
+- Shanten: seven pairs and kokushi are riichi_engine's own counts (its CPU's
+  `Cpu::Analysis::Shanten`); the regular form is the host's
+  (`Engine.shanten`). The engine's count takes the hand as all there is, so
+  it is wrong once there are melds (three sets and a single tile next to a
+  meld is tenpai, the engine says 2-shanten), and it takes about 50 ms a
+  turn for the acceptance. The host counts each suit apart (once per suit
+  pattern) with the melds as sets already made; for a closed hand it gives
+  the engine's number (the tests compare 3000 random hands), with melds
+  tenpai is what the wait judge says.
+- Time (CRuby, one seat's help at one state, one process): over 4 CPU
+  hanchan with seats at levels 1, 2 and 3, median 0.9 ms, 95 % 4.5 ms, at
+  most 30 ms (the first ones, before the suit patterns are known; `rake
+  test` prints the `assist:` line).
 
 ### Calls on a discard
 
@@ -165,7 +193,8 @@ A Hash (MessagePack); tiles are one byte each in binary strings (bin).
 | `res` | at a round's end: `k` (`tsumo_agari`, `ron_agari`, `ryuukyoku`, `kyuushu_kyuuhai`, `sanchahou`), `d` (the four score changes), `f` (who dealt in), `wn` (one entry per winner, in turn order from the discarder: `w` seat, `y` the yaku as riichi_engine names them, in Japanese, `pt` fu, han and points, `h` and `ag` the hand and the winning tile), `tp` (tenpai seats at a draw), `rs` (the seats of the three rons at a sanchahou) |
 | `fin` | at the end: `[[seat, rank, score, point x 10], ...]` |
 | `me`, `h`, `dt`, `a` | the member's view only: its seat (-1: watching), its hand (sorted, without the drawn tile), the drawn tile (-1 none), what it may do: `[[type, tiles], ...]` |
-| `wt` | the member's view only, when it may declare riichi: the riichi help, one binary string: per discard that declares riichi the tile, the number of waits n and n pairs `[wait, left]` (the waits as riichi_engine's wait judge gives them; left: 4 less what the seat can see of the tile: its own hand, the rivers, every meld, the dora indicators) |
+| `wt` | the member's view only, the help (Assist, levels 1-3): one binary string, per discard the tile, the number of waits n and n pairs `[wait, left]` (the waits as riichi_engine's wait judge gives them; left: 4 less what the seat can see of the tile: its own hand, the rivers, every meld, the dora indicators) |
+| `uk` | the member's view only, level 3 when no discard leaves the hand tenpai: one binary string, per discard the tile, the shanten after it, the number n of tiles that bring it down and n pairs `[tile, left]` (left as in `wt`; a tile the seat sees all four of is left out) |
 
 Tile numbers: `0..8` 1m..9m, `9` 0m (red five), `10..18` 1p..9p, `19` 0p,
 `20..28` 1s..9s, `29` 0s, `30..36` 1z..7z (east south west north white
@@ -189,7 +218,11 @@ with fourteen yaku each is about 1.9 KB. The riichi help adds at most
 14 x (2 + 13 x 2) = 392 B (fourteen discards with thirteen waits each, more
 than a hand can have; a nine-sided chuuren gives 80 B); a view built by hand
 with it, full rivers, the other seats' kans and the long names is about
-1.5 KB. The tests hold every view under 3800 B.
+1.5 KB. The acceptance (`uk`, level 3) adds at most 14 x (3 + 34 x 2) =
+994 B (every kind after every discard, more than a hand can have; random
+hands give at most about 250 B, 20 CPU hanchan at most 762 B with a view of
+1,043 B); the same view built by hand with it is about 2.1 KB. `wt` and `uk` never come together. The tests hold every view
+under 3800 B.
 
 ### Time and saving
 
@@ -304,9 +337,15 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   through `act` (wins when offered, calls now and then, passes, timeouts,
   and now and then something not offered, refused): no exception, the points
   add up after every round, after every step no seat's view has another
-  seat's hand, the riichi help comes only with a riichi offer, and every
-  view fits in a board's message; and the worst-case views (a result, a
-  riichi turn with the riichi help at its largest).
+  seat's hand, the help comes only as each seat's level says (level 1 only
+  with a riichi offer, uk only at level 3 and never with wt), and every
+  view fits in a board's message (the four seats ask for the help at
+  levels 1, 2, 3 and 0); and the worst-case views (a result, a riichi turn
+  with the riichi help at its largest).
+- `test_mahjong_assist.rb`: the help by level (which views get `wt` and
+  `uk`, the call with and without the level), the shanten against the
+  engine's for closed hands and against the wait judge with melds, the
+  acceptance, and the largest acceptance view.
 - `test_mahjong_rules.rb`: the lobby (join, sit, stand, the owner, CPUs,
   start, a spectator, away and back, back to the lobby after a game), tokens,
   refusals (no token, a wrong token, an action not offered, a stale state),

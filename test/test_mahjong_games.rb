@@ -10,12 +10,14 @@ class TestMahjongGames < Minitest::Test
   include MahjongTestHelper
 
   LIMIT = 3800
+  LEVELS = [1, 2, 3, 0].freeze # the help each seat's screen asks for (README "Assist")
   GAMES = Integer(ENV.fetch("MJ_GAMES", "20"))
   PROCS = [Integer(ENV.fetch("MJ_PROCS", "8")), GAMES].min
 
   def play_games(n)
     out = { "games" => 0, "rounds" => 0, "max_view" => 0, "max_public" => 0, "kinds" => Hash.new(0),
-            "checks" => 0, "actions" => 0, "cpu_refused" => 0, "wt_views" => 0, "max_wt" => 0, "errors" => [] }
+            "checks" => 0, "actions" => 0, "cpu_refused" => 0, "wt_views" => 0, "max_wt" => 0, "uk_views" => 0, "max_uk" => 0,
+            "assist_ms" => [], "errors" => [] }
     n.times do
       t = cpu_table
       now = 0
@@ -30,19 +32,29 @@ class TestMahjongGames < Minitest::Test
           out["kinds"][@last_result["kind"]] += 1
         end
         4.times do |seat|
-          v = check_secrecy(t, seat, now)
+          level = LEVELS[seat]
+          v = check_secrecy(t, seat, now, level)
           out["max_view"] = [out["max_view"], reply_bytes(v)].max
           out["checks"] += 1
           if v["wt"]
             out["wt_views"] += 1
             out["max_wt"] = [out["max_wt"], v["wt"].bytesize].max
-            out["errors"] << "wt without riichi" unless v["a"].any? { |t, _| t == E::RIICHI }
+            out["errors"] << "wt without riichi" if level == 1 && v["a"].none? { |t, _| t == E::RIICHI }
+            out["errors"] << "wt without a discard" if v["a"].none? { |t, _| t == E::DAHAI }
           end
+          if v["uk"]
+            out["uk_views"] += 1
+            out["max_uk"] = [out["max_uk"], v["uk"].bytesize].max
+            out["errors"] << "uk below level 3" if level < 3
+            out["errors"] << "uk with wt" if v["wt"]
+          end
+          out["errors"] << "help at level 0" if level.zero? && (v["wt"] || v["uk"])
         end
         out["max_public"] = [out["max_public"], reply_bytes(t.public_view(now))].max
         raise "too many steps" if steps > 2_000_000
       end
       out["games"] += 1
+      out["assist_ms"].concat(t.assist_times)
       out["rounds"] += t.stats["rounds"]
       out["actions"] += t.stats["actions"]
       out["cpu_refused"] += t.stats["cpu_refused"]
@@ -72,18 +84,25 @@ class TestMahjongGames < Minitest::Test
       Marshal.load(data)
     end
     sum = results.each_with_object(Hash.new(0)) do |x, a|
-      %w[games rounds actions checks cpu_refused wt_views].each { |k| a[k] += x[k] }
+      %w[games rounds actions checks cpu_refused wt_views uk_views].each { |k| a[k] += x[k] }
       a["max_view"] = [a["max_view"], x["max_view"]].max
       a["max_wt"] = [a["max_wt"], x["max_wt"]].max
+      a["max_uk"] = [a["max_uk"], x["max_uk"]].max
       a["max_public"] = [a["max_public"], x["max_public"]].max
       x["kinds"].each { |k, v| a["kind_#{k}"] += v }
     end
     errors = results.flat_map { |x| x["errors"] }
     puts "\n  #{sum.sort.map { |k, v| "#{k}=#{v}" }.join(' ')}"
+    ms = results.flat_map { |x| x["assist_ms"] }.sort
+    unless ms.empty?
+      puts "  assist: #{ms.size} computations, #{format('%.2f', ms[ms.size / 2])} / " \
+           "#{format('%.2f', ms[ms.size * 95 / 100])} / #{format('%.2f', ms.last)} ms (median / 95% / max)"
+    end
     assert_empty errors
     assert_equal GAMES, sum["games"]
     assert_operator sum["max_view"], :<, LIMIT
     assert_operator sum["wt_views"], :>, 0 if GAMES >= 4
+    assert_operator sum["uk_views"], :>, 0 if GAMES >= 4
   end
 
   HUMAN_GAMES = Integer(ENV.fetch("MJ_HUMAN_GAMES", "1"))
@@ -216,7 +235,7 @@ class TestMahjongGames < Minitest::Test
     # A real hand with many waits: nine-sided chuuren and a drawn tile.
     s = st
     s.hands[seat] = Mahjong::State::Hand.new(%w[1m 1m 1m 2m 3m 4m 5m 6m 7m 8m 9m 9m 9m 5m])
-    w = E.riichi_waits(s, seat, %w[1m 2m 3m 4m 5m 6m 7m 8m 9m])
+    w = E.waits_after(s, seat, %w[1m 2m 3m 4m 5m 6m 7m 8m 9m])
     n = w.sum { |_d, ws| 2 + ws.size * 2 }
     puts "  chuuren: #{w.count { |_d, ws| ws.any? }} discards, #{w.sum { |_d, ws| ws.size }} waits, wt #{n} B"
     assert_operator n, :<, 14 * 28

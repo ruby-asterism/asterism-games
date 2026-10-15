@@ -29,6 +29,8 @@ module AsterismGames
       SAVE_FORMAT = 2
       MAX_ROUNDS = 40 # a hanchan has far fewer; a guard against a loop
       MAX_MEMBERS = 16
+      ASSIST_LEVELS = 0..3 # README "Assist"
+      ASSIST_DEFAULT = 1   # the riichi help, for a screen that does not ask
 
       DEFAULTS = {
         "turn_ms" => 20_000,      # a human's time to discard
@@ -628,8 +630,9 @@ module AsterismGames
       end
 
       # One seat's view (seat -1: a spectator member): the public one, the
-      # hand and what it may do.
-      def view(seat, now)
+      # hand, what it may do and the help its screen asked for (assist, the
+      # level of README "Assist"; a screen that does not say gets 1).
+      def view(seat, now, assist = ASSIST_DEFAULT)
         v = public_view(now)
         v["me"] = seat
         if seat >= 0 && @state && @status != "wait"
@@ -645,35 +648,85 @@ module AsterismGames
         end
         a = offers(seat)
         v["a"] = a.map { |t, ts| [t, Tiles.pack(ts).b] }
-        wt = riichi_help(seat, a)
+        wt, uk = assist_help(seat, a, assist)
         v["wt"] = wt if wt
+        v["uk"] = uk if uk
         v
       end
 
-      # The waits after each riichi discard (README "Views", "wt"), when the
-      # seat may declare riichi: one binary String, per discard the tile, the
-      # number of waits n and n pairs [wait, left]. Worked out once per state
-      # version and seat.
+      # The help for one seat's screen at its level (README "Assist"), as
+      # [wt, uk] (binary strings or nil): level 1 the waits after each
+      # discard that declares riichi; 2 the waits after each discard that
+      # leaves the hand tenpai, with melds or without riichi too; 3 as 2, and
+      # when no discard leaves it tenpai, the shanten and the acceptance
+      # after each discard. Worked out once per state version, seat and
+      # level; the time each takes goes to @assist_ms.
+      #   wt: per discard the tile, the number of waits n, n pairs [wait, left]
+      #   uk: per discard the tile, the shanten after it, the number of
+      #       tiles n that bring it down, n pairs [tile, left]
+      def assist_help(seat, offers, level)
+        level = level.to_i
+        return [nil, nil] if level <= 0 || seat.negative? || @state.nil? || @status != "play"
+        c = @assist[[seat, level]]
+        return c[1] if c && c[0] == @sv
+        t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        out = level == 1 ? [riichi_help(seat, offers), nil] : tenpai_help(seat, offers, level)
+        @assist[[seat, level]] = [@sv, out]
+        note_assist_ms((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0) if out[0] || out[1]
+        out
+      end
+
       def riichi_help(seat, offers)
         o = offers.find { |t, _ts| t == Engine::RIICHI }
-        return nil unless o
-        key = [@sv, seat]
-        return @wait_help[1] if @wait_help && @wait_help[0] == key
+        o ? waits_bytes(Engine.waits_after(@state, seat, o[1])) : nil
+      end
+
+      def tenpai_help(seat, offers, level)
+        o = offers.find { |t, _ts| t == Engine::DAHAI }
+        return [nil, nil] unless o
+        names = o[1].uniq
+        st = @state
+        melds = st.fuuros[seat].size
+        hand = st.hands[seat]
+        tenpai = names.select { |n| Engine.shanten(hand.remove(n).to_34, melds).zero? }
+        waits = Engine.waits_after(st, seat, tenpai).reject { |_d, w| w.empty? }
+        return [waits_bytes(waits), nil] unless waits.empty?
+        return [nil, nil] if level < 3
         out = []
-        Engine.riichi_waits(@state, seat, o[1]).each do |d, waits|
+        Engine.ukeire_after(st, seat, names).each do |d, sh, list|
+          out << Tiles.code(d) << sh << list.size
+          list.each { |w, left| out << Tiles.code(w) << left }
+        end
+        [nil, out.pack("C*").b]
+      end
+
+      def waits_bytes(list)
+        out = []
+        list.each do |d, waits|
           out << Tiles.code(d) << waits.size
           waits.each { |w, left| out << Tiles.code(w) << left }
         end
-        bin = out.pack("C*").b
-        @wait_help = [key, bin]
-        bin
+        out.pack("C*").b
+      end
+
+      # The help's times (ms), the last ASSIST_TIMES of them (assist_times).
+      ASSIST_TIMES = 5000
+
+      def note_assist_ms(ms)
+        @assist_ms << ms
+        @assist_ms.shift if @assist_ms.size > ASSIST_TIMES
+        @stats["assist"] += 1
+      end
+
+      def assist_times
+        @assist_ms.dup
       end
 
       # A member's view by its token (nil: not a member).
-      def member_view(token, now)
+      def member_view(token, now, assist = ASSIST_DEFAULT)
         node = node_of(token)
         return nil unless node
-        view(seat_index(node) || -1, now)
+        view(seat_index(node) || -1, now, assist)
       end
 
       def bits
@@ -805,7 +858,8 @@ module AsterismGames
       def reset_all
         @ver = 1
         @sv = 0
-        @wait_help = nil
+        @assist = {}          # [seat, level] => [state version, [wt, uk]]
+        @assist_ms = []
         @now = 0
         @status = "wait"
         @seats = [nil] * 4

@@ -479,10 +479,10 @@ class TestMahjongRules < Minitest::Test
     s = riichi_ready_state
     o = E.offers(s, 0, E.rule).find { |t, _| t == E::RIICHI }
     assert_equal ["9m"], o[1]
-    assert_equal [["9m", [["1s", 3], ["4s", 3]]]], E.riichi_waits(s, 0, o[1])
+    assert_equal [["9m", [["1s", 3], ["4s", 3]]]], E.waits_after(s, 0, o[1])
     # the waits of a discard that is not offered, for the counting: after
     # 3s the hand waits on nothing
-    assert_equal [["3s", []]], E.riichi_waits(s, 0, ["3s"])
+    assert_equal [["3s", []]], E.waits_after(s, 0, ["3s"])
   end
 
   def test_riichi_waits_count_the_seats_own_hand_and_melds
@@ -492,7 +492,7 @@ class TestMahjongRules < Minitest::Test
     s.fuuros[1] = [Mahjong::State::Fuuro.new(type: :pon, tiles: [Mahjong::Tiles::Tile.new("4s")] * 3,
                                              called_tile: Mahjong::Tiles::Tile.new("4s"), from_seat: 2)]
     # discarding the drawn 1s: 1s seen twice (the river, the discard), 4s four times (pon, indicator)
-    waits = E.riichi_waits(s, 0, ["1s"])
+    waits = E.waits_after(s, 0, ["1s"])
     assert_equal [["1s", [["1s", 2], ["4s", 0]]]], waits
   end
 
@@ -503,7 +503,7 @@ class TestMahjongRules < Minitest::Test
     s = t.state
     give(s, seat, %w[1m 2m 3m 4p 5p 6p 7s 8s 9s 1z 1z 2s 3s 9m])
     s.last_tsumo = Mahjong::Tiles::Tile.new("9m")
-    t.instance_variable_set(:@wait_help, nil)
+    t.instance_variable_set(:@assist, {})
     v = t.view(seat, now)
     assert_includes v["a"].map(&:first), E::RIICHI
     b = v["wt"].bytes
