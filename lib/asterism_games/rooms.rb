@@ -30,6 +30,14 @@ module AsterismGames
   # starts with an empty lobby. A host process that stops on its own is
   # started again (after 1, 2, 4 .. 30 s); a restarted supervisor finds the
   # rooms and their saved tables again.
+  #
+  # The permanent tables (README "Permanent tables", the "permanent"
+  # settings): with a certificate of the host's own (a row of the console's
+  # registry), one more host process joins the router on the registered
+  # side, outside every room, and serves its tables there for the boards
+  # and the browsers with a pass. Saved under state_dir/permanent/, kept
+  # across restarts, never removed by the rooms' clean-up; started again
+  # like a room's host.
   class Rooms
     CHECK_S = 1.0
     STOP_WAIT_S = 8
@@ -75,6 +83,8 @@ module AsterismGames
       @dir = File.join(config["state_dir"], "rooms")
       FileUtils.mkdir_p(@dir)
       @children = {} # slot => {"pid", "room", "until", "since", "restarts", "next_at"}
+      @permanent = config["permanent"]
+      @perm = { "restarts" => 0 } # the permanent tables' host: {"pid", "since", "restarts", "next_at", "last_exit", "waiting"}
       @mtime = nil
       @data = nil
       @read_ok = false
@@ -91,10 +101,16 @@ module AsterismGames
     def rooms_file = File.join(@rooms["dir"], "rooms.json")
     def certs_dir = File.join(@rooms["dir"], "certs")
     def slot_dir(slot) = File.join(@dir, slot)
+    def permanent_dir = File.join(@config["state_dir"], "permanent")
+    attr_reader :perm
 
     def run
       @log.call("games: rooms from #{rooms_file}: tables for rooms opening #{@rooms['apps'].join(', ')} " \
                 "(at most #{@rooms['max']} rooms)")
+      if @permanent
+        @log.call("games: permanent tables #{@permanent['tables'].map { |t| t['name'] }.join(', ')} " \
+                  "with #{@permanent['credentials']}")
+      end
       start_status_server
       until @stop
         @lock.synchronize { check }
@@ -109,6 +125,8 @@ module AsterismGames
     def check(now = @clock.call)
       read_file
       reap(now)
+      reap_permanent(now)
+      start_permanent(now)
       wanted = self.class.wanted(@data, @rooms["apps"], now.to_i)
       @children.keys.each do |slot|
         c = @children[slot]
@@ -187,11 +205,49 @@ module AsterismGames
         "status_file" => File.join(dir, "host.json"), "tables" => @rooms["tables"] }
     end
 
-    def fork_host(slot, cfg)
+    # The permanent tables' host (when configured and not running): its
+    # certificate must be there (else it is looked for again on every pass,
+    # said once in the log).
+    def start_permanent(now)
+      return unless @permanent && @perm["pid"].nil?
+      return if @perm["next_at"] && now < @perm["next_at"]
+      tar = @permanent["credentials"]
+      unless File.file?(tar) && File.readable?(tar)
+        @log.call("games: permanent: no readable #{tar}; the permanent tables wait for it") unless @perm["waiting"]
+        @perm["waiting"] = true
+        return
+      end
+      @perm["waiting"] = false
+      FileUtils.mkdir_p(permanent_dir)
+      cfg = { "node" => @permanent["node"], "app" => @config["app"], "credentials" => tar,
+              "credentials_router" => @permanent["router"], "state_dir" => permanent_dir,
+              "status_file" => File.join(permanent_dir, "host.json"), "tables" => @permanent["tables"] }
+      @perm.merge!("since" => Time.now.utc.iso8601, "next_at" => nil)
+      @perm["pid"] = @spawn.call("permanent", cfg)
+      @log.call("games: permanent: host pid #{@perm['pid']} (#{@permanent['tables'].map { |t| t['name'] }.join(', ')})")
+    end
+
+    def reap_permanent(now)
+      return unless @perm["pid"]
+      pid, st = Process.wait2(@perm["pid"], Process::WNOHANG)
+      return unless pid
+      @perm["pid"] = nil
+      @perm["restarts"] += 1
+      delay = [2**[@perm["restarts"] - 1, 5].min, BACKOFF_MAX_S].min
+      @perm["next_at"] = now + delay
+      @perm["last_exit"] = st.exitstatus || "signal #{st.termsig}"
+      @log.call("games: permanent: host pid #{pid} stopped (#{@perm['last_exit']}); again in #{delay} s")
+    rescue Errno::ECHILD
+      @perm["pid"] = nil
+    end
+
+    # who: a room's slot ("01") or "permanent".
+    def fork_host(who, cfg)
+      label = who == "permanent" ? "permanent" : "room #{who}"
       fork do
         @server&.close
-        $PROGRAM_NAME = "asterism-games room #{slot}"
-        host = Host.new(cfg, log: ->(m) { @log.call("room #{slot}: #{m}") })
+        $PROGRAM_NAME = "asterism-games #{label}"
+        host = Host.new(cfg, log: ->(m) { @log.call("#{label}: #{m}") })
         %w[INT TERM].each { |s| trap(s) { host.stop! } }
         host.run
         exit!(0)
@@ -223,8 +279,10 @@ module AsterismGames
 
     def stop_all
       pids = @children.values.map { |c| c["pid"] }.compact
+      pids << @perm["pid"] if @perm["pid"]
       terminate(pids)
       @children.clear
+      @perm["pid"] = nil
     end
 
     def terminate(pids)
@@ -273,13 +331,33 @@ module AsterismGames
                    "state" => c["pid"] ? (fresh && h["connected"] ? "up" : "starting") : "restarting",
                    "connected" => fresh ? h["connected"] : false, "tables" => fresh ? h["tables"] : {} }]
         end
+        perm = permanent_status(now)
+        seated = ->(r) { r["tables"].to_h.values.any? { |t| t["humans"].to_i.positive? } }
         { "host" => "asterism-games", "version" => AsterismGames::VERSION, "since" => @started_at.iso8601,
           "rooms_file" => { "ok" => @read_ok, "read_at" => @read_at&.iso8601 },
           "apps" => @rooms["apps"], "max" => @rooms["max"], "rooms" => rooms,
           "without_table" => (wanted.keys - rooms.keys).sort,
-          "busy" => rooms.values.any? { |r| r["tables"].to_h.values.any? { |t| t["humans"].to_i.positive? } },
-          "rss_kb" => rss_kb([Process.pid] + @children.values.map { |c| c["pid"] }.compact) }
+          "permanent" => perm,
+          "busy" => rooms.values.any?(&seated) || (perm ? seated.call(perm) : false),
+          "rss_kb" => rss_kb([Process.pid, @perm["pid"]].compact + @children.values.map { |c| c["pid"] }.compact) }
       end
+    end
+
+    # The permanent tables' host for the status (nil: not configured).
+    # "node" is the setting (nil: the certificate's name), never read from
+    # the certificate here.
+    def permanent_status(now)
+      return nil unless @permanent
+      h = read_json(File.join(permanent_dir, "host.json")) || {}
+      fresh = @perm["pid"] && h["at"].to_i >= now.to_i - 10 && h["pid"] == @perm["pid"]
+      state = if @perm["pid"] then fresh && h["connected"] ? "up" : "starting"
+              elsif @perm["waiting"] then "no certificate"
+              else "restarting"
+              end
+      { "node" => fresh ? h["node"] : nil, "table_names" => @permanent["tables"].map { |t| t["name"] },
+        "pid" => @perm["pid"], "since" => @perm["since"], "restarts" => @perm["restarts"],
+        "last_exit" => @perm["last_exit"], "state" => state, "connected" => fresh ? h["connected"] : false,
+        "tables" => fresh ? h["tables"] : {} }
     end
 
     def rss_kb(pids)

@@ -8,10 +8,24 @@ rooms:
   dir: /rooms                  # the console's rooms volume (rooms.json, certs/room-NN.tar), read-only
   apps:                        # a room whose link opens one of these gets the tables below
     - /app/game/mahjong/mahjong.app.rb
-  max: 3                       # rooms with tables at once (one host process each, about 60 MB)
+  max: 3                       # rooms with tables at once (one host process each, about 50 MB)
   node: games                  # the host's node ID in a room (asterism/games/games/mahjong1)
   status_listen: 0.0.0.0:7460  # GET /status for the console's rooms page
   tables:
     - name: mahjong1
       game: mahjong
       # turn_seconds, call_seconds, rule: ... as in config/example.yml
+# The permanent tables (README "Permanent tables"): with the host's own
+# certificate from the console (a registry row, e.g. "games", its .tar in
+# ASTERISM_GAMES_PERMANENT_CREDENTIALS), one more host process serves these
+# tables on the registered side, for the boards and the browsers with a
+# pass (asterism/games/games/mahjong1 ...). No certificate: no such tables.
+permanent:
+  router: tls/zenohd:7448      # zenohd on the console's network (over the certificate's public name)
+  # credentials: /credentials/games.tar   # or ASTERISM_GAMES_PERMANENT_CREDENTIALS
+  # node: games                # the certificate's name unless said
+  tables:
+    - name: mahjong1
+      game: mahjong
+    - name: mahjong2
+      game: mahjong

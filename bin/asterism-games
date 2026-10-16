@@ -5,7 +5,8 @@
 # or ASTERISM_GAMES_CONFIG, and the environment).
 #
 #   bin/asterism-games [--config PATH]          # the host (tables, or the rooms' tables)
-#   bin/asterism-games status [--idle] [URL]    # the rooms' host: what GET /status says;
+#   bin/asterism-games status [--idle] [URL]    # the rooms' host: what GET /status says
+#                                               # (the rooms and the permanent tables);
 #                                               # --idle: exit 0 when nobody sits at a table
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 
@@ -24,11 +25,15 @@ if ARGV.first == "status"
   rooms = s["rooms"] || {}
   puts "asterism-games #{s['version']} since #{s['since']}: #{rooms.size} room(s) with tables (at most #{s['max']}), " \
        "RSS #{(s['rss_kb'].to_i / 1024.0).round(1)} MB"
-  rooms.each do |slot, r|
+  text = lambda do |r|
     tables = (r["tables"] || {}).map do |n, t|
       "#{n} #{t['st']} (#{t['humans']} seated, #{t['cpus']} CPU, #{t['members']} at the table)"
     end
-    puts "  room #{slot}: #{r['state']}, #{tables.empty? ? 'no tables yet' : tables.join('; ')}"
+    "#{r['state']}, #{tables.empty? ? 'no tables yet' : tables.join('; ')}"
+  end
+  rooms.each { |slot, r| puts "  room #{slot}: #{text.call(r)}" }
+  if (perm = s["permanent"])
+    puts "  permanent tables#{" (#{perm['node']})" if perm['node']}: #{text.call(perm)}"
   end
   puts "  rooms waiting for a table: #{s['without_table'].join(', ')}" unless s["without_table"].to_a.empty?
   puts s["busy"] ? "busy: someone sits at a table" : "idle: nobody sits at a table"

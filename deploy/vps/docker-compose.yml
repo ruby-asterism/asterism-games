@@ -5,16 +5,23 @@
 # never touches the console.
 #
 #   games    7460 (GET /status)       none: the console asks on the "router" network
-#            joins zenohd tls/7448 with a room slot's certificate, one process per room
+#            joins zenohd tls/7448 with a room slot's certificate, one process per room,
+#            and (with the host's own certificate) one more for the permanent tables
 #
 # From the console's project it takes, by name (ASTERISM_PROJECT, "asterism"):
 #   <project>_rooms    read-only: rooms.json (the open rooms, which app each opens)
 #                      and certs/room-NN.tar (the slots' certificates)
 #   <project>_router   the network zenohd and the console are on
 # and it keeps its own:
-#   state              the saved tables (rooms/<slot>/), written after every change;
-#                      the console's daily backup takes it in (the console's
-#                      deploy/vps/docker-compose.games.yml)
+#   state              the saved tables (rooms/<slot>/, permanent/), written after
+#                      every change; the console's daily backup takes it in (the
+#                      console's deploy/vps/docker-compose.games.yml)
+# and reads, from this directory:
+#   credentials/       read-only: the host's own .tar from the console (a registry
+#                      row, e.g. "games"), for the permanent tables; named in .env
+#                      (ASTERISM_GAMES_PERMANENT_CREDENTIALS=/credentials/games.tar).
+#                      Readable by uid 1000 (chown 1000:1000, chmod 600). None: no
+#                      permanent tables.
 #
 # Settings: .env next to this file (env.example). Updating: ./update.sh.
 name: asterism-games
@@ -45,12 +52,15 @@ services:
     volumes:
       - rooms:/rooms:ro
       - state:/state
+      - ./credentials:/credentials:ro
     networks:
       router:
         aliases: [asterism-games]
-    # The supervisor (about 40 MB) and one process per room with tables
-    # (about 60 MB each): 3 rooms fit in 320 MB. Over it, the kernel stops a
-    # process of the container and the supervisor (or docker) starts it again.
+    # The supervisor (about 45 MB RSS), one process per room with tables and
+    # one for the permanent tables (about 50 MB RSS each, half of it shared
+    # with the supervisor): 3 rooms and the permanent tables fit in 384 MB.
+    # Over it, the kernel stops a process of the container and the
+    # supervisor (or docker) starts it again.
     mem_limit: ${GAMES_MEM_LIMIT:-384m}
     logging:
       driver: json-file

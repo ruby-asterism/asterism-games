@@ -13,7 +13,8 @@ module AsterismGames
       "credentials" => nil,
       "state_dir" => "var/state",
       "tables" => [{ "name" => "mahjong1", "game" => "mahjong" }, { "name" => "mahjong2", "game" => "mahjong" }],
-      "rooms" => nil
+      "rooms" => nil,
+      "permanent" => nil
     }.freeze
 
     # The rooms of a console (README "Rooms"): given (a "rooms" section or
@@ -35,6 +36,25 @@ module AsterismGames
       "ASTERISM_GAMES_ROOM_NODE" => ["node", :s],
       "ASTERISM_GAMES_ROOM_ROUTER" => ["router", :s],
       "ASTERISM_GAMES_STATUS_LISTEN" => ["status_listen", :s]
+    }.freeze
+
+    # The permanent tables next to the rooms (README "Permanent tables"):
+    # with a certificate of the host's own (a row of the console's
+    # registry, e.g. "games"), the rooms' supervisor runs one more host
+    # process on the registered side of the router, for the boards and the
+    # browsers with a pass. Only with rooms (the supervisor); without rooms
+    # the host itself takes "credentials" and "tables".
+    PERMANENT_DEFAULTS = {
+      "credentials" => nil,                                  # the host's .tar (none: no permanent tables)
+      "router" => nil,                                       # over the certificate's router
+      "node" => nil,                                         # the certificate's name
+      "tables" => [{ "name" => "mahjong1", "game" => "mahjong" }, { "name" => "mahjong2", "game" => "mahjong" }]
+    }.freeze
+    PERMANENT_ENV_KEYS = {
+      "ASTERISM_GAMES_PERMANENT_CREDENTIALS" => ["credentials", :s],
+      "ASTERISM_GAMES_PERMANENT_ROUTER" => ["router", :s],
+      "ASTERISM_GAMES_PERMANENT_NODE" => ["node", :s],
+      "ASTERISM_GAMES_PERMANENT_TABLES" => ["tables", :names]
     }.freeze
 
     # Environment variable => [key, kind]; the table ones apply to every
@@ -83,6 +103,28 @@ module AsterismGames
       ENV_KEYS.each { |k, (key, _)| @data[key] = env[k] if env[k] && !env[k].empty? }
       @data["tables"] = Array(@data["tables"]).map { |t| table_options(t, env) }
       @data["rooms"] = room_options(@data["rooms"], env)
+      @data["permanent"] = permanent_options(@data["permanent"], env)
+    end
+
+    # The permanent section with its defaults and the environment, or nil
+    # when no certificate is given or there are no rooms (the supervisor
+    # runs it).
+    def permanent_options(p, env)
+      p = PERMANENT_DEFAULTS.merge(p.is_a?(Hash) ? p : {})
+      PERMANENT_ENV_KEYS.each do |k, (key, kind)|
+        v = env[k]
+        next if v.nil? || v.empty?
+        p[key] = if kind == :names
+                   v.split(",").map(&:strip).reject(&:empty?).map { |n| { "name" => n, "game" => "mahjong" } }
+                 else
+                   v
+                 end
+      end
+      return nil if p["credentials"].to_s.empty? || @data["rooms"].nil?
+      p["node"] = nil if p["node"].to_s.empty?
+      p["tables"] = Array(p["tables"]).map { |t| table_options(t, env) }
+      raise ArgumentError, "permanent.tables: at least one table" if p["tables"].empty?
+      p
     end
 
     # The rooms section with its defaults and the environment, or nil when

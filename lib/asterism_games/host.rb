@@ -72,8 +72,15 @@ module AsterismGames
       @log.call("games: largest message #{@stats['max_bytes']} B (#{@stats['max_what']})")
     end
 
+    # This host's node ID: the setting, else the certificate's name (the
+    # permanent tables, README "Permanent tables": the router's ACL knows
+    # the host by that name).
+    def node
+      @node ||= @config["node"] || (@config["credentials"] && ::Asterism::Credentials.load(@config["credentials"], warn: false).name)
+    end
+
     def connect
-      opts = { node: @config["node"], app: @config["app"] }
+      opts = { node: node, app: @config["app"] }
       opts[:credentials] = @config["credentials"] if @config["credentials"]
       # A room's host (Rooms): the slot's certificate and the room's key
       # space, so every key is the room's (room/<slot>/asterism/...).
@@ -87,7 +94,7 @@ module AsterismGames
       @session = ::Asterism.session
       @connected = true
       write_status
-      @log.call("games: #{@config['node']}/#{@config['app']} up (#{@games.keys.join(', ')}) via " \
+      @log.call("games: #{node}/#{@config['app']} up (#{@games.keys.join(', ')}) via " \
                 "#{locator || 'credentials'}#{" in #{@config['namespace']}" if @config['namespace']}")
     end
 
@@ -106,9 +113,9 @@ module AsterismGames
 
     # What the room supervisor shows (Rooms#status): written to
     # config["status_file"] every STATUS_EVERY_MS. Counts only, no names,
-    # no nodes, no tokens.
+    # no nodes, no tokens (the host's own node ID only, once known).
     def status_now(now = @clock.call)
-      { "pid" => Process.pid, "at" => Time.now.to_i, "connected" => @connected ? true : false,
+      { "pid" => Process.pid, "at" => Time.now.to_i, "node" => @node, "connected" => @connected ? true : false,
         "reconnecting" => (@connected && ::Asterism.reconnecting?) ? true : false,
         "tables" => @games.transform_values { |g| g.respond_to?(:summary) ? g.summary(now) : {} } }
     rescue StandardError
@@ -143,7 +150,7 @@ module AsterismGames
     def put_state(name, game, now)
       @put_at[name] = now
       return unless @session && !::Asterism.reconnecting?
-      key = "asterism/#{@config['node']}/#{@config['app']}/#{name}/state"
+      key = "asterism/#{node}/#{@config['app']}/#{name}/state"
       # What everybody may see, as a spectator sees it (README "Spectators").
       payload = ::Asterism::Codec.pack(game.respond_to?(:spectator_view) ? game.spectator_view(now) : game.public_view(now))
       note_size("put #{name}/state", key.bytesize + payload.bytesize)

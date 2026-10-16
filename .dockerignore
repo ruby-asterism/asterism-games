@@ -5,3 +5,4 @@ var
 *.log
 deploy/vps/.env
 test
+deploy/vps/credentials

@@ -12,6 +12,9 @@
 #                                [--players 4] [--think-ms 500] [--games 1] [--prefix bot-NAME]
 #                                [--rules 0=1,1=0] [--result-ms 0] [--start-ms 0]
 #                                [--credentials room-01.tar --namespace room/01]   # in a room
+#                                [--credentials fmruby-aaaaaa.tar --node fmruby-aaaaaa]
+#                                    # one player as a board with its own certificate
+#                                    # (the permanent tables, README "Permanent tables")
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 require "asterism"
 require "asterism_games/mahjong/engine"
@@ -29,6 +32,7 @@ ARGV.each_slice(2) do |k, v|
   when "--prefix" then opts[:prefix] = v
   when "--credentials" then opts[:credentials] = v
   when "--namespace" then opts[:namespace] = v
+  when "--node" then opts[:node] = v
   when "--rules" then opts[:rules] = v.split(",").map { |kv| kv.split("=").map(&:to_i) }
   when "--result-ms" then opts[:result_ms] = v.to_i
   when "--start-ms" then opts[:start_ms] = v.to_i
@@ -36,9 +40,10 @@ ARGV.each_slice(2) do |k, v|
   end
 end
 $stdout.sync = true
+opts[:players] = 1 if opts[:node] # one node ID, one player
 
 def play(i, opts)
-  node = "#{opts[:prefix]}-#{i}"
+  node = opts[:node] || "#{opts[:prefix]}-#{i}"
   extra = {}
   extra[:credentials] = opts[:credentials] if opts[:credentials]
   extra[:config] = { "namespace" => opts[:namespace] } if opts[:namespace]
@@ -99,6 +104,6 @@ ensure
 end
 
 pids = Array.new(opts[:players]) { |i| fork { play(i, opts) } }
-puts "bots #{opts[:prefix]}-0..#{opts[:players] - 1} at #{opts[:table]}"
+puts "bots #{opts[:node] || "#{opts[:prefix]}-0..#{opts[:players] - 1}"} at #{opts[:table]}"
 trap("INT") { pids.each { |p| Process.kill("TERM", p) rescue nil } }
 pids.each { |p| Process.wait(p) }

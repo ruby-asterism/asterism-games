@@ -2,7 +2,9 @@
 
 The game host (`bin/asterism-games`) next to an Asterism console on a
 server (a VPS), serving a mahjong table in each room that opens the table's
-screen (README "Rooms"). The console's installation comes first: its
+screen (README "Rooms") and, if you want, permanent tables for the boards
+and browsers registered with the console (README "Permanent tables",
+section 7). The console's installation comes first: its
 `docs/install.md`, with rooms set up (its section 12, "Rooms") and its
 `deploy/vps` running as the compose project `asterism`.
 
@@ -18,8 +20,13 @@ Names and addresses below are placeholders: `router.example.org`,
  asterism-games (project "asterism-games")                                           |
    supervisor  reads /rooms/rooms.json (which rooms are open, what they open)        |
    + one host process per room that opens the table --TLS as room-<slot>, namespace room/<slot>
+   + one host process for the permanent tables -------TLS as games (its own .tar), no namespace
    GET /status on 7460 <-- the console (the rooms' page)
-   /state (its volume): rooms/<slot>/ the saved tables <-- the console's daily backup (read-only)
+   /state (its volume): rooms/<slot>/, permanent/ the saved tables <-- the console's daily backup (read-only)
+   /credentials (deploy/vps/credentials/, read-only): games.tar
+
+ boards (P4-Nano, Tab5) --tls/router.example.org:7448, their own certificates--> zenohd
+ browsers with a pass  --wss://router.example.org:7443--> nginx --> zenohd ws/
 ```
 
 - The game host is a compose project of its own (`deploy/vps/docker-compose.yml`,
@@ -29,9 +36,10 @@ Names and addresses below are placeholders: `router.example.org`,
 - Nothing changes for nginx, the firewall or DNS: the host is a client of
   zenohd inside the server, like the door.
 - Memory: about 45 MB for the supervisor and 45-50 MB for each room with a
-  table (2 rooms with 4 players each: 136-140 MB in all). The container's
-  limit is `GAMES_MEM_LIMIT` (384 MB), and `GAMES_ROOM_MAX` (3) rooms have
-  tables at once.
+  table (2 rooms with 4 players each: 136-140 MB in all), and as much for
+  the permanent tables' process (51 MB RSS, 24 MB of it its own, with two tables in play). The container's limit is
+  `GAMES_MEM_LIMIT` (384 MB), and `GAMES_ROOM_MAX` (3) rooms have tables at
+  once.
 
 ## 2. What you need
 
@@ -116,7 +124,63 @@ In the console's `deploy/vps`:
 5. Close the room: the host's log says the host stopped and the room's
    tables were removed.
 
-## 7. Updating
+## 7. Permanent tables (optional)
+
+Tables outside the rooms, for the boards that connect to the console's
+router with their own certificates and for the browsers with a pass
+(README "Permanent tables"). The host joins the router with a certificate
+of its own, a row of the console's registry.
+
+1. **In the console** (Admin > Relay; the templates and what they keep
+   closed: the console's docs/rooms.md, "A game host's permanent tables";
+   console 0.2.3 shows the tables on the rooms' page):
+   - Roles > New role `games-host`: Read and write `asterism/${node}`,
+     `asterism/${node}/games/**`, `asterism/${node}/@profile`; Watch
+     `asterism/**`; not for browsers.
+   - Roles > New role `games`: Read `asterism/*/games/**`; Ask
+     `asterism/*/games/*/call/${node}` and `asterism/*/games/*/meta`;
+     browsers have this role; Opens in a browser page
+     `/app/game/mahjong/mahjong.app.rb`.
+   - The boards' rows (e.g. `fmruby-aaaaaa`): Edit, tick `games` next to
+     `match`.
+   - Register: kind `client`, name `games`, role `games-host`. Open it,
+     "Issue a certificate", "Save all (.tar)": `games.tar`.
+   - Apply (the banner "Review and apply").
+2. **On the server**, put the file next to this checkout's compose file
+   (the container's user is 1000):
+
+   ```
+   cd /srv/asterism/asterism-games/deploy/vps
+   install -m 600 -o 1000 -g 1000 ~/games.tar credentials/games.tar     # sudo if you are not uid 1000
+   echo 'ASTERISM_GAMES_PERMANENT_CREDENTIALS=/credentials/games.tar' >> .env
+   docker compose up -d                                                  # the host starts again with it
+   ```
+
+   Copy the file to the server as you would a private key (scp, then
+   remove the copy in your downloads). `credentials/` is never committed
+   (its `.gitignore`).
+3. **Check**:
+
+   ```
+   docker compose logs --tail 20 games      # "permanent: host pid ..." and
+                                            # "permanent: games: games/games up (mahjong1, mahjong2) via tls/zenohd:7448"
+   docker compose exec games bundle exec bin/asterism-games status
+                                            # "permanent tables (games): up, mahjong1 wait (0 seated ...)"
+   ```
+
+   The console's rooms page says "Permanent tables of the node games ...:
+   up", the graph shows `games` with `mahjong1` and `mahjong2` on the
+   registered side, and a board's table screen (or "Open the browser
+   build" with the mahjong table) lists `games/mahjong1` and
+   `games/mahjong2`.
+
+A host that says `permanent: no readable /credentials/games.tar` waits for
+the file (the rooms go on). Issuing a new certificate for the row: put the
+new `.tar` in place and `docker compose restart games`. To stop the
+permanent tables, take the line out of `.env` and `docker compose up -d`;
+their saved tables stay in `/state/permanent/`.
+
+## 8. Updating
 
 From `deploy/vps`:
 
@@ -135,12 +199,13 @@ on from the same turn after a few seconds, and the players' screens come
 back to it by themselves. To go back, run it with the old ref (it prints
 it); the old image stays (`docker image ls asterism-games`).
 
-## 8. Backups and restoring
+## 9. Backups and restoring
 
 With `docker-compose.games.yml`, the console's daily backup takes the
 host's volume in: the same `.tar.gz` has `extra/games/rooms/<slot>/...`
-(the manifest lists the files). A restore of the console (`bin/asterism
-restore`) leaves them alone. To put a room's tables back by hand:
+and `extra/games/permanent/...` (the manifest lists the files). A restore
+of the console (`bin/asterism restore`) leaves them alone. To put the
+tables back by hand (`rooms` or `permanent` below):
 
 ```
 cd /srv/asterism/asterism-games/deploy/vps
@@ -151,9 +216,11 @@ docker compose start games
 ```
 
 Only rooms still open (the same room on the same slot) take their tables
-back; the host removes the others.
+back; the host removes the others. The permanent tables always do. The
+certificate (`credentials/games.tar`) is not in the backup: it is a
+private key; issue a new one for the row if it is lost.
 
-## 9. Starting with the server, logs, memory
+## 10. Starting with the server, logs, memory
 
 - `restart: unless-stopped`: Docker starts the host at boot, after the
   console's stack has made its network. A systemd unit is not needed; if
@@ -168,7 +235,7 @@ back; the host removes the others.
   the limit is started again by the supervisor; its table goes on from the
   last change.
 
-## 10. Removing
+## 11. Removing
 
 ```
 docker compose down            # in asterism-games/deploy/vps

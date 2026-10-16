@@ -12,14 +12,16 @@ Status: Step 3 of the mahjong plan: up to four players at a table (a lobby
 to sit and start, calls by several players decided together, players that
 drop out played for after a short wait until they are back), two tables at
 once on a local network, or a table in each room of an Asterism console
-on a server ("Rooms"; the server's setup: docs/install.md). Not published yet.
+on a server ("Rooms") and permanent tables next to them for the boards and
+browsers registered with the console ("Permanent tables"; the server's
+setup: docs/install.md). Not published yet.
 
 | Path | What |
 |---|---|
 | `bin/asterism-games` | the host |
 | `bin/mahjong-bots` | players without screens, for trying a table (one process each) |
 | `lib/asterism_games/host.rb` | the connection, the loop, the puts, the game registry (`Host::GAMES`) |
-| `lib/asterism_games/rooms.rb` | the rooms' supervisor: one host process per room that opens a table ("Rooms") |
+| `lib/asterism_games/rooms.rb` | the rooms' supervisor: one host process per room that opens a table ("Rooms"), and one for the permanent tables ("Permanent tables") |
 | `lib/asterism_games/config.rb` | the settings (file and environment) |
 | `lib/asterism_games/store.rb` | saved states, one JSON file per table |
 | `lib/asterism_games/mahjong/` | the mahjong table: `table.rb` (seats, rounds, views, time), `engine.rb` (the calls into riichi_engine), `remote.rb` (the exposed object), `tiles.rb` (tile numbers) |
@@ -60,7 +62,7 @@ A YAML file (`--config PATH` or `ASTERISM_GAMES_CONFIG`; see
 | `router` | `ASTERISM_GAMES_ROUTER` | `tcp/127.0.0.1:7447` | the Zenoh router |
 | `node` | `ASTERISM_GAMES_NODE` | `games` | this host's node ID |
 | `app` | `ASTERISM_GAMES_APP` | `games` | the application every game lives under |
-| `credentials` | `ASTERISM_GAMES_CREDENTIALS` | none | a console's `.tar`, for a router over mutual TLS (the router and the node ID then come from it) |
+| `credentials` | `ASTERISM_GAMES_CREDENTIALS` | none | a console's `.tar`, for a router over mutual TLS (the router comes from it, and the node ID too unless `node` is given) |
 | `state_dir` | `ASTERISM_GAMES_STATE_DIR` | `var/state` | where the tables are saved |
 | `tables` | | two tables `mahjong1`, `mahjong2` | each `{name, game: mahjong, ...}` |
 
@@ -141,6 +143,61 @@ An Asterism console (0.2.2 and later) makes rooms: a key space of its own
 Memory (CRuby 3.2, the image, measured): the supervisor about 43 MB RSS,
 each room's host about 45-50 MB more (the forked process shares the loaded
 code with the supervisor at first).
+
+## Permanent tables
+
+Next to the rooms, the supervisor can keep tables of its own on the
+registered side of the console's router: the boards that connect with
+their own certificates (P4-Nano, Tab5: `/home/asterism/config.toml` and
+their `.tar`) and the browsers with a pass see them in the table screen's
+list (`games/games/mahjong1`, `games/games/mahjong2`), as on a home network.
+
+- **The host's certificate.** The console registers the host as a row of
+  its own (kind `client`, name `games`, the role `games-host`) and issues
+  its certificate; the `.tar` ("Save all (.tar)") goes to the host
+  (`permanent.credentials`). The router's ACL knows the host by that name,
+  so the node ID is the certificate's name unless `permanent.node` says
+  otherwise. The players' rows get the role `games`. The roles' templates
+  and what they keep closed: the console's docs/rooms.md, "A game host's
+  permanent tables".
+- **One more process.** The supervisor forks one more host process
+  (Host) for the tables of `permanent.tables` (`mahjong1` and `mahjong2`),
+  joins the router with that certificate, outside every room (no
+  namespace), and puts the host's profile (`asterism-games`). It is started
+  again like a room's host (1, 2, 4 ... 30 s). Without the certificate file
+  (or not readable) the supervisor waits for it and says so once in the
+  log; the rooms go on.
+- **Saving.** The tables are saved under `state_dir/permanent/` after every
+  change and taken back at every start; the rooms' clean-up never touches
+  them. A game goes on from the same turn after a restart of the host.
+- **Status.** `GET /status` has `permanent` (the host's node, `state`: `up`,
+  `starting`, `restarting` or `no certificate`, each table's counts; null
+  when not set up); `busy` counts its seats too, and the RSS its process.
+  The console (0.2.3) shows it on the rooms' page under the game host's
+  line; the graph shows the node `games` and its tables on the registered
+  side.
+- **Hands.** A seat's view needs the seat's token, which `join` gives to
+  the node that joined. A board's node ID is its certificate's name and the
+  router lets only that certificate call under it, so another member cannot
+  get a board's token. The browsers are one subject at the router (any
+  browser may call under any `wasm-*` node ID, the console's docs/g1_5.md),
+  so a browser's seat is as safe as the other pass holders are trusted.
+
+| Key (`permanent:`) | Environment | Default | |
+|---|---|---|---|
+| `credentials` | `ASTERISM_GAMES_PERMANENT_CREDENTIALS` | none (no permanent tables) | the host's `.tar` from the console |
+| `router` | `ASTERISM_GAMES_PERMANENT_ROUTER` | the certificate's (`tls/zenohd:7448` in the image) | the router |
+| `node` | `ASTERISM_GAMES_PERMANENT_NODE` | the certificate's name | the host's node ID |
+| `tables` | `ASTERISM_GAMES_PERMANENT_TABLES` (names, comma separated) | `mahjong1`, `mahjong2` | as `tables` above; the `MAHJONG_*` environment applies |
+
+The section is read only with `rooms` (the supervisor). Without rooms, the
+host itself does the same with `credentials` and `tables`.
+
+Memory (the image, measured with a room's table and both permanent tables
+in play): the permanent tables' process 51 MB RSS (24 MB PSS: the rest is
+shared with the supervisor), the container 66 MiB in all with the
+supervisor and one room. With `rooms.max` (3) rooms as well, about 250 MB
+RSS (about 120 MB PSS).
 
 ## The mahjong table
 
