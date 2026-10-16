@@ -5,8 +5,11 @@ module AsterismGames
     # The table as an Asterism object (<node>/<app>/<table>). Its methods run
     # from Asterism.poll on the host's loop and never wait.
     #
-    #   join(name)                  -> {"token", "seat", "owner"} or {"error" => "full"}
-    #   mine                        -> the same for a node that joined, or nil
+    #   join(name[, secret])        -> {"token", "seat", "owner"} or {"error" => "full"}
+    #   mine([secret])              -> the same for a node that joined, or nil
+    #                                  (secret: the browser's in a room, README
+    #                                  "Who joins"; {"error" => "identity"} when
+    #                                  the node ID does not come from it)
     #   sit(token, seat)            -> "ok" or why not (seat -1: any free seat)
     #   stand(token)                -> "ok" or why not
     #   cpu(token, seat, on)        -> "ok" or why not (the owner; seat -1: every empty seat)
@@ -26,7 +29,8 @@ module AsterismGames
     # call by a member counts as a sign that it is there (away_ms).
     class Remote
       # view takes one or two arguments (-1: the arguments are not counted).
-      METHODS = { join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, rule: 3, view: -1, act: 4, table: 0, leave: 1 }.freeze
+      # join and mine take an optional secret (README "Who joins").
+      METHODS = { join: -1, mine: -1, sit: 2, stand: 1, cpu: 3, start: 1, rule: 3, view: -1, act: 4, table: 0, leave: 1 }.freeze
 
       def initialize(table, clock)
         @table = table
@@ -38,13 +42,15 @@ module AsterismGames
         c ? c.from.to_s : ""
       end
 
-      def join(name)
-        @table.join(caller_node, name.to_s, @clock.call)
+      def join(name, secret = nil)
+        @table.join(caller_node, name.to_s, @clock.call, secret)
       end
 
-      def mine
-        @table.touch(caller_node, @clock.call)
-        @table.mine(caller_node)
+      def mine(secret = nil)
+        node = caller_node
+        r = @table.mine(node, secret)
+        @table.touch(node, @clock.call) if r && !r["error"]
+        r
       end
 
       def sit(token, seat)

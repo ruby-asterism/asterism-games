@@ -51,6 +51,9 @@ class TestMahjongGames < Minitest::Test
           out["errors"] << "help at level 0" if level.zero? && (v["wt"] || v["uk"])
         end
         out["max_public"] = [out["max_public"], reply_bytes(t.public_view(now))].max
+        sv = t.view(-1, now) # a spectator: the four hands too
+        out["max_spectator"] = [out["max_spectator"].to_i, reply_bytes(sv)].max
+        out["errors"] << "a spectator sees offers" unless sv["a"] == []
         raise "too many steps" if steps > 2_000_000
       end
       out["games"] += 1
@@ -89,6 +92,7 @@ class TestMahjongGames < Minitest::Test
       a["max_wt"] = [a["max_wt"], x["max_wt"]].max
       a["max_uk"] = [a["max_uk"], x["max_uk"]].max
       a["max_public"] = [a["max_public"], x["max_public"]].max
+      a["max_spectator"] = [a["max_spectator"], x["max_spectator"].to_i].max
       x["kinds"].each { |k, v| a["kind_#{k}"] += v }
     end
     errors = results.flat_map { |x| x["errors"] }
@@ -101,6 +105,7 @@ class TestMahjongGames < Minitest::Test
     assert_empty errors
     assert_equal GAMES, sum["games"]
     assert_operator sum["max_view"], :<, LIMIT
+    assert_operator sum["max_spectator"], :<, LIMIT
     assert_operator sum["wt_views"], :>, 0 if GAMES >= 4
     assert_operator sum["uk_views"], :>, 0 if GAMES >= 4
   end
@@ -202,6 +207,17 @@ class TestMahjongGames < Minitest::Test
     v = t.view(seat, 0)
     bytes = reply_bytes(v)
     puts "\n  worst case view: #{bytes} B"
+    assert_operator bytes, :<, LIMIT
+    # A spectator's view of the same table (README "Spectators"): the four
+    # hands besides, at their largest (fourteen tiles each, one drawn).
+    sp = t.join("wasm-cccccc", "名前" * 5 + "ab", 0)["token"] || t.mine("wasm-bbbb00")["token"]
+    4.times { |s| st.hands[s] = Mahjong::State::Hand.new(%w[1m 2m 3m 4p 5p 6p 7s 8s 9s 1z 1z 2s 3s 9m]) }
+    st.phase = :dahai
+    st.last_tsumo = Mahjong::Tiles::Tile.new("9m")
+    sv = t.member_view(sp, 0)
+    assert_equal 4, sv["sh"].size
+    bytes = reply_bytes(sv)
+    puts "  worst case spectator view: #{bytes} B (hands #{sv['sh'].sum(&:bytesize) + 4} B)"
     assert_operator bytes, :<, LIMIT
   end
 

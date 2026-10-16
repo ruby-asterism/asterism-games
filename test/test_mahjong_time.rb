@@ -149,8 +149,8 @@ class TestMahjongTime < Minitest::Test
     st.last_tsumo = Mahjong::Tiles::Tile.new("9m")
     assert_equal "ok", t.act(toks[dealer], t.sv, E::DAHAI, ["8s"], 0)
     assert_equal :naki_wait, st.phase
-    dl = t.public_view(0)["dl"]
-    assert_equal [5000], dl[1..], "call_ms, no bank part"
+    dl = t.view(caller, 0)["dl"]
+    assert_equal [1 << caller, 5000], dl, "call_ms, no bank part"
   end
 
   # ------------------------------------------------------------ the local rule

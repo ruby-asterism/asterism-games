@@ -77,7 +77,8 @@ module AsterismGames
       "MAHJONG_CPU_MS" => ["cpu_ms", 1],
       "MAHJONG_CPU_LEVEL" => ["cpu_level", nil],
       "MAHJONG_SPECTATORS" => ["spectators", 1],
-      "MAHJONG_SPECTATOR_DELAY_SECONDS" => ["spectator_delay_ms", 1000]
+      "MAHJONG_SPECTATOR_DELAY_SECONDS" => ["spectator_delay_ms", 1000],
+      "MAHJONG_SPECTATOR_DELAY_MINUTES" => ["spectator_delay_ms", 60_000]
     }.freeze
     # Table keys in the file, in seconds, and the table's own (ms) names.
     TABLE_FILE_KEYS = {
@@ -87,7 +88,8 @@ module AsterismGames
       "away_seconds" => ["away_ms", 1000], "away_wait_seconds" => ["away_wait_ms", 1000],
       "cpu_ms" => ["cpu_ms", 1],
       "cpu_level" => ["cpu_level", nil], "humans" => ["humans", 1],
-      "spectators" => ["spectators", 1], "spectator_delay_seconds" => ["spectator_delay_ms", 1000]
+      "spectators" => ["spectators", 1], "spectator_delay_seconds" => ["spectator_delay_ms", 1000],
+      "spectator_delay_minutes" => ["spectator_delay_ms", 60_000]
     }.freeze
 
     attr_reader :data

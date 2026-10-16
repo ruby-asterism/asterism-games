@@ -193,16 +193,18 @@ module AsterismGames
         c["next_at"] = now + BACKOFF_MAX_S
         return
       end
-      cfg = child_config(slot, tar, d)
+      cfg = child_config(slot, tar, d, room["room"])
       c.merge!("room" => room["room"], "until" => room["until"], "since" => Time.now.utc.iso8601, "next_at" => nil)
       c["pid"] = @spawn.call(slot, cfg)
       @log.call("games: room #{slot}: room #{room['room']} opens #{room['app']}: host pid #{c['pid']}")
     end
 
-    def child_config(slot, tar, dir)
+    # room_id: the room's ID, with which its tables check who joins (README
+    # "Rooms", "Who joins").
+    def child_config(slot, tar, dir, room_id = nil)
       { "node" => @rooms["node"], "app" => @config["app"], "credentials" => tar,
         "credentials_router" => @rooms["router"], "namespace" => "room/#{slot}", "state_dir" => dir,
-        "status_file" => File.join(dir, "host.json"), "tables" => @rooms["tables"] }
+        "status_file" => File.join(dir, "host.json"), "tables" => @rooms["tables"], "room_id" => room_id }
     end
 
     # The permanent tables' host (when configured and not running): its

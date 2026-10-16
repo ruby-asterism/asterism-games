@@ -81,7 +81,7 @@ A mahjong table takes (the environment applies to every table):
 | `cpu_level` | `MAHJONG_CPU_LEVEL` | `normal` | `easy` / `normal` / `hard` (riichi_engine's CPU levels) |
 | `humans` | | 4 | seats members may take (0: four CPUs that play at once, for tests) |
 | `spectators` | `MAHJONG_SPECTATORS` | 12 | members without a seat at most ("Spectators") |
-| `spectator_delay_seconds` | `MAHJONG_SPECTATOR_DELAY_SECONDS` | 0 | spectators see the game this much later ("Spectators") |
+| `spectator_delay_minutes` | `MAHJONG_SPECTATOR_DELAY_MINUTES` | 0 | spectators see the game (and the four hands) this much later ("Spectators"); `spectator_delay_seconds` / `MAHJONG_SPECTATOR_DELAY_SECONDS` as before, in seconds |
 | `rule` | | (below) | riichi_engine rule keys over the host's defaults ("Rules"); the owner's local rules go over them ("Local rules") |
 
 ## Rooms
@@ -129,6 +129,37 @@ An Asterism console (0.2.2 and later) makes rooms: a key space of its own
   it (`--idle` exits 0 when nobody sits at a table: update.sh's
   `--when-idle`). In the console's graph each room's frame shows the host's
   node (`games`) and its tables, like any node in a room.
+
+### Who joins
+
+In a room every connection holds the slot's one certificate, so the router
+lets any member call under any node ID, and a seat goes with the node ID:
+without more, a member could join under another member's ID and get that
+member's token and hand. So a browser in a room has a secret of its own for
+the room (the browser build makes 16 random bytes once per room and keeps
+them in the browser's storage under the room's ID), and its node ID is
+`wasm-` and the first six hex digits of SHA-256(`<room ID>:<secret>`): the
+same shape as every browser ID, the same after a reload, another in another
+room. The table app sends the secret with `join` and `mine` (an extra
+argument; the methods take it or not). The host knows the room's ID (the
+supervisor passes it to the room's host, `room_id`) and works the node ID
+out again: a `join` or `mine` whose caller's node ID does not come from the
+secret given answers `{"error" => "identity"}` (the screen says to open the
+room's link again). The member keeps the SHA-256 of its secret (saved with
+the table; the secret itself is not), so two secrets that happen to give the
+same six digits are told apart (`"taken"`). Outside the rooms nothing is
+checked (a home network; the permanent tables, where a board's certificate
+is its node ID). `bin/mahjong-bots --room <room ID>` makes the same kind of
+secret and ID for each bot.
+
+- A table app from before (no secret) cannot join a table in a room on this
+  host: it is told `"identity"`.
+- **What is still open**: every connection in a room is the same subject at
+  the router, so a member could declare a queryable or a state put on the
+  host's own keys (`room/<slot>/asterism/games/...`) and collect the
+  secrets that other pages send with `join`. The fix is a host certificate
+  of its own per slot, and an ACL that lets only it declare the queryable
+  and put on the games keys (planned separately).
 
 | Key (`rooms:`) | Environment | Default | |
 |---|---|---|---|
@@ -205,7 +236,7 @@ RSS (about 120 MB PSS).
 
 | Method | Arguments | Returns |
 |---|---|---|
-| `join` | name | `{"token", "seat" (-1: none), "owner"}`, or `{"error" => "full"}` (16 members) or `{"error" => "spectators"}` ("Spectators") |
+| `join` | name | `{"token", "seat" (-1: none), "owner"}`, or `{"error" => "full"}` (16 members) or `{"error" => "spectators"}` ("Spectators"); a join again from the same node keeps the membership and takes the name given (a screen whose player changes its name; at the seat too, during a game as well); at most 32 bytes, no control characters, empty: the node ID |
 | `mine` | none | the same for a node that joined, or nil (nothing is created) |
 | `sit` | token, seat | `"ok"` or why not (`"taken"`, `"not waiting"`, ...); seat -1: the first free one. In the lobby only; a seated member moves |
 | `stand` | token | `"ok"` or why not (lobby only) |
@@ -279,10 +310,12 @@ host's rules ("Rules": `Engine::RULE_DEFAULTS` and the table's `rule`
 setting) are where they start, and choosing a host's value again drops the
 choice. A new room (a slot used again) starts from the host's rules.
 
-`ru` has one number per item for items 0-10 and `rx` for items 11-14, in
-this order (a table screen that knows only the first eleven reads `ru` as
-before); `rule(token, item, value)` takes one of the values listed (or the
-host's own value for the item). Item 10 is the time ("Time"): its value is
+`ru` has one number per item for items 0-10, `rx` for items 11-14 and `ry`
+for items 15-16, in this order (a table screen that knows only the first
+eleven reads `ru` as before, one that knows fifteen reads `rx` as before;
+the numbers of the items never change, and a screen shows them in an order
+of its own); `rule(token, item, value)` takes one of the values listed (or
+the host's own value for the item). Item 10 is the time ("Time"): its value is
 a code, the seconds for a move plus 1000 times the seconds of the bank
 (5+20 is 20005, a fixed 20 s is 20). `ru` gives its seconds for a move
 only (what a table app before MJ-E3 shows as "the time to discard"), `tb`
@@ -306,6 +339,8 @@ host's own value among them):
 | 12 | nagashi mangan | `nagashi_mangan` | 0 / 1 |
 | 13 | double yakuman (suuankou tanki, kokushi 13-wait, junsei chuuren) | `double_yakuman` | 0 / 1 |
 | 14 | tenpai-yame | `tenpai_yame` | 0 / 1 |
+| 15 | the CPUs' level | (the host's `cpu_level`) | 0 easy, 1 normal, 2 hard: the CPUs of the table's next game play at it |
+| 16 | the spectators' delay | (the host's `spectator_delay_minutes`) | seconds: 0 (none), 60, 180, 300, and the host's own; in the lobby `dc` lists them in order ("Spectators") |
 
 Left out: `atozuke` (riichi_engine has the key but does not use it), the
 starting points, the first place target and the uma (they change the final
@@ -317,9 +352,12 @@ what Mahjong Soul does), `pao` (which yakuman; a list, not a switch),
 
 ### Spectators
 
-A member without a seat watches: its view is the public one (no hand but
-the winners' at a win, no offers, no help), and so are the put on
-`.../state` and `table`.
+A member without a seat watches: its view is the public one with the four
+hands besides (`sh`, `sd`: each seat's hand and drawn tile, as a seat's
+own `h` and `dt`), and no offers, no help and no sign of who may call. The
+put on `.../state` and `table` have no hand (except the winners', shown at
+a win), so the seated players, who read the put too, never see another
+hand.
 
 - **How many.** At most `spectators` members without a seat (12: a room
   of an Asterism console lets 16 pages in, four of them at the seats; the
@@ -327,22 +365,24 @@ the winners' at a win, no offers, no help), and so are the put on
   could still sit counts in addition, so people can come in and sit. A
   member beyond that gets `{"error" => "spectators"}`; a member gets its
   place back as before.
-- **The delay.** With `spectator_delay_seconds` above 0, the spectators'
-  view, the put and `table` show the game as it was that long ago: the host
-  keeps the game's part of the public view (`st sv r sc ri dora kw fu hc ls
-  ev res fin fr`) at every change for that long, and the people's part (`nm
-  hu sk aw ow mb ru rx`) and `v` are now's (so a screen asks again when the
-  delayed picture moves on). There is no deadline (`dl`) in a delayed
-  view. The seated players' own views are never delayed. Counted in time,
-  not in actions: a round's result then stays as long for the spectators
-  as for the players, and an action every 0.7 s (a CPU) or every 20 s (a
-  person) does not change how far behind the spectators are. A host
-  started again starts the delay over (the past is not saved).
-- **The default is 0.** The spectators see no hand and nothing the players
-  do not see, so a delay keeps nothing from anybody; it would only put the
-  spectators out of step with the people they talk to. Set it when the
-  table is shown to an audience, or if the spectators' view ever shows
-  hands.
+- **The delay.** With a delay (`spectator_delay_minutes`, or chosen by the
+  owner in the lobby: "Local rules", item 16), the spectators' view, the
+  put and `table` show the game as it was that long ago: the host keeps the
+  game's part of the public view (`st sv r sc ri dora kw fu hc ls ev res
+  fin fr`) and the four hands at every change for that long, and the
+  people's part (`nm hu sk aw ow mb ru rx ry`) and `v` are now's (so a
+  screen asks again when the delayed picture moves on). There is no
+  deadline (`dl`) in a delayed view. The seated players' own views are never
+  delayed. Counted in time, not in actions: a round's result then stays as
+  long for the spectators as for the players, and an action every 0.7 s (a
+  CPU) or every 20 s (a person) does not change how far behind the
+  spectators are. A host started again starts the delay over (the past is
+  not saved).
+- **The default is no delay.** The spectators see the hands as they are:
+  good for watching a game, and for an audience in the same room. A seated
+  player who joins the same table from a second screen sees the others'
+  hands too; where that matters, choose a delay (a minute or more: the
+  hands it shows are then of a past turn).
 
 ### Calls on a discard
 
@@ -354,6 +394,22 @@ Once all have answered, riichi_engine's priority decides: ron over pon and
 open kan over chi; several rons by the rule (by default every ron wins,
 two or three; `triple_ron_draw` makes three a draw, sanchahou), equal calls in turn order from the discarder. The players
 see the choices exactly as the engine lists them.
+
+Nobody learns who else may call, or who has answered:
+
+- A seat sees its own choices only (`a`). Its `dl` has its own bit while it
+  still has to answer; every other seat's `dl` has the bits of the three
+  others whoever they are (the screen says "the others are answering"),
+  with the same time left. The public view (the put, `table`, the
+  spectators) has no `dl` while the calls are open.
+- An answer changes only the answering seat's view: its `v` is the table's
+  plus one until the calls are decided (its buttons go), the table's own
+  version does not move and nothing is put (the table is saved). The
+  change that follows the calls moves the version by two, past what that
+  seat saw.
+- When everybody passed, the last event (`ev`) is a pass by seat -1.
+- What still shows: that the host waits (the phase `r[7]` is the calls,
+  for a human the time of the window), not for whom.
 
 ### Time
 
@@ -397,7 +453,7 @@ A Hash (MessagePack); tiles are one byte each in binary strings (bin).
 
 | Key | |
 |---|---|
-| `v` / `sv` | the view's version (any change) / the state version (actions) |
+| `v` / `sv` | the view's version (any change; in a seat's own view one more after its answer to open calls, "Calls on a discard") / the state version (actions) |
 | `t`, `st` | the table's name; `wait` (the lobby), `play`, `result` (a round's result), `over` |
 | `nm`, `hu` | the four names (`""` for an empty seat); the human seats as bits |
 | `sk` | the four seats: 0 empty, 1 a member, 2 a CPU |
@@ -411,14 +467,15 @@ A Hash (MessagePack); tiles are one byte each in binary strings (bin).
 | `fu` | four meld lists: per meld `[kind, from, n, n tiles]`; kind 1 chi, 2 pon, 3 closed kan, 4 open kan, 5 added kan; from 1 right, 2 across, 3 left, 0 none. The tiles are in the order a table shows them: the called tile is first when it came from the left, second from across, last from the right (an added kan: the last of the first three, the added tile fourth) |
 | `hc` | the four hand sizes |
 | `ls`, `ev` | the last discard `[seat, tile]`; the last action `[type, seat]` |
-| `dl` | `[seats as bits, ms]`: whom the host waits for (one seat's turn, or every seat that may still call) and how long it still waits; on a player's own move with a bank, a third number, the bank's ms in it ("Time") |
+| `dl` | `[seats as bits, ms]`: whom the host waits for and how long it still waits: the seat whose turn it is; in the calls on a discard, in a seat's own view only, its own bit while it has to answer, else the three others' ("Calls on a discard"); on a player's own move with a bank, a third number, the bank's ms in it ("Time") |
 | `res` | at a round's end: `k` (`tsumo_agari`, `ron_agari`, `ryuukyoku`, and the abortive draws `kyuushu_kyuuhai`, `sanchahou`, `suufon_renda`, `suukaikan`, `suucha_riichi`), `rd` (the round: `[bakaze, kyoku, honba]`), `d` (the four score changes), `f` (who dealt in), `wn` (one entry per winner, in turn order from the discarder: `w` seat, `y` the yaku as riichi_engine names them, in Japanese, `yh` the han of each (-1: a yakuman, -2: a double yakuman), `pt` fu, han and points, `h` and `ag` the hand and the winning tile, `pa` pao: `[[the seat that pays, the yakuman], ...]`), `tp` (tenpai seats at a draw), `ng` (the seats with nagashi mangan at a draw; paid in place of the no-ten payments), `rs` (the seats of the three rons at a sanchahou) |
-| `ru`, `rx` | the local rules ("Local rules"), one number per item: items 0-10 and 11-14 (item 10 the seconds for a move) |
-| `tb`, `tc` | item 10's bank, seconds; in the lobby, item 10's choices as codes ("Local rules") |
+| `ru`, `rx`, `ry` | the local rules ("Local rules"), one number per item: items 0-10, 11-14 and 15-16 (item 10 the seconds for a move) |
+| `tb`, `tc`, `dc` | item 10's bank, seconds; in the lobby, item 10's choices as codes and item 16's choices in seconds ("Local rules") |
 | `fin` | at the end: `[[seat, rank, score, point x 10], ...]` |
 | `fr` | at the end, why the game ended: `normal_end` (the last round played, the fourth round of the extra round too), `tobi`, `all_last_oya_agari` (agari-yame), `all_last_oya_tenpai` (tenpai-yame), `sudden_death` (somebody reached 30,000 in the extra round), `west` (after west 4, the host's, only without `sudden_death`), `rounds` (the host's guard against a loop); none for a game saved before it was added |
 | `me`, `h`, `dt`, `a` | the member's view only: its seat (-1: watching), its hand (sorted, without the drawn tile), the drawn tile (-1 none), what it may do: `[[type, tiles], ...]` |
 | `wt` | the member's view only, the help (Assist, levels 1-3): one binary string, per discard the tile, the number of waits n and n pairs `[wait, left]` (the waits as riichi_engine's wait judge gives them; left: 4 less what the seat can see of the tile: its own hand, the rivers, every meld, the dora indicators) |
+| `sh`, `sd` | a spectator's own view only: the four hands (sorted, without the drawn tile) and the four drawn tiles (-1 none) ("Spectators") |
 | `uk` | the member's view only, level 3 when no discard leaves the hand tenpai: one binary string, per discard the tile, the shanten after it, the number n of tiles that bring it down and n pairs `[tile, left]` (left as in `wt`; a tile the seat sees all four of is left out) |
 
 Tile numbers: `0..8` 1m..9m, `9` 0m (red five), `10..18` 1p..9p, `19` 0p,
@@ -446,7 +503,8 @@ with it, full rivers, the other seats' kans and the long names is about
 1.5 KB. The acceptance (`uk`, level 3) adds at most 14 x (3 + 34 x 2) =
 994 B (every kind after every discard, more than a hand can have; random
 hands give at most about 250 B, 20 CPU hanchan at most 762 B with a view of
-1,043 B); the same view built by hand with it is about 2.1 KB. `wt` and `uk` never come together. The tests hold every view
+1,043 B); the same view built by hand with it is about 2.1 KB. `wt` and `uk` never come together. A spectator's view of the
+largest result adds the four hands (59 B): about 2.2 KB. The tests hold every view
 under 3800 B.
 
 ### Time and saving
@@ -509,6 +567,7 @@ later. "Not sure" marks what could not be confirmed.
 | The winning tile of a tenhou | the one that scores most | `tenhou_best_tile` (false: the tile drawn) | key only | true |
 | Kan ura dora | yes | always (`fix/kan-uradora`) | no | yes |
 | Thinking time | 5+20: 5 s a move plus a 20 s bank | none (the host's timers) | yes (item 10) | 5 s a move, a 20 s bank every round, 8 s a call (`turn_seconds`, `bank_seconds`, `call_seconds`; "Time") |
+| Riichi on a tile that is ronned | not made: the 1000 points come back, no stick (a pon or kan of the tile lets it stand) | `riichi_void_on_ron` (false: the stick stays, the winner takes it) | key only | true |
 | Same-turn furiten | after passing a winning tile (robbing a kan too), until one's next draw | on a pass of a ron offered, and on a winning tile with no ron offered (no yaku on it, or furiten already; `fix/dojun-furiten-no-yaku`) | no | as the engine |
 | Formal tenpai (karaten) | yes, except a single wait on a tile the hand holds four of | the wait judge leaves out only a tile the hand holds four of (a single wait on the fourth tile of a pon is tenpai; `test/karaten-tenpai`) | no | as the engine |
 
@@ -521,7 +580,7 @@ fixed: the `fmrb` branch of
 [riichi_engine](https://github.com/HenrikStephensen/riichi_engine)
 (`Gemfile` takes it as a git source, so the lockfile pins a revision). Each fix is a branch of its own
 (`fix/*`, `feat/*`), written to be sent upstream; `fmrb` merges them (version
-`0.1.1.fmrb5`, not published). The host has no corrections of its own around
+`0.1.1.fmrb6`, not published). The host has no corrections of its own around
 the engine any more.
 
 What 0.1.0 got wrong, and what this host did about it before the fork:
@@ -552,6 +611,7 @@ What 0.1.0 got wrong, and what this host did about it before the fork:
 | 22 | an unknown `game_type` never ends | `fix/unknown-game-type` | none |
 | 23 | a kan's ura dora indicator is not counted (the ura indicators stay as dealt) | `fix/kan-uradora` | none |
 | 24 | a seat that lets a winning tile go by with no ron offered (no yaku on it) is not furiten for the go-around | `fix/dojun-furiten-no-yaku` | none |
+| 25 | the normal/hard CPU calls without a yaku in sight (it looks at the shanten alone), and a chi with several pairs is counted without taking the tiles out | `fix/cpu-yaku-calls` | none |
 
 New keys in 0.1.1.fmrb3, each off by default (the engine plays as 0.1.0
 without them; the host turns them on, "Rules"): `suufon_renda`,
@@ -563,7 +623,9 @@ without them; the host turns them on, "Rules"): `suufon_renda`,
 turns it off), `riichi_ankan` (`feat/riichi-ankan`),
 `kokushi_ankan_chankan` (`feat/kokushi-ankan-chankan`), `pao_honba`
 (`feat/pao-honba`), `tenhou_best_tile` (`feat/tenhou-best-tile`),
-`nan_iri` and `sudden_death` (`feat/sudden-death`).
+`nan_iri` and `sudden_death` (`feat/sudden-death`). New in 0.1.1.fmrb6:
+`riichi_void_on_ron` (`feat/riichi-void-on-ron`; off by default, the host
+turns it on).
 
 The fork compares its win evaluation with the Python package `mahjong`
 (PyPI) on 30 000 random winning hands and one or more hands per yaku
@@ -584,8 +646,8 @@ fork's documents now say so, `fix/tobi-doc`); without `sudden_death` the
 west round never ends without a player above the threshold (the host ends
 the game after west 4); `tsumo_agari` and `ron_agari` leave the points to
 the host (the engine's API says so). Without `kuikae` set to false a seat
-may discard the tile it just called, and a riichi declared on a tile that
-is ronned does not get its stick back. A
+may discard the tile it just called, and without `riichi_void_on_ron` a
+riichi declared on a tile that is ronned keeps its stick on the table. A
 CPU decision takes about 2 ms of CRuby time at the median (about 0.4 s at
 most, the first time a suit pattern with many tiles is counted).
 
@@ -627,15 +689,19 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   game; a tonpuu game chosen in the lobby ends in the east round or the
   south round after it, open
   tanyao off offers no ron on an open tanyao-only hand, the red fives in
-  the wall), the spectators (over a whole game no hand, draw, offer or help
-  in a spectator's view, the put or `table`; with a delay they see the
-  game as it was that long ago while the players do not wait; none by
-  default; how many) and the han of each yaku in a result; the items of
+  the wall), the spectators (over a whole game the four hands and no
+  offer, help or sign of a call in a spectator's own view, no hand in the
+  put, `table` or a seat's view; with a delay they see the game and the
+  hands as they were that long ago while the players do not wait; none by
+  default; how many), the CPUs' level and the spectators' delay chosen in
+  the lobby (reaching the CPUs, saved, the delay setting in minutes) and
+  the han of each yaku in a result; the items of
   0.1.1.fmrb3 (the three abortive draws as one item, over a setting with
   only some of them) and the extra round item (both keys, its value by the
   game chosen, over a setting with only one of them).
-- `test_mahjong_round_ends.rb`: the rules of 0.1.1.fmrb3 and fmrb4 the host
-  turns on: every host key reaching the engine, nagashi mangan paid in place
+- `test_mahjong_round_ends.rb`: the rules of 0.1.1.fmrb3, fmrb4 and fmrb6
+  the host turns on: every host key reaching the engine, a ron on the
+  riichi tile giving the 1000 back (a pon of it letting the riichi stand), nagashi mangan paid in place
   of the no-ten payments (and not when turned off), pao recorded at the pon
   and paid (all of it at a tsumo, half with the discarder at a ron, the
   honba of a ron by the seat liable), no swap-calling after a chi (not
@@ -654,6 +720,18 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   player's short wait leaving the bank, the calls keeping their time, the
   owner's choice (a bank, a fixed time, the old app's values) reaching the
   table, the banks saved, and a table saved before the bank read back.
+- `test_mahjong_call_privacy.rb`: the calls on a discard keep their secret:
+  each seat sees its own choices only, and a second seat that may call (or
+  answers) changes no other seat's view, the spectator's, the put or the
+  public view (two tables compared key by key); the versions after the
+  calls, the passes naming nobody, and over whole four-member hanchan no
+  `dl` but a candidate's own bit or the "others" bits.
+- `test_mahjong_room_identity.rb`: who joins in a room: the node ID from
+  the room and the secret, another member's ID refused without its secret
+  (join and mine), the seat back after a reload, the secret kept only as
+  its hash, two secrets with one ID told apart, nothing checked outside a
+  room, the calls with and without the secret, the room's ID reaching the
+  tables.
 - `test_rooms.rb`: the rooms' supervisor with stand-in host processes: which
   rooms get a host (the app, closed, ended), the child's settings (the
   slot's certificate, the namespace), a new room on the slot starting from
@@ -667,7 +745,7 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
 `bin/mahjong-bots` fills a table with players over the network (to try a
 second table, or the host under load): `bundle exec bin/mahjong-bots
 --table games/games/mahjong2`. In a room: `--credentials room-01.tar
---namespace room/01 --table games/games/mahjong1`. `--rules 0=1,1=0` sets
+--namespace room/01 --room <room ID> --table games/games/mahjong1`. `--rules 0=1,1=0` sets
 local rules before the start (a tonpuu game without open tanyao),
 `--start-ms` waits in the lobby (for spectators), `--result-ms` looks at
 each result that long.

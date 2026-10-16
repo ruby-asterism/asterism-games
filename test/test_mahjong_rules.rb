@@ -74,6 +74,31 @@ class TestMahjongRules < Minitest::Test
     assert_equal "not seated", t.act(s, t.sv, E::DAHAI, ["1m"], 0)
   end
 
+  # A player's name set on its screen: a join again from the same node
+  # changes it (the same token and seat), in the lobby and during a game,
+  # in the names and the member list; the host's limits still apply.
+  def test_a_join_again_changes_the_name
+    t = M::Table.new("t", {})
+    a = t.join("wasm-aaaaaa", "Old", 0)["token"]
+    assert_equal "ok", t.sit(a, 2, 0)
+    r = t.join("wasm-aaaaaa", "あたらしい名前", 10)
+    assert_equal a, r["token"]
+    assert_equal 2, r["seat"]
+    assert_equal "あたらしい名前", t.public_view(10)["nm"][2]
+    assert_equal ["あたらしい名前", 2, 2], t.public_view(10)["mb"][0]
+    t.cpu(a, -1, true)
+    assert_equal "ok", t.start(a, 10)
+    seat = t.seat_of(a)
+    v0 = t.public_view(10)["v"]
+    t.join("wasm-aaaaaa", "Third", 20)
+    assert_equal "Third", t.public_view(20)["nm"][seat], "during a game, at the seat"
+    assert_operator t.public_view(20)["v"], :>, v0, "the screens ask again"
+    t.join("wasm-aaaaaa", "x" * 40 + "\u0001", 30)
+    assert_equal "x" * 32, t.public_view(30)["nm"][seat], "cut to 32 bytes, no control characters"
+    t.join("wasm-aaaaaa", "", 40)
+    assert_equal "wasm-aaaaaa", t.public_view(40)["nm"][seat], "an empty name is the node ID"
+  end
+
   def test_members_away_and_back
     t, toks = seated_table(2, "away_ms" => 5000)
     seat = toks.keys.first
@@ -154,11 +179,13 @@ class TestMahjongRules < Minitest::Test
     t.touch(present, 2900)
     t.tick(2900)
     assert_equal :naki_wait, t.state.phase
-    assert_equal [0b1010, 2100], t.public_view(2900)["dl"]
+    assert_equal [0b0010, 2100], t.view(1, 2900)["dl"]
+    assert_equal [0b1000, 2100], t.view(3, 2900)["dl"]
     t.touch(present, 3100)
     t.tick(3100)
     assert_equal :naki_wait, t.state.phase, "seat 3 still has its time"
-    assert_equal [0b1000, 1900], t.public_view(3100)["dl"], "seat 1 (away) has passed"
+    assert_equal [0b1000, 1900], t.view(3, 3100)["dl"]
+    assert_equal [0b1101, 1900], t.view(1, 3100)["dl"], "seat 1 (away) has passed"
     assert_equal 1, t.stats["away_calls"]
     pon = t.view(3, 3100)["a"].find { |a, _| a == E::PON }
     assert_equal "ok", t.act(toks[3], t.sv, E::PON, M::Tiles.unpack(pon[1]), 3200)
@@ -346,11 +373,14 @@ class TestMahjongRules < Minitest::Test
     t, toks = calls_table([1], pon: true)
     assert_equal :naki_wait, t.state.phase
     assert_equal 1, t.stats["multi_human_calls"]
-    assert_equal [0b1010, 5000], t.public_view(0)["dl"], "both seats get the same deadline"
+    assert_equal [0b0010, 5000], t.view(1, 0)["dl"], "both seats get the same deadline, each its own bit"
+    assert_equal [0b1000, 5000], t.view(3, 0)["dl"]
+    assert_nil t.public_view(0)["dl"], "nobody else learns who may call"
     pon = t.view(3, 0)["a"].find { |a, _| a == E::PON }
     assert_equal "ok", t.act(toks[3], t.sv, E::PON, M::Tiles.unpack(pon[1]), 100)
     assert_equal :naki_wait, t.state.phase, "seat 1 has not answered"
-    assert_equal [0b0010, 4900], t.public_view(100)["dl"]
+    assert_equal [0b0010, 4900], t.view(1, 100)["dl"]
+    assert_equal [0b0111, 4900], t.view(3, 100)["dl"], "seat 3 waits for the others, whoever they are"
     assert_equal [], t.view(3, 100)["a"], "an answer is final"
     assert_equal "ok", t.act(toks[1], t.sv, E::RON, [], 200)
     assert_equal "result", t.status

@@ -18,6 +18,8 @@ class TestMahjongLocalRules < Minitest::Test
   NAGASHI = 12
   DOUBLE_YAKUMAN = 13
   TENPAI_YAME = 14
+  CPU = 15
+  DELAY = 16
   AI = ::Mahjong::Cpu::Ai::NormalAi.new
 
   # A lobby with n members seated (the first is the owner): [table, tokens].
@@ -50,8 +52,11 @@ class TestMahjongLocalRules < Minitest::Test
                  "no kiriage, tobi, west round, the setting's time (1 s in the test table)"
     assert_equal [1, 1, 1, 1], t.public_view(0)["rx"],
                  "the abortive draws, nagashi mangan, double yakuman, tenpai-yame"
-    assert_equal T::RULE_ITEMS.size, t.public_view(0)["ru"].size + t.public_view(0)["rx"].size
+    assert_equal [1, 0], t.public_view(0)["ry"], "the setting's CPUs (normal), no spectator delay"
+    assert_equal T::RULE_ITEMS.size, %w[ru rx ry].sum { |k| t.public_view(0)[k].size }
     assert_equal 11, t.public_view(0)["ru"].size, "the items a table app of MJ3b knows"
+    assert_equal 4, t.public_view(0)["rx"].size, "and the four a table app of MJ-E2 knows besides"
+    assert_equal [0, 60, 180, 300], t.public_view(0)["dc"]
     assert_equal [20_005, 5, 30, 60, 600, 1], t.rule_choices(TURN),
                  "5+20, 5+0, 30 s, 60 s, 600 s and the setting's own time (1 s, no bank)"
     assert_equal 0, t.public_view(0)["tb"], "no bank"
@@ -167,6 +172,92 @@ class TestMahjongLocalRules < Minitest::Test
     assert_equal [1 << seat, 10_000], t.public_view(now)["dl"]
   end
 
+  # Item 15: the owner's CPU level reaches the table's CPUs (in "ry", not
+  # in "ru" or "rx"); the setting's level is the start and choosing it
+  # again drops the choice.
+  def test_the_cpu_level_reaches_the_cpus
+    t, toks = lobby
+    assert_instance_of ::Mahjong::Cpu::Ai::NormalAi, t.instance_variable_get(:@ai)
+    assert_equal [0, 1, 2], t.rule_choices(CPU)
+    assert_equal "ok", t.set_rule(toks[0], CPU, 2)
+    assert_instance_of ::Mahjong::Cpu::Ai::HardAi, t.instance_variable_get(:@ai)
+    assert_equal 2, t.public_view(0)["ry"][0]
+    assert_equal 11, t.public_view(0)["ru"].size
+    assert_equal 4, t.public_view(0)["rx"].size
+    assert_equal "ok", t.set_rule(toks[0], CPU, 0)
+    assert_instance_of ::Mahjong::Cpu::Ai::EasyAi, t.instance_variable_get(:@ai)
+    assert_equal "value", t.set_rule(toks[0], CPU, 3)
+    assert_equal "ok", t.set_rule(toks[0], CPU, 1)
+    assert_nil t.to_saved(0)["rules"]["cpu"], "the setting's level again: no choice kept"
+    h, = lobby(1, "cpu_level" => "hard")
+    assert_equal 2, h.public_view(0)["ry"][0], "the setting's level"
+    assert_instance_of ::Mahjong::Cpu::Ai::HardAi, h.instance_variable_get(:@ai)
+  end
+
+  # The CPUs of a game play at the level chosen in the lobby: a game started
+  # with easy CPUs asks the easy AI.
+  def test_the_chosen_level_plays
+    t, toks = lobby
+    assert_equal "ok", t.set_rule(toks[0], CPU, 0)
+    start(t, toks)
+    asked = 0
+    ai = t.instance_variable_get(:@ai)
+    ai.define_singleton_method(:think) { |**kw| asked += 1; super(**kw) }
+    run_until(t, 0) { asked >= 3 }
+    assert_instance_of ::Mahjong::Cpu::Ai::EasyAi, ai
+  end
+
+  # Item 16: the spectators' delay (seconds; none, 1, 3, 5 minutes and the
+  # setting's own), in "ry"; it is what the spectators see.
+  def test_the_spectator_delay_item
+    t, toks = lobby(1, "spectator_delay_ms" => 45_000)
+    assert_equal [0, 45, 60, 180, 300], t.rule_choices(DELAY)
+    assert_equal 45, t.public_view(0)["ry"][1]
+    assert_equal [0, 45, 60, 180, 300], t.public_view(0)["dc"]
+    assert_equal "value", t.set_rule(toks[0], DELAY, 30)
+    assert_equal "ok", t.set_rule(toks[0], DELAY, 180)
+    assert_equal 180_000, t.spectator_delay_ms
+    assert_equal "ok", t.set_rule(toks[0], DELAY, 0)
+    assert_equal 0, t.spectator_delay_ms
+    sp = t.join("wasm-cccc01", "W", 0)["token"]
+    start(t, toks)
+    now = run_until(t, 0) { t.sv > 5 }
+    assert_equal t.sv, t.member_view(sp, now)["sv"], "no delay chosen: now"
+  end
+
+  def test_a_delay_chosen_holds_the_spectators_back
+    t, toks = lobby(1, "cpu_ms" => 300)
+    assert_equal "ok", t.set_rule(toks[0], DELAY, 60)
+    sp = t.join("wasm-cccc01", "W", 0)["token"]
+    start(t, toks)
+    first = t.sv
+    now = run_until(t, 0) { t.sv > first + 5 }
+    assert_operator t.member_view(sp, now)["sv"], :<=, first + 1, "a minute behind"
+  end
+
+  def test_the_cpu_level_and_the_delay_are_saved
+    Dir.mktmpdir do |dir|
+      store = AsterismGames::Store.new(dir)
+      t, toks = lobby(1, store: store)
+      t.set_rule(toks[0], CPU, 2)
+      t.set_rule(toks[0], DELAY, 300)
+      t.save(0)
+      u = human_table(store: store)
+      assert_equal [2, 300], u.public_view(0)["ry"]
+      assert_instance_of ::Mahjong::Cpu::Ai::HardAi, u.instance_variable_get(:@ai)
+      assert_equal 300_000, u.spectator_delay_ms
+    end
+  end
+
+  def test_the_spectator_delay_setting_in_minutes
+    c = AsterismGames::Config.new({ "tables" => [{ "name" => "m", "spectator_delay_minutes" => 3 }] }, {})
+    assert_equal 180_000, c["tables"][0]["spectator_delay_ms"]
+    c = AsterismGames::Config.new({ "tables" => [{ "name" => "m" }] }, { "MAHJONG_SPECTATOR_DELAY_MINUTES" => "1" })
+    assert_equal 60_000, c["tables"][0]["spectator_delay_ms"]
+    c = AsterismGames::Config.new({ "tables" => [{ "name" => "m", "spectator_delay_seconds" => 20 }] }, {})
+    assert_equal 20_000, c["tables"][0]["spectator_delay_ms"], "the seconds as before"
+  end
+
   def test_the_rules_are_saved_and_stay_for_the_next_game
     Dir.mktmpdir do |dir|
       store = AsterismGames::Store.new(dir)
@@ -277,9 +368,10 @@ class TestMahjongLocalRules < Minitest::Test
   end
 
   # Over a whole tonpuu game (one human played through act), a spectator's
-  # view, the put and table never carry a hand (except the winners' at a
-  # win), a draw, an offer or the help.
-  def test_spectators_never_see_a_hand
+  # own view has the four hands ("sh", "sd") and no offer, no help and no
+  # sign of who may call; the put and table carry no hand (except the
+  # winners' at a win), and no seat's view has the four hands.
+  def test_spectators_see_the_four_hands_and_nothing_else
     t, toks = lobby(1, "over_ms" => 10**9)
     t.set_rule(toks[0], GAME, 1)
     sp = spectator(t)
@@ -288,11 +380,21 @@ class TestMahjongLocalRules < Minitest::Test
     checks = 0
     until t.status == "over"
       v = t.member_view(sp, now, 3)
-      [v, t.spectator_view(now)].each do |x|
-        %w[h dt wt uk].each { |k| refute x.key?(k), "a spectator's view has #{k}" }
-        assert_equal [], x["a"] if x.key?("a")
-        assert_equal(-1, x["me"]) if x.key?("me")
+      %w[h dt wt uk].each { |k| refute v.key?(k), "a spectator's view has #{k}" }
+      assert_equal [], v["a"]
+      assert_equal(-1, v["me"])
+      if t.status == "wait"
+        refute v.key?("sh")
+      else
+        hands = (0..3).map { |s| t.hand_of(s) }
+        assert_equal hands.map(&:first), v["sh"], "the four hands"
+        assert_equal hands.map(&:last), v["sd"], "the drawn tiles"
       end
+      assert_nil v["dl"], "no sign of who may call" if t.state&.phase == :naki_wait
+      [t.spectator_view(now), t.public_view(now), t.view(seat, now, 3)].each do |x|
+        %w[sh sd].each { |k| refute x.key?(k), "#{k} outside a spectator's own view" }
+      end
+      %w[h dt wt uk].each { |k| refute t.spectator_view(now).key?(k), "the put has #{k}" }
       checks += 1
       a = t.view(seat, now)["a"]
       o = a.find { |x, _| [E::TSUMO_AGARI, E::RON, E::NEXT, E::SKIP].include?(x) } || a.find { |x, _| x == E::DAHAI }
@@ -313,16 +415,20 @@ class TestMahjongLocalRules < Minitest::Test
     sp = spectator(t)
     seat, = start(t, toks).first
     seen = {} # time => state version
+    hands = {} # state version => the four hands
     now = 0
     while now < 30_000 && t.status == "play"
       t.act(toks[0], t.sv, E::DAHAI, [M::Tiles.unpack(t.view(seat, now)["a"].find { |x, _| x == E::DAHAI }[1]).last], now) if
         t.view(seat, now)["a"].any? { |x, _| x == E::DAHAI }
       seen[now] = t.sv # after what happened at now
+      hands[t.sv] ||= (0..3).map { |s| t.hand_of(s).first } if t.status == "play"
       now += 10
       t.tick(now)
       next if now < 5000
       want = seen[now - 5000]
       v = t.member_view(sp, now)
+      assert_equal hands[v["sv"]], v["sh"], "the hands are as old as the rest" if hands[v["sv"]]
+      refute t.spectator_view(now).key?("sh"), "never in the put"
       assert_operator v["sv"], :<=, want, "at #{now} ms a spectator is no later than 5 s ago"
       assert_operator v["sv"], :>=, seen[now - 5020], "and not earlier" if seen[now - 5020]
       assert_equal t.spectator_view(now)["sv"], v["sv"], "the put and table are as late"

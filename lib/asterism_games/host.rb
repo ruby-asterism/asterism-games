@@ -45,6 +45,8 @@ module AsterismGames
       @stats = Hash.new(0)
       config["tables"].each do |t|
         f = GAMES.fetch(t["game"]) { raise ArgumentError, "unknown game #{t['game'].inspect}" }
+        # A room's tables check who joins against the room's ID (README "Who joins").
+        t = t.merge("room_id" => config["room_id"]) if config["room_id"]
         g, r, m = f.call(t, @store, @log, @clock)
         @games[t["name"]] = g
         @remotes[t["name"]] = SizeWatch.new(r, self)
@@ -140,6 +142,9 @@ module AsterismGames
         if g.dirty?
           g.save(now)
           put_state(name, g, now)
+        elsif g.respond_to?(:unsaved?) && g.unsaved?
+          # A change only one seat's own view shows: saved, not put.
+          g.save(now)
         elsif now - @put_at.fetch(name, 0) >= PUT_EVERY_MS
           put_state(name, g, now)
         end

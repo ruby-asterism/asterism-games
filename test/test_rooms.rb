@@ -68,6 +68,7 @@ class TestRooms < Minitest::Test
     assert_equal "games", c["node"]
     assert_equal ["mahjong1"], c["tables"].map { _1["name"] }
     assert_equal "aaaa", JSON.parse(File.read(File.join(c["state_dir"], "room.json")))["room"]
+    assert_equal "aaaa", c["room_id"], "the room's ID, for who joins (README \"Who joins\")"
     @rooms.check(@now + 1)
     assert_equal 1, @spawned.size, "one host per room"
   end

@@ -16,7 +16,8 @@ tables:
     away_seconds: 10         # a player not heard from this long is shown as away
     away_wait_seconds: 2     # an away player's time to discard or call (back: the full times)
     cpu_ms: 700              # a CPU's pause before it acts
-    cpu_level: normal        # easy / normal / hard (riichi_engine's CPU levels)
+    cpu_level: normal        # easy / normal / hard (riichi_engine's CPU levels; the owner may choose another)
+    # spectator_delay_minutes: 0   # spectators see the game and the hands this much later (README "Spectators")
     humans: 4                # seats players may take
     # rule: riichi_engine's rule keys over the host's defaults (README "Rules"):
     #   game_type: hanchan    # or tonpuu
