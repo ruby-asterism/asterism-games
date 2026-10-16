@@ -261,6 +261,65 @@ class TestMahjongRoundEnds < Minitest::Test
     assert_equal "play", t.status
   end
 
+  # ------------------------------------------------------------ riichi on a ronned tile
+
+  # The dealer declares riichi with 8m (tenpai on 1s 4s); the next seat
+  # waits on 5m 8m (tanyao) when ron is set, the seat across holds 8m 8m
+  # when pon is set. [table, seats, dealer, the next seat, the seat across]
+  def riichi_on_8m(ron: false, pon: false)
+    t, seats = table4
+    oya = t.state.oya_seat
+    w = (oya + 1) % 4
+    q = (oya + 2) % 4
+    st = at_discard(t, oya, %w[1m 2m 3m 4p 5p 6p 7s 8s 9s 1z 1z 2s 3s], "8m")
+    give(st, w, %w[2m 3m 4m 5p 6p 7p 3s 4s 5s 6m 7m 5s 5s]) if ron
+    give(st, q, %w[8m 8m 1m 9m 1p 9p 1s 9s 1z 2z 3z 4z 5z]) if pon
+    riichi = t.view(oya, 0)["a"].find { |x, _| x == E::RIICHI }
+    assert riichi, "riichi is offered"
+    assert_includes M::Tiles.unpack(riichi[1]), "8m"
+    assert_equal "ok", t.act(seats[oya], t.sv, E::RIICHI, ["8m"], 0)
+    [t, seats, oya, w, q]
+  end
+
+  def test_a_ron_on_the_riichi_tile_gives_the_1000_back
+    t, seats, oya, w, = riichi_on_8m(ron: true)
+    assert_equal 24_000, t.state.scores[oya], "the stick is paid at the declaration"
+    assert_equal 1, t.state.kyoutaku
+    assert t.view(w, 0)["a"].find { |x, _| x == E::RON }, "the ron is offered"
+    assert_equal "ok", t.act(seats[w], t.sv, E::RON, [], 0)
+    v = t.public_view(0)
+    res = v["res"]
+    assert_equal "ron_agari", res["k"]
+    assert_equal oya, res["f"]
+    pts = res["d"][w]
+    assert_equal(-pts, res["d"][oya], "the dealer pays the ron and nothing more")
+    assert_equal 25_000 - pts, v["sc"][oya], "the 1000 came back"
+    assert_equal 25_000 + pts, v["sc"][w], "no stick for the winner"
+    assert_equal 0, t.state.kyoutaku
+    assert_equal 0, v["r"][3], "no stick on the table"
+    assert_equal 0, v["ri"] & (1 << oya), "the riichi is gone"
+    assert_equal 100_000, v["sc"].sum
+  end
+
+  def test_a_pon_of_the_riichi_tile_lets_the_riichi_stand
+    t, seats, oya, _w, q = riichi_on_8m(pon: true)
+    pon = t.view(q, 0)["a"].find { |x, _| x == E::PON }
+    assert pon, "the pon is offered"
+    assert_equal "ok", t.act(seats[q], t.sv, E::PON, M::Tiles.unpack(pon[1]), 0)
+    t.tick(0)
+    assert_equal q, t.state.current_seat
+    v = t.public_view(0)
+    assert_equal 24_000, v["sc"][oya]
+    assert_equal 1, v["r"][3], "the stick stays"
+    assert_equal 1 << oya, v["ri"] & (1 << oya), "the riichi stands"
+  end
+
+  def test_the_host_turns_riichi_void_on_ron_on
+    assert E::RULE_DEFAULTS["riichi_void_on_ron"]
+    t, = table4
+    assert t.rule.riichi_void_on_ron?
+  end
+
   # ------------------------------------------------------------ kuikae
 
   # No swap-calling: after a chi of 3m with 4m 5m the caller may not discard

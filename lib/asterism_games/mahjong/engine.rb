@@ -86,7 +86,11 @@ module AsterismGames
         # round at the latest; a ron with several winners where the dealer
         # keeps the deal goes on).
         "nan_iri" => true,
-        "sudden_death" => true
+        "sudden_death" => true,
+        # A riichi declared on a tile that is ronned does not stand: the
+        # 1000 points come back and the stick goes (a pon or kan of it lets
+        # the riichi stand).
+        "riichi_void_on_ron" => true
       }.freeze
 
       def rule(overrides = {})
