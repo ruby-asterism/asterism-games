@@ -1,35 +1,64 @@
 # asterism-games
 
-Game hosts for [Asterism](https://github.com/ruby-asterism/asterism): a
-CRuby process that joins a Zenoh network as an Asterism node, holds the
-state of the games and lets players on boards (Family mruby), browsers and
-PCs play through Asterism calls. The first game is riichi mahjong (four
-players; seats nobody takes are played by CPUs), built on the
-[riichi_engine](https://github.com/HenrikStephensen/riichi_engine) gem (a
-fork with fixes, see "riichi_engine" below).
+A showcase of [Asterism](https://github.com/ruby-asterism/asterism): how
+to write the server side of an application in Ruby on an Asterism
+network. A game host is a CRuby process that joins a Zenoh network as an
+Asterism node, exposes each table as an Asterism object, holds the state
+of the games and lets players on boards (Family mruby), browsers and PCs
+play through Asterism calls.
 
-Status: Step 3 of the mahjong plan: up to four players at a table (a lobby
-to sit and start, calls by several players decided together, players that
-drop out played for after a short wait until they are back), two tables at
-once on a local network, or a table in each room of an Asterism console
-on a server ("Rooms") and permanent tables next to them for the boards and
-browsers registered with the console ("Permanent tables"; the server's
-setup: docs/install.md). Not published yet.
+It is two parts, in this repository for now:
+
+- **The framework** (`lib/asterism_games.rb`, `lib/asterism_games/*.rb`):
+  everything a game host needs whatever the game is. The connection
+  (Asterism's block API, the tables exposed with `caller: :from`), the
+  host's loop, the puts of each table's state, saving and resuming, the
+  members and their tokens, who may join in a room, the rooms' supervisor
+  (one host process per room of an Asterism console), the permanent tables
+  next to the rooms, the status (`GET /status`) and the settings. A game
+  subclasses `AsterismGames::Game` and `AsterismGames::Remote` and writes
+  only its rules and the methods it exposes ("Writing a game"). The
+  framework requires no game; it is meant to become a gem of its own.
+- **The games**: the first is riichi mahjong (`lib/asterism_games/mahjong/`:
+  four players, seats nobody takes are played by CPUs), built on the
+  [riichi_engine](https://github.com/HenrikStephensen/riichi_engine) gem (a
+  fork with fixes, see "riichi_engine" below), which only the game needs.
+  The table screens are Family mruby apps (fmruby-core's
+  `flash/app/game/mahjong/`), on the boards and in the browser build.
+
+```
+ bin/asterism-games  ──requires──>  asterism_games/mahjong  ──>  riichi_engine
+        │                                   │ (Table < Game, Remote < Remote)
+        └──requires──>  asterism_games  <───┘
+                        (Host, Rooms, Config, Store, Game, Remote)  ──>  asterism
+```
+
+Status: up to four players at a table (a lobby to sit and start, calls by
+several players decided together, players that drop out played for after a
+short wait until they are back), two tables at once on a local network, or
+a table in each room of an Asterism console on a server ("Rooms") and
+permanent tables next to them for the boards and browsers registered with
+the console ("Permanent tables"; the server's setup: docs/install.md). Not
+published yet.
 
 | Path | What |
 |---|---|
-| `bin/asterism-games` | the host |
+| `bin/asterism-games` | the host (loads the framework and the games) |
 | `bin/mahjong-bots` | players without screens, for trying a table (one process each) |
-| `lib/asterism_games/host.rb` | the connection, the loop, the puts, the game registry (`Host::GAMES`) |
-| `lib/asterism_games/rooms.rb` | the rooms' supervisor: one host process per room that opens a table ("Rooms"), and one for the permanent tables ("Permanent tables") |
-| `lib/asterism_games/config.rb` | the settings (file and environment) |
+| `lib/asterism_games.rb` | the framework, without any game |
+| `lib/asterism_games/game.rb` | the base of a game: the registry, the members and tokens, who joins in a room, the views, the time, saving ("Writing a game") |
+| `lib/asterism_games/remote.rb` | the base of the exposed object: the methods and their numbers of arguments, the caller (`from:`), `join` / `mine` / `leave` |
+| `lib/asterism_games/host.rb` | the connection (Asterism's `Net`), the loop, the puts, the status file |
+| `lib/asterism_games/rooms.rb` | the rooms' supervisor: one host process per room that opens a table ("Rooms"), and one for the permanent tables ("Permanent tables"); `GET /status` |
+| `lib/asterism_games/config.rb` | the settings (file and environment; each game's table keys come from the game) |
 | `lib/asterism_games/store.rb` | saved states, one JSON file per table |
-| `lib/asterism_games/mahjong/` | the mahjong table: `table.rb` (seats, rounds, views, time), `engine.rb` (the calls into riichi_engine), `remote.rb` (the exposed object), `tiles.rb` (tile numbers) |
+| `lib/asterism_games/mahjong.rb` | the mahjong game: requiring it registers `mahjong` |
+| `lib/asterism_games/mahjong/` | `table.rb` (seats, rounds, views, time, the table's settings), `engine.rb` (the calls into riichi_engine), `remote.rb` (the exposed object), `tiles.rb` (tile numbers) |
 | `config/example.yml` | settings to copy |
 | `config/rooms.yml` | the settings of the server's image (rooms) |
 | `deploy/vps/` | the server's image, compose file, `update.sh` (docs/install.md) |
 | `docs/install.md` | putting the host on a server next to an Asterism console |
-| `test/` | the tests (`rake test`) |
+| `test/` | the tests (`rake test`); `test/framework/` a small game on the framework alone |
 
 ## Running
 
@@ -64,9 +93,11 @@ A YAML file (`--config PATH` or `ASTERISM_GAMES_CONFIG`; see
 | `app` | `ASTERISM_GAMES_APP` | `games` | the application every game lives under |
 | `credentials` | `ASTERISM_GAMES_CREDENTIALS` | none | a console's `.tar`, for a router over mutual TLS (the router comes from it, and the node ID too unless `node` is given) |
 | `state_dir` | `ASTERISM_GAMES_STATE_DIR` | `var/state` | where the tables are saved |
-| `tables` | | two tables `mahjong1`, `mahjong2` | each `{name, game: mahjong, ...}` |
+| `tables` | | the first game's tables (`mahjong1`, `mahjong2`) | each `{name, game, ...}`; `game` defaults to the first game registered (`mahjong`) |
 
-A mahjong table takes (the environment applies to every table):
+The other keys of a table are its game's (`settings` in the game's class,
+"Writing a game"). A mahjong table takes (the environment applies to every
+mahjong table):
 
 | Key | Environment | Default | |
 |---|---|---|---|
@@ -142,8 +173,9 @@ An Asterism console (0.2.2 and later) makes rooms: a key space of its own
 
 A seat at a table goes with the node ID of the member that took it: a
 member's `join` and `mine` give back its token, and with it its hand. So
-the table must know that a call's caller (`Asterism.current_call.from`, the
-last chunk of the call's key) is who it says.
+the table must know that a call's caller (`from:`, which Asterism fills
+in from the last chunk of the call's key: the tables are exposed with
+`caller: :from`) is who it says.
 
 **With seats** (a console 0.3.0: `rooms.json` says how many seats the
 room's slot has, `"seats"`, and the seats' node prefix): the console's door
@@ -204,12 +236,12 @@ tables, where a board's certificate is its node ID).
 | Key (`rooms:`) | Environment | Default | |
 |---|---|---|---|
 | `dir` | `ASTERISM_GAMES_ROOMS_DIR` | none (no rooms) | the console's rooms volume: `rooms.json`, `certs/` |
-| `apps` | `ASTERISM_GAMES_ROOM_APPS` (comma separated) | `/app/game/mahjong/mahjong.app.rb` | a room whose link opens one of these gets the tables |
+| `apps` | `ASTERISM_GAMES_ROOM_APPS` (comma separated) | the games' screens (`/app/game/mahjong/mahjong.app.rb`) | a room whose link opens one of these gets the tables |
 | `max` | `ASTERISM_GAMES_ROOM_MAX` | 3 | rooms with tables at once |
 | `node` | `ASTERISM_GAMES_ROOM_NODE` | `games` | the host's node ID in a room |
 | `router` | `ASTERISM_GAMES_ROOM_ROUTER` | the certificate's (`tls/zenohd:7448`) | the router |
 | `status_listen` | `ASTERISM_GAMES_STATUS_LISTEN` | none | host:port of `GET /status` |
-| `tables` | | one table `mahjong1` | as `tables` above; the `MAHJONG_*` environment applies |
+| `tables` | | the first game's first table (`mahjong1`) | as `tables` above; the `MAHJONG_*` environment applies |
 | `credentials` | `ASTERISM_GAMES_ROOM_CREDENTIALS` | `permanent.credentials` | the host's own `.tar` for the rooms (used when `rooms.json` lists the host in `"hosts"`) |
 | `secret_ids` | `ASTERISM_GAMES_ROOM_SECRET_IDS` (`1` / `0`) | true | callers that are neither a seat nor the host's are checked with their secret ("Who joins"); false: refused |
 | `seat_reuse_seconds` | `ASTERISM_GAMES_ROOM_SEAT_REUSE_SECONDS` | 1800 | a seat's node ID silent this long at a table is a new page |
@@ -273,6 +305,93 @@ shared with the supervisor), the container 66 MiB in all with the
 supervisor and one room. With `rooms.max` (3) rooms as well, about 250 MB
 RSS (about 120 MB PSS).
 
+## Writing a game
+
+A game is two classes on the framework: the table (`AsterismGames::Game`:
+the rules, the views, the saved form) and the object the host exposes for
+each table (`AsterismGames::Remote`: the methods players call). Everything
+else is the framework's: the connection, the members and their tokens, who
+may join in a room, the host's loop, the puts, saving and resuming, the
+rooms, the permanent tables, the status and the settings. A complete small
+game is `test/framework/tally.rb`; the shape of one:
+
+```ruby
+require "asterism_games"
+
+module Counter
+  class Remote < AsterismGames::Remote
+    exposes press: 2, view: 1             # name => number of arguments (join, mine, leave are there)
+
+    def press(token, n, from:)            # from: the caller's node ID (caller: :from)
+      mark(token, from)                    # a call from the member's own node: it is there
+      @game.press(token, n.to_i, now)
+    end
+
+    def view(token, from:)
+      mark(token, from)
+      @game.member_view(token, now) || { "error" => "token" }
+    end
+  end
+
+  class Table < AsterismGames::Game
+    register "counter"                     # tables: [{name: counter1, game: counter}]
+    remote Remote
+    tables "counter1"                      # the tables when the settings name none
+    screens "/app/game/counter/counter.app.rb"   # a room whose link opens this gets them
+    settings file: { "goal" => ["goal", 1] }, env: { "COUNTER_GOAL" => ["goal", 1] }
+    DEFAULTS = AsterismGames::Game::DEFAULTS.merge("goal" => 10).freeze
+
+    def initialize(...)
+      super
+      @n = 0
+      load_saved(0)                        # restore and resume_clock when a saved state is there
+    end
+
+    def press(token, n, now)
+      return "token" unless node_of(token)
+      @n += n
+      changed                              # saved and put by the host
+      "ok"
+    end
+
+    def tick(now) = super.tap { expire_members(now) }   # time: called on the host's loop
+    def public_view(now) = { "v" => @ver, "t" => @name, "n" => @n }   # put on .../<table>/state
+    def member_view(token, now) = node_of(token) && public_view(now)
+    def to_saved(now) = super.merge("n" => @n)
+    def restore(data, now) = super.then { @n = data["n"].to_i }
+  end
+end
+```
+
+`bin/asterism-games` requires the framework and the games it serves
+(`require "asterism_games/mahjong"`); the settings name a game per table.
+
+What the framework gives a game:
+
+| | |
+|---|---|
+| `Remote.exposes` | the exposed methods and their numbers of arguments (-1: any), checked by Asterism before a call; the host exposes them with `caller: :from`, so every method takes `from:` (Asterism fills it in from the call's key and refuses a call that brings it). `join(name[, secret])`, `mine([secret])`, `leave(token)` are the base's |
+| `Game#join` / `mine` / `leave` | a member per node with a token (`SecureRandom`, 32 hex digits); the same node gets its token back. In a room the caller is checked ("Who joins"). A game adds its own through `member_reply`, `join_refusal`, `renamed`, `forget` (free what the member held) and `keep_member?` |
+| `node_of(token)`, `touch`, `member_away?` (`away_ms`), `expire_members` | the token's member, the sign that a member is there, members gone for long |
+| `tick(now)` | the host calls it on its loop (every 10 ms) and the game moves on by the time given: deadlines, CPU turns. Never waits |
+| `public_view` / `spectator_view` / `state_view` / a member's view | what everybody, a spectator, the state key and one member see. What only one member may see (a hand) goes in the answer of that member's call, never on the state key (anyone in the key space may subscribe to it) |
+| `changed`, `dirty?`, `unsaved?` | a change to save and put; a change only one member's view shows (`@unsaved = true`) is saved, not put |
+| `to_saved` / `restore` / `resume_clock`, `SAVE_FORMAT` | the saved form (one JSON file per table, `state_dir/<table>.json`, written to a temporary file and renamed); a state of another format is not read. Times are saved as the time left and resumed with the host's clock |
+| `summary(now)` | the counts the status shows (`st`, `members`, `humans`, `cpus`, `away`, and the game's own): no names, no nodes, no tokens. `busy` (`bin/asterism-games status --idle`) is `humans - away` |
+| `settings`, `tables`, `screens`, `DEFAULTS` | the table keys of the settings file and the environment, the tables a host serves by default, the table apps that get the tables in a room, the table's options |
+
+The host (`Host`) is written with Asterism's block API:
+`Asterism.connect(...) do |net| ... end` exposes the tables, sets the
+profile (`name: asterism-games`; not in a room) and starts the Net's
+receiving thread, which answers the calls. The games move on in the
+host's own loop (`step`: `tick`, saving, the puts, every 10 ms), which
+holds `Asterism::LOCK` while it runs: the receiving thread holds the same
+lock for each of its ticks, so a game never sees a call and a step at
+once, and a game needs no lock of its own. When the connection is lost
+(the receiving thread ends; `net.lost_reason` says why) the host saves and
+connects again after 3 s; while a client of a router only reconnects
+(`reconnecting?`) the tables stay and the puts wait.
+
 ## The mahjong table
 
 ### Methods
@@ -297,8 +416,10 @@ RSS (about 120 MB PSS).
   fills empty seats with CPUs and starts. At the end of a game the owner's
   next (or `over_seconds`) brings the table back to the lobby with the same
   seats, for another game.
-- The node that calls is the caller in the call's key
-  (`Asterism.current_call.from`). The same node gets its membership and
+- The node that calls is the caller in the call's key (`from:`, filled
+  in by Asterism; a call that brings `from:` itself is refused). The
+  arguments are as before: a table app that knows nothing of `from:`
+  calls as it did. The same node gets its membership and
   token back from `join` (and `mine`), so a player that restarts its
   application finds its table again.
 - The token is 32 hex digits from `SecureRandom`. Everything about a hand
@@ -783,7 +904,20 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   nothing, `max` and a stopped host started again, the status (counts
   only) and the settings from the environment.
 - `test_network.rb`: the same refusals through a router, with the host in a
-  child process (skipped without `ASTERISM_TEST_ROUTER`).
+  child process, and the caller from Asterism (a call that brings `from:`
+  is refused, the numbers of arguments are counted) (skipped without
+  `ASTERISM_TEST_ROUTER`).
+- `test_framework.rb`: the framework without a game: its files require
+  nothing of a game, loading it loads only its own files (no riichi_engine),
+  and `test/framework/test_tally.rb` runs in a process of its own with a
+  small game of its own (`test/framework/tally.rb`) and nothing else: the
+  exposed methods, the settings from the game, members and tokens through
+  the Remote with `from:`, saving and another host going on from the saved
+  state, the status file, a room and the permanent tables of that game
+  (who joins, `GET /status`, the room's tables removed when it closes) and,
+  with `ASTERISM_TEST_ROUTER`, the host over a router (calls, the state
+  put, the profile). Also the mahjong game's registration and its exposed
+  methods as before.
 
 `bin/mahjong-bots` fills a table with players over the network (to try a
 second table, or the host under load): `bundle exec bin/mahjong-bots

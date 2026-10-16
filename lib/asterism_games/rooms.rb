@@ -16,13 +16,13 @@ module AsterismGames
   #    "revoked": [{"room": "<uid>", "until": <Unix s>}], ...}
   #   certs/room-01.tar   the slot's certificate (namespace room/01)
   #
-  # A room whose link opens one of the configured apps (the mahjong table's
-  # screen) gets the configured tables: this supervisor forks one host
-  # process (Host) for the room, which joins the router in the room's key
-  # space (namespace room/<slot>) and serves the tables there, as browsers
-  # in the room see them (asterism/games/games/mahjong1). One process per
-  # room, since the asterism gem keeps one connection a process. Other
-  # rooms get nothing.
+  # A room whose link opens one of the configured apps (by default the
+  # games' screens, Game.screens) gets the configured tables: this
+  # supervisor forks one host process (Host) for the room, which joins
+  # the router in the room's key space (namespace room/<slot>) and serves
+  # the tables there, as browsers in the room see them
+  # (asterism/games/games/<table>). One process per room, since the
+  # asterism gem keeps one connection a process. Other rooms get nothing.
   #
   # Which certificate (console 0.3.0, its docs/rooms.md "Seats"): when
   # rooms.json lists this host's node in "hosts", the router keeps the

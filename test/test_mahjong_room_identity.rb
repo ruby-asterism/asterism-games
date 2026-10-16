@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require_relative "test_helper"
-require "minitest/mock"
 
 # Who joins a table in a room (README "Who joins"): a browser's node ID
 # comes from a secret of its own for the room, and join and mine refuse an
@@ -93,14 +92,12 @@ class TestMahjongRoomIdentity < Minitest::Test
     assert_equal(-1, M::Remote::METHODS[:join])
     assert_equal(-1, M::Remote::METHODS[:mine])
     r = M::Remote.new(room_table, -> { 0 })
-    call = Struct.new(:from).new(id(SECRET_A))
-    Asterism.stub(:current_call, call) do
-      assert_equal({ "error" => "identity" }, r.join("A"), "the old app's join in a room")
-      tok = r.join("A", SECRET_A)["token"]
-      assert tok
-      assert_equal tok, r.mine(SECRET_A)["token"]
-      assert_equal({ "error" => "identity" }, r.mine)
-    end
+    from = id(SECRET_A) # what Asterism passes (caller: :from)
+    assert_equal({ "error" => "identity" }, r.join("A", from: from), "the old app's join in a room")
+    tok = r.join("A", SECRET_A, from: from)["token"]
+    assert tok
+    assert_equal tok, r.mine(SECRET_A, from: from)["token"]
+    assert_equal({ "error" => "identity" }, r.mine(from: from))
   end
 
   def test_a_hosts_tables_get_the_room_id

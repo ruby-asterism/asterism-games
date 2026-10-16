@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require "digest"
 require "json"
 require "securerandom"
+require_relative "../game"
 require_relative "tiles"
 require_relative "engine"
 
@@ -30,33 +30,60 @@ module AsterismGames
     # its seat is played for after a shorter wait (away_wait_ms instead of
     # turn_ms and call_ms, counted from the start of the wait), so the others
     # are not held up a full turn each time. Back, it has the full times again.
-    class Table
+    class Table < Game
+      register "mahjong"
+      tables "mahjong1", "mahjong2"
+      screens "/app/game/mahjong/mahjong.app.rb"
+      # The table keys of the settings file (seconds) and of the environment
+      # (for every mahjong table), and the table's own (ms) names (README
+      # "Settings").
+      settings file: {
+                 "turn_seconds" => ["turn_ms", 1000], "bank_seconds" => ["bank_ms", 1000],
+                 "call_seconds" => ["call_ms", 1000],
+                 "result_seconds" => ["result_ms", 1000], "over_seconds" => ["over_ms", 1000],
+                 "away_seconds" => ["away_ms", 1000], "away_wait_seconds" => ["away_wait_ms", 1000],
+                 "cpu_ms" => ["cpu_ms", 1],
+                 "cpu_level" => ["cpu_level", nil], "humans" => ["humans", 1],
+                 "spectators" => ["spectators", 1], "spectator_delay_seconds" => ["spectator_delay_ms", 1000],
+                 "spectator_delay_minutes" => ["spectator_delay_ms", 60_000],
+                 "rule" => ["rule", :hash]
+               },
+               env: {
+                 "MAHJONG_TURN_SECONDS" => ["turn_ms", 1000],
+                 "MAHJONG_BANK_SECONDS" => ["bank_ms", 1000],
+                 "MAHJONG_CALL_SECONDS" => ["call_ms", 1000],
+                 "MAHJONG_RESULT_SECONDS" => ["result_ms", 1000],
+                 "MAHJONG_OVER_SECONDS" => ["over_ms", 1000],
+                 "MAHJONG_AWAY_SECONDS" => ["away_ms", 1000],
+                 "MAHJONG_AWAY_WAIT_SECONDS" => ["away_wait_ms", 1000],
+                 "MAHJONG_CPU_MS" => ["cpu_ms", 1],
+                 "MAHJONG_CPU_LEVEL" => ["cpu_level", nil],
+                 "MAHJONG_SPECTATORS" => ["spectators", 1],
+                 "MAHJONG_SPECTATOR_DELAY_SECONDS" => ["spectator_delay_ms", 1000],
+                 "MAHJONG_SPECTATOR_DELAY_MINUTES" => ["spectator_delay_ms", 60_000]
+               }
+
       SAVE_FORMAT = 2
       MAX_ROUNDS = 40 # a hanchan has far fewer; a guard against a loop
-      MAX_MEMBERS = 16
       ASSIST_LEVELS = 0..3 # README "Assist"
       ASSIST_DEFAULT = 1   # the riichi help, for a screen that does not ask
 
-      DEFAULTS = {
+      DEFAULTS = Game::DEFAULTS.merge(
         "turn_ms" => 5_000,       # a human's time for a move (a discard, riichi, a kan, a win)
         "bank_ms" => 20_000,      # and the bank a move may go on into, one per seat, full again every round (0: none)
         "call_ms" => 8_000,       # every human's time to call a discard
         "cpu_ms" => 700,          # a CPU waits this long before it acts
         "result_ms" => 8_000,     # the result of a round stays this long
         "over_ms" => 60_000,      # the end of a game stays this long (then the lobby)
-        "away_ms" => 10_000,      # a member not heard from this long is away
         "away_wait_ms" => 2_000,  # an away seat's time to discard or call
         "cpu_level" => "normal",  # easy / normal / hard
         "humans" => 4,            # seats members may take (0: CPUs only, at once)
         "spectators" => 12,       # members without a seat at most (a room lets 16 pages in: 4 seats + 12)
         "spectator_delay_ms" => 0, # what spectators see is this old (README "Spectators")
-        "room_id" => nil,         # in a room: its ID, against which joins are checked (README "Who joins")
-        "trusted_nodes" => [],    # in a room: node IDs the router binds to their callers (the seats)
-        "trusted_prefix" => nil,  # in a room: the host's own names (it and its bots), bound likewise
-        "secret_ids" => true,     # in a room: other callers are checked with their secret
-        "seat_reuse_ms" => 1_800_000, # a seat's node ID silent this long is a new page on that seat
         "rule" => {}              # riichi_engine rule keys over Engine::RULE_DEFAULTS
-      }.freeze
+        # and Game::DEFAULTS: away_ms (10 s), the rooms' room_id, trusted_nodes,
+        # trusted_prefix, secret_ids and seat_reuse_ms (README "Who joins")
+      ).freeze
 
       # The local rules the owner chooses in the lobby (README "Local
       # rules"): one value per item, in this order, and rule(token, item,
@@ -107,13 +134,10 @@ module AsterismGames
       # view takes them from the past, the rest is now).
       GAME_KEYS = %w[st sv r sc ri dora kw fu hc ls ev dl res fin fr].freeze
 
-      attr_reader :name, :ver, :sv, :status, :state, :opts, :stats, :rule
+      attr_reader :sv, :status, :state, :stats, :rule
 
       def initialize(name, opts = {}, store: nil, log: nil)
-        @name = name
-        @opts = DEFAULTS.merge(opts.transform_keys(&:to_s))
-        @store = store
-        @log = log
+        super
         @choice = {}         # the owner's local rules: riichi_engine keys
         @time_choice = nil   # the owner's [time for a move, bank] (ms), nil: the setting's
         @cpu_choice = nil    # the owner's CPU level (RULE_CPU), nil: the setting's
@@ -126,105 +150,47 @@ module AsterismGames
       end
 
       # ------------------------------------------------------------ members
+      #
+      # join, mine, leave, the tokens and who joins in a room are the
+      # framework's (Game); the table adds the seats to them.
 
-      # A node joins the table (or gets its membership back). Returns
-      # {"token", "seat" (-1: none), "owner"} or {"error" => "full"}; in a
-      # room {"error" => "identity"} when the node ID does not come from the
-      # secret, {"error" => "taken"} when the member has another one.
-      def join(node, name, now, secret = nil)
-        node = node.to_s
-        bad = identity_error(node, secret)
-        return { "error" => bad } if bad
-        m = reused_seat(node, now)
-        if m && m["key"] && m["key"] != secret_key(secret)
-          return { "error" => "taken" }
-        elsif m.nil?
-          return { "error" => "full" } if @members.size >= MAX_MEMBERS
-          return { "error" => "spectators" } if spectators_full?
-          m = @members[node] = { "token" => SecureRandom.hex(16), "at" => @join_count += 1 }
-          m["key"] = secret_key(secret) if room? && !trusted?(node)
-        end
-        m["name"] = clean_name(name, node)
-        m["seen"] = now
+      # join: {"token", "seat" (-1: none), "owner"}.
+      def member_reply(node)
+        { "token" => @members[node]["token"], "seat" => seat_index(node) || -1, "owner" => @owner == node }
+      end
+
+      # A table of 16 members ("full"), or no room for another spectator.
+      def join_refusal(node)
+        super || (spectators_full? ? "spectators" : nil)
+      end
+
+      # A seated member's new name is its seat's too.
+      def renamed(node, name)
         i = seat_index(node)
-        @seats[i]["name"] = m["name"] if i
-        changed
-        member_reply(node)
+        @seats[i]["name"] = name if i
       end
 
-      # The caller's membership, or nil (nothing is created); in a room the
-      # secret has to agree, as for join.
-      def mine(node, secret = nil, now = nil)
-        node = node.to_s
-        bad = identity_error(node, secret)
-        return { "error" => bad } if bad
-        m = now ? reused_seat(node, now) : @members[node]
-        return nil unless m
-        return { "error" => "taken" } if m["key"] && m["key"] != secret_key(secret)
-        member_reply(node)
+      # A member leaves (or is forgotten). In the lobby its seat empties;
+      # during a game its seat goes to a CPU. The owner's role passes on.
+      def forget(node)
+        i = seat_index(node)
+        if i
+          if @status == "wait"
+            @seats[i] = nil
+          else
+            @seats[i] = cpu_seat
+            @decl.delete(i)
+            @answered.delete(i)
+          end
+        end
+        super
+        pass_owner if @owner == node
+        name_cpus
       end
 
-      # ------------------------------------------------------------ who joins (rooms)
-      #
-      # With seats (the console's 0.3.0) the router binds a page's calls to
-      # its seat's node ID (wasm-0103), and the host's own names to the
-      # host's certificate: those callers (trusted_nodes, trusted_prefix)
-      # are taken as they are, as outside a room.
-      #
-      # Before the seats every connection of a room held the room's one
-      # certificate, so the router let any member call under any node ID. A
-      # browser in a room has a secret of its own for the room, and its node
-      # ID is "wasm-" and the first six hex digits of SHA-256("<room
-      # ID>:<secret>"); join and mine carry the secret, and the table works
-      # the ID out again. Such callers are still let in while secret_ids is
-      # on (the pages of the browser build from before the seats). Outside
-      # a room (no room_id) nothing is checked: a board's certificate is its
-      # node ID there. The member keeps the SHA-256 of its secret: two
-      # secrets that give the same six digits are told apart ("taken").
-
-      def room?
-        !@opts["room_id"].to_s.empty?
-      end
-
-      # A caller the router has bound to its name in this room.
-      def trusted?(node)
-        return false unless room?
-        return true if Array(@opts["trusted_nodes"]).include?(node)
-        prefix = @opts["trusted_prefix"].to_s
-        !prefix.empty? && node.start_with?(prefix)
-      end
-
-      # The member of a node, or nil; a seat's node ID that has not called
-      # for seat_reuse_ms is another page now (the door gave the seat away
-      # after as long without a connection): the old member leaves (its
-      # seat goes to a CPU in a game) and nil is returned.
-      def reused_seat(node, now)
-        m = @members[node]
-        return m unless m && trusted?(node) && Array(@opts["trusted_nodes"]).include?(node)
-        return m unless m["seen"] && now - m["seen"] > @opts["seat_reuse_ms"].to_i
-        @log&.call("mahjong: #{@name}: #{node} was silent for #{(now - m['seen']) / 60_000} min: a new page on that seat")
-        leave(m["token"])
-        nil
-      end
-
-      # Why a join or mine from node with secret is refused, or nil.
-      def identity_error(node, secret)
-        return nil unless room?
-        return nil if trusted?(node)
-        return "identity" unless @opts["secret_ids"]
-        return "identity" unless secret.is_a?(String) && secret.match?(/\A[0-9a-f]{32}\z/)
-        return "identity" unless node == self.class.room_node_id(@opts["room_id"], secret)
-        nil
-      end
-
-      def secret_key(secret)
-        secret.is_a?(String) ? Digest::SHA256.hexdigest(secret) : nil
-      end
-
-      # The node ID of the secret in the room (the browser build's main.js
-      # works out the same).
-      def self.room_node_id(room_id, secret)
-        "wasm-#{Digest::SHA256.hexdigest("#{room_id}:#{secret}")[0, 6]}"
+      # Seated members stay however long they are away (expire_members).
+      def keep_member?(node)
+        !seat_index(node).nil?
       end
 
       # No room for another member without a seat: spectators at most
@@ -238,22 +204,6 @@ module AsterismGames
           room += [@opts["humans"].to_i - humans, 0].max
         end
         watching >= room
-      end
-
-      def member_reply(node)
-        { "token" => @members[node]["token"], "seat" => seat_index(node) || -1, "owner" => @owner == node }
-      end
-
-      # A call from a node: it is there.
-      def touch(node, now)
-        m = @members[node.to_s]
-        m["seen"] = now if m
-      end
-
-      def node_of(token)
-        return nil unless token.is_a?(String) && !token.empty?
-        @members.each { |node, m| return node if m["token"] == token }
-        nil
       end
 
       def seat_index(node)
@@ -507,28 +457,6 @@ module AsterismGames
         "ok"
       end
 
-      # The member leaves the table. In the lobby its seat empties; during a
-      # game its seat goes to a CPU.
-      def leave(token)
-        node = node_of(token)
-        return false unless node
-        i = seat_index(node)
-        if i
-          if @status == "wait"
-            @seats[i] = nil
-          else
-            @seats[i] = cpu_seat
-            @decl.delete(i)
-            @answered.delete(i)
-          end
-        end
-        @members.delete(node)
-        pass_owner if @owner == node
-        name_cpus
-        changed
-        true
-      end
-
       def seat_of(token)
         return nil unless token.is_a?(String) && !token.empty?
         @seats.index { |s| s && s["kind"] == "human" && s["token"] == token }
@@ -543,11 +471,6 @@ module AsterismGames
         s = @seats[seat]
         return false unless s && s["kind"] == "human"
         member_away?(s["node"])
-      end
-
-      def member_away?(node)
-        m = @members[node]
-        m.nil? || m["seen"].nil? || @now - m["seen"] > @opts["away_ms"]
       end
 
       # ------------------------------------------------------------ actions
@@ -658,20 +581,6 @@ module AsterismGames
         v.delete("sh") unless hands
         v.delete("sd") unless hands
         v
-      end
-
-      # Spectators that are gone for long are forgotten (seated members stay).
-      def expire_members(now)
-        return if @members.empty? || now - @expire_at.to_i < 1000
-        @expire_at = now
-        gone = @members.keys.select do |node|
-          seat_index(node).nil? && member_away?(node) && now - @members[node]["seen"].to_i > @opts["away_ms"] * 6
-        end
-        gone.each do |node|
-          @members.delete(node)
-          pass_owner if @owner == node
-        end
-        changed unless gone.empty?
       end
 
       def step(now)
@@ -1277,34 +1186,15 @@ module AsterismGames
       end
 
       # ------------------------------------------------------------ saving
-
-      def changed
-        @ver += 1
-        @dirty = true
-      end
-
-      # Changed: to save and to put.
-      def dirty?
-        @dirty
-      end
-
-      # Changed in what only a seat's own view shows (an answer to the
-      # calls): to save, not to put (Host#step).
-      def unsaved?
-        @unsaved
-      end
-
-      def save(now)
-        @dirty = false
-        @unsaved = false
-        return unless @store
-        @store.write(@name, to_saved(now))
-      end
+      #
+      # changed, dirty?, unsaved? and save are the framework's (Game). A
+      # change only a seat's own view shows (an answer to the calls) sets
+      # @unsaved: saved, not put (Host#step).
 
       def to_saved(now)
         { "format" => SAVE_FORMAT, "name" => @name, "ver" => @ver, "sv" => @sv, "status" => @status,
           "seats" => @seats, "owner" => @owner,
-          "members" => @members.to_h { |n, m| [n, m.reject { |k, _| k == "seen" }] },
+          "members" => saved_members,
           "counts" => [@join_count, @sit_count],
           "game" => @game, "round" => @state&.to_json,
           "decl" => @decl.to_h { |k, a| [k.to_s, saved_action(a)] },
@@ -1321,9 +1211,8 @@ module AsterismGames
         a.transform_keys(&:to_s).transform_values { |x| x.is_a?(Symbol) ? x.to_s : x }
       end
 
-      def load_saved(now)
-        d = @store&.read(@name)
-        return unless d && d["format"] == SAVE_FORMAT
+      # A saved state of SAVE_FORMAT back (Game#load_saved: then resume_clock).
+      def restore(d, now)
         @ver = d["ver"].to_i + 1
         @sv = d["sv"].to_i
         @status = d["status"]
@@ -1355,20 +1244,18 @@ module AsterismGames
         @banks = if d["banks"].is_a?(Array) && d["banks"].size == 4 then d["banks"].map(&:to_i)
                  elsif @game then [bank_ms] * 4
                  end
-        resume_clock(now, d)
         @log&.call("mahjong: #{@name}: resumed (#{@status}, state #{@sv}, #{@members.size} members)")
       end
 
       # Times read back are relative to when they were saved; a host started
       # again calls this with its own clock. Members count as just seen.
-      def resume_clock(now, d = @store&.read(@name))
-        return unless d && d["format"] == SAVE_FORMAT
+      def resume_clock(now, d = saved)
+        return unless d
         @deadline = d["deadline_left"] && now + d["deadline_left"]
         @wait_from = @deadline && now - d["wait_spent"].to_i
         @cpu_at = d["cpu_left"] && now + d["cpu_left"]
         @next_at = d["next_left"] && now + d["next_left"]
-        @members.each_value { |m| m["seen"] = now }
-        @now = now
+        super
       end
 
       # ------------------------------------------------------------ setup
@@ -1384,9 +1271,8 @@ module AsterismGames
         @now = 0
         @status = "wait"
         @seats = [nil] * 4
-        @members = {}
+        reset_members
         @owner = nil
-        @join_count = 0
         @sit_count = 0
         @away_bits = 0
         @game = nil
@@ -1435,15 +1321,6 @@ module AsterismGames
         when "hard" then ::Mahjong::Cpu::Ai::HardAi.new
         else ::Mahjong::Cpu::Ai::NormalAi.new
         end
-      end
-
-      NAME_MAX = 32
-
-      def clean_name(name, node)
-        s = name.to_s.dup.force_encoding("UTF-8")
-        s = s.scrub("").delete("\u0000-\u001f").strip
-        s = s.byteslice(0, NAME_MAX).scrub("") if s.bytesize > NAME_MAX
-        s.empty? ? node : s
       end
     end
   end

@@ -44,8 +44,17 @@ class TestNetwork < Minitest::Test
     FileUtils.rm_rf(@dir) if @dir
   end
 
+  # (One test: a host forked after this process used zenoh-c would hang
+  # in its connect, so the host is forked once, before the first connect.)
   def test_tokens_and_refusals_over_the_network
     assert_nil @t.mine, "not a member yet"
+    # The tables are exposed with caller: :from: the caller is the node in
+    # the call's key, never an argument (README "Who called" of asterism),
+    # and the numbers of arguments are counted as before.
+    e = assert_raises(Asterism::RemoteError) { @t.mine(from: "wasm-aaaaaa") }
+    assert_equal "arguments", e.remote_kind
+    e = assert_raises(Asterism::RemoteError) { @t.sit("x") }
+    assert_equal "arguments", e.remote_kind
     r = @t.join("Tester")
     token = r["token"]
     assert_equal 32, token.size

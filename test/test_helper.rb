@@ -4,7 +4,8 @@ $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 require "minitest/autorun"
 require "tmpdir"
 require "asterism"
-require "asterism_games/host"
+require "asterism_games"
+require "asterism_games/mahjong"
 
 module MahjongTestHelper
   M = AsterismGames::Mahjong

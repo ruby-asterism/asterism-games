@@ -41,7 +41,8 @@ if ARGV.first == "status"
   exit 0
 end
 
-require "asterism_games/host"
+require "asterism_games"
+require "asterism_games/mahjong"
 
 path = ENV["ASTERISM_GAMES_CONFIG"]
 if (i = ARGV.index("--config"))

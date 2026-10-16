@@ -1,10 +1,18 @@
 # frozen_string_literal: true
 
 require "yaml"
+require_relative "game"
 
 module AsterismGames
   # Settings: a YAML file (ASTERISM_GAMES_CONFIG or --config), then the
   # environment over it. See README "Settings".
+  #
+  # The games come from the registry (AsterismGames.games): a table's
+  # "game" defaults to the first game registered, the tables the settings
+  # do not name are that game's (Game.tables), a room opens the tables
+  # when its link opens one of the games' screens (Game.screens), and each
+  # game says which table keys the file and the environment may set
+  # (Game.settings).
   class Config
     DEFAULTS = {
       "router" => "tcp/127.0.0.1:7447",
@@ -12,7 +20,7 @@ module AsterismGames
       "app" => "games",
       "credentials" => nil,
       "state_dir" => "var/state",
-      "tables" => [{ "name" => "mahjong1", "game" => "mahjong" }, { "name" => "mahjong2", "game" => "mahjong" }],
+      "tables" => nil,                                        # nil: the first game's tables
       "rooms" => nil,
       "permanent" => nil
     }.freeze
@@ -22,12 +30,12 @@ module AsterismGames
     # the tables above.
     ROOM_DEFAULTS = {
       "dir" => nil,                                          # the console's rooms volume (rooms.json, certs/)
-      "apps" => ["/app/game/mahjong/mahjong.app.rb"],        # a room opening one of these gets the tables
+      "apps" => nil,                                         # a room opening one of these gets the tables (nil: the games' screens)
       "max" => 3,                                            # rooms with tables at once
       "node" => "games",                                     # the host's node ID in a room
       "router" => nil,                                       # over the slot certificate's router
       "status_listen" => nil,                                # host:port for GET /status
-      "tables" => [{ "name" => "mahjong1", "game" => "mahjong" }],
+      "tables" => nil,                                       # nil: the first game's first table
       # The host's own certificate in the rooms (README "Rooms", console
       # 0.3.0 lists the host in rooms.json "hosts"): its .tar, else the
       # permanent tables' one; the slot's certificate only when the console
@@ -64,7 +72,7 @@ module AsterismGames
       "credentials" => nil,                                  # the host's .tar (none: no permanent tables)
       "router" => nil,                                       # over the certificate's router
       "node" => nil,                                         # the certificate's name
-      "tables" => [{ "name" => "mahjong1", "game" => "mahjong" }, { "name" => "mahjong2", "game" => "mahjong" }]
+      "tables" => nil                                        # nil: the first game's tables
     }.freeze
     PERMANENT_ENV_KEYS = {
       "ASTERISM_GAMES_PERMANENT_CREDENTIALS" => ["credentials", :s],
@@ -73,8 +81,8 @@ module AsterismGames
       "ASTERISM_GAMES_PERMANENT_TABLES" => ["tables", :names]
     }.freeze
 
-    # Environment variable => [key, kind]; the table ones apply to every
-    # mahjong table.
+    # Environment variable => [key, kind]. The table ones are the games'
+    # own (Game.settings), applied to every table of that game.
     ENV_KEYS = {
       "ASTERISM_GAMES_ROUTER" => ["router", :s],
       "ASTERISM_GAMES_NODE" => ["node", :s],
@@ -82,31 +90,24 @@ module AsterismGames
       "ASTERISM_GAMES_CREDENTIALS" => ["credentials", :s],
       "ASTERISM_GAMES_STATE_DIR" => ["state_dir", :s]
     }.freeze
-    TABLE_ENV_KEYS = {
-      "MAHJONG_TURN_SECONDS" => ["turn_ms", 1000],
-      "MAHJONG_BANK_SECONDS" => ["bank_ms", 1000],
-      "MAHJONG_CALL_SECONDS" => ["call_ms", 1000],
-      "MAHJONG_RESULT_SECONDS" => ["result_ms", 1000],
-      "MAHJONG_OVER_SECONDS" => ["over_ms", 1000],
-      "MAHJONG_AWAY_SECONDS" => ["away_ms", 1000],
-      "MAHJONG_AWAY_WAIT_SECONDS" => ["away_wait_ms", 1000],
-      "MAHJONG_CPU_MS" => ["cpu_ms", 1],
-      "MAHJONG_CPU_LEVEL" => ["cpu_level", nil],
-      "MAHJONG_SPECTATORS" => ["spectators", 1],
-      "MAHJONG_SPECTATOR_DELAY_SECONDS" => ["spectator_delay_ms", 1000],
-      "MAHJONG_SPECTATOR_DELAY_MINUTES" => ["spectator_delay_ms", 60_000]
-    }.freeze
-    # Table keys in the file, in seconds, and the table's own (ms) names.
-    TABLE_FILE_KEYS = {
-      "turn_seconds" => ["turn_ms", 1000], "bank_seconds" => ["bank_ms", 1000],
-      "call_seconds" => ["call_ms", 1000],
-      "result_seconds" => ["result_ms", 1000], "over_seconds" => ["over_ms", 1000],
-      "away_seconds" => ["away_ms", 1000], "away_wait_seconds" => ["away_wait_ms", 1000],
-      "cpu_ms" => ["cpu_ms", 1],
-      "cpu_level" => ["cpu_level", nil], "humans" => ["humans", 1],
-      "spectators" => ["spectators", 1], "spectator_delay_seconds" => ["spectator_delay_ms", 1000],
-      "spectator_delay_minutes" => ["spectator_delay_ms", 60_000]
-    }.freeze
+
+    # The game a table without "game" plays: the first one registered.
+    def self.default_game
+      AsterismGames.games.keys.first
+    end
+
+    # The tables of the default game ([{"name", "game"}]; first: only the first).
+    def self.default_tables(first: false)
+      name = default_game
+      names = name ? AsterismGames.game(name).tables : []
+      names = names.first(1) if first
+      names.map { |n| { "name" => n, "game" => name } }
+    end
+
+    # The table apps of every game (a room opening one gets the tables).
+    def self.default_apps
+      AsterismGames.games.values.flat_map(&:screens).uniq
+    end
 
     attr_reader :data
 
@@ -119,6 +120,7 @@ module AsterismGames
     def initialize(file = {}, env = ENV)
       @data = DEFAULTS.merge(file)
       ENV_KEYS.each { |k, (key, _)| @data[key] = env[k] if env[k] && !env[k].empty? }
+      @data["tables"] = self.class.default_tables if @data["tables"].nil?
       @data["tables"] = Array(@data["tables"]).map { |t| table_options(t, env) }
       @data["rooms"] = room_options(@data["rooms"], env)
       @data["permanent"] = permanent_options(@data["permanent"], env)
@@ -136,13 +138,14 @@ module AsterismGames
         v = env[k]
         next if v.nil? || v.empty?
         p[key] = if kind == :names
-                   v.split(",").map(&:strip).reject(&:empty?).map { |n| { "name" => n, "game" => "mahjong" } }
+                   v.split(",").map(&:strip).reject(&:empty?).map { |n| { "name" => n, "game" => self.class.default_game } }
                  else
                    v
                  end
       end
       return nil if p["credentials"].to_s.empty? || @data["rooms"].nil?
       p["node"] = nil if p["node"].to_s.empty?
+      p["tables"] = self.class.default_tables if p["tables"].nil?
       p["tables"] = Array(p["tables"]).map { |t| table_options(t, env) }
       raise ArgumentError, "permanent.tables: at least one table" if p["tables"].empty?
       p
@@ -165,9 +168,11 @@ module AsterismGames
       return nil if r["dir"].to_s.empty?
       r["secret_ids"] = r["secret_ids"] ? true : false
       r["seat_reuse_seconds"] = r["seat_reuse_seconds"].to_i
+      r["apps"] = self.class.default_apps if r["apps"].nil?
       r["apps"] = Array(r["apps"]).map(&:to_s)
       r["max"] = r["max"].to_i
       raise ArgumentError, "rooms.max must be 1 or more" if r["max"] < 1
+      r["tables"] = self.class.default_tables(first: true) if r["tables"].nil?
       r["tables"] = Array(r["tables"]).map { |t| table_options(t, env) }
       r
     end
@@ -176,14 +181,23 @@ module AsterismGames
       @data[key]
     end
 
+    # A table of the settings: its name, its game and the game's settings
+    # (Game.settings: seconds to ms, the text, or a Hash as it is). A game
+    # nobody registered keeps its name (the host refuses it).
     def table_options(t, env)
-      out = { "name" => t["name"].to_s, "game" => (t["game"] || "mahjong").to_s }
-      TABLE_FILE_KEYS.each do |k, (key, mul)|
+      out = { "name" => t["name"].to_s, "game" => (t["game"] || self.class.default_game).to_s }
+      klass = AsterismGames.game(out["game"])
+      return out unless klass
+      keys = klass.settings
+      keys[:file].each do |k, (key, mul)|
         next unless t.key?(k)
-        out[key] = mul ? (t[k].to_f * mul).round : t[k].to_s
+        out[key] = case mul
+                   when :hash then t[k].to_h
+                   when nil then t[k].to_s
+                   else (t[k].to_f * mul).round
+                   end
       end
-      out["rule"] = t["rule"].to_h if t["rule"]
-      TABLE_ENV_KEYS.each do |k, (key, mul)|
+      keys[:env].each do |k, (key, mul)|
         v = env[k]
         next if v.nil? || v.empty?
         out[key] = mul ? (v.to_f * mul).round : v

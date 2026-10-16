@@ -1,9 +1,13 @@
 # frozen_string_literal: true
 
+require_relative "../remote"
+
 module AsterismGames
   module Mahjong
-    # The table as an Asterism object (<node>/<app>/<table>). Its methods run
-    # from Asterism.poll on the host's loop and never wait.
+    # The mahjong table as an Asterism object (<node>/<app>/<table>), on
+    # the framework's Remote: join, mine and leave come from there, the
+    # rest is the table's own. Every method takes the caller's node ID as
+    # from: (Asterism fills it in; README "Who called" of asterism).
     #
     #   join(name[, secret])        -> {"token", "seat", "owner"} or {"error" => "full"}
     #   mine([secret])              -> the same for a node that joined, or nil
@@ -24,89 +28,56 @@ module AsterismGames
     #   table                       -> the public view (no hand; as a spectator sees it)
     #   leave(token)                -> true / false
     #
-    # The caller is Asterism.current_call.from (the node ID in the call's
-    # key); the same node gets its membership and token back from join. Every
+    # The same node gets its membership and token back from join. Every
     # call by a member counts as a sign that it is there (away_ms).
-    class Remote
+    class Remote < AsterismGames::Remote
       # view takes one or two arguments (-1: the arguments are not counted).
       # join and mine take an optional secret (README "Who joins").
-      METHODS = { join: -1, mine: -1, sit: 2, stand: 1, cpu: 3, start: 1, rule: 3, view: -1, act: 4, table: 0, leave: 1 }.freeze
+      METHODS = exposes(join: -1, mine: -1, sit: 2, stand: 1, cpu: 3, start: 1, rule: 3, view: -1, act: 4, table: 0,
+                        leave: 1)
 
-      def initialize(table, clock)
-        @table = table
-        @clock = clock
+      def sit(token, seat, from: nil)
+        mark(token, from)
+        @game.sit(token, seat.to_i, now)
       end
 
-      def caller_node
-        c = ::Asterism.current_call
-        c ? c.from.to_s : ""
+      def stand(token, from: nil)
+        mark(token, from)
+        @game.stand(token)
       end
 
-      def join(name, secret = nil)
-        @table.join(caller_node, name.to_s, @clock.call, secret)
+      def cpu(token, seat, on, from: nil)
+        mark(token, from)
+        @game.cpu(token, seat.to_i, on ? true : false)
       end
 
-      def mine(secret = nil)
-        node = caller_node
-        r = @table.mine(node, secret, @clock.call)
-        @table.touch(node, @clock.call) if r && !r["error"]
-        r
+      def start(token, from: nil)
+        mark(token, from)
+        @game.start(token, now)
       end
 
-      def sit(token, seat)
-        mark(token)
-        @table.sit(token, seat.to_i, @clock.call)
+      def rule(token, item, value, from: nil)
+        mark(token, from)
+        @game.set_rule(token, item.to_i, value.to_i)
       end
 
-      def stand(token)
-        mark(token)
-        @table.stand(token)
-      end
-
-      def cpu(token, seat, on)
-        mark(token)
-        @table.cpu(token, seat.to_i, on ? true : false)
-      end
-
-      def start(token)
-        mark(token)
-        @table.start(token, @clock.call)
-      end
-
-      def rule(token, item, value)
-        mark(token)
-        @table.set_rule(token, item.to_i, value.to_i)
-      end
-
-      def view(token, assist = nil)
-        mark(token)
+      def view(token, assist = nil, from: nil)
+        mark(token, from)
         lv = assist.nil? ? Table::ASSIST_DEFAULT : assist.to_i.clamp(Table::ASSIST_LEVELS.min, Table::ASSIST_LEVELS.max)
-        v = @table.member_view(token, @clock.call, lv)
+        v = @game.member_view(token, now, lv)
         v || { "error" => "token" }
       end
 
-      def act(token, sv, type, tiles)
-        mark(token)
+      def act(token, sv, type, tiles, from: nil)
+        mark(token, from)
         names = tiles.is_a?(String) ? Tiles.unpack(tiles) : Array(tiles).map(&:to_s)
-        @table.act(token, sv.to_i, type.to_i, names, @clock.call)
+        @game.act(token, sv.to_i, type.to_i, names, now)
       rescue KeyError, IndexError
         "not offered"
       end
 
-      def table
-        @table.spectator_view(@clock.call)
-      end
-
-      def leave(token)
-        @table.leave(token)
-      end
-
-      private
-
-      # A call with a member's token from that member's own node.
-      def mark(token)
-        node = @table.node_of(token)
-        @table.touch(node, @clock.call) if node && node == caller_node
+      def table(from: nil)
+        @game.spectator_view(now)
       end
     end
   end
