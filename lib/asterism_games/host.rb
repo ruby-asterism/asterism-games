@@ -45,8 +45,11 @@ module AsterismGames
       @stats = Hash.new(0)
       config["tables"].each do |t|
         f = GAMES.fetch(t["game"]) { raise ArgumentError, "unknown game #{t['game'].inspect}" }
-        # A room's tables check who joins against the room's ID (README "Who joins").
-        t = t.merge("room_id" => config["room_id"]) if config["room_id"]
+        # A room's tables check who joins against the room's ID, and trust
+        # the callers the router binds to their names (README "Who joins").
+        if config["room_id"]
+          t = t.merge(config.slice("room_id", "trusted_nodes", "trusted_prefix", "secret_ids", "seat_reuse_ms").compact)
+        end
         g, r, m = f.call(t, @store, @log, @clock)
         @games[t["name"]] = g
         @remotes[t["name"]] = SizeWatch.new(r, self)
@@ -84,8 +87,8 @@ module AsterismGames
     def connect
       opts = { node: node, app: @config["app"] }
       opts[:credentials] = @config["credentials"] if @config["credentials"]
-      # A room's host (Rooms): the slot's certificate and the room's key
-      # space, so every key is the room's (room/<slot>/asterism/...).
+      # A room's host (Rooms): its own certificate (or the slot's) and the
+      # room's key space, so every key is the room's (room/<slot>/asterism/...).
       opts[:config] = { "namespace" => @config["namespace"] } if @config["namespace"]
       locator = @config["credentials"] ? @config["credentials_router"] : @config["router"]
       ::Asterism.connect(locator, **opts)

@@ -5,8 +5,9 @@
 # never touches the console.
 #
 #   games    7460 (GET /status)       none: the console asks on the "router" network
-#            joins zenohd tls/7448 with a room slot's certificate, one process per room,
-#            and (with the host's own certificate) one more for the permanent tables
+#            joins zenohd tls/7448 with the host's own certificate (games.tar; a room
+#            slot's certificate with a console before 0.3.0), one process per room,
+#            and one more for the permanent tables
 #
 # From the console's project it takes, by name (ASTERISM_PROJECT, "asterism"):
 #   <project>_rooms    read-only: rooms.json (the open rooms, which app each opens)
@@ -18,7 +19,7 @@
 #                      console's deploy/vps/docker-compose.games.yml)
 # and reads, from this directory:
 #   credentials/       read-only: the host's own .tar from the console (a registry
-#                      row, e.g. "games"), for the permanent tables; named in .env
+#                      row, e.g. "games"), for the permanent tables and the rooms; named in .env
 #                      (ASTERISM_GAMES_PERMANENT_CREDENTIALS=/credentials/games.tar).
 #                      Readable by uid 1000 (chown 1000:1000, chmod 600). None: no
 #                      permanent tables.

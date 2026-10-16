@@ -15,11 +15,12 @@ Names and addresses below are placeholders: `router.example.org`,
 
 ```
  browsers (a room's link)                        the console's stack (project "asterism")
-   --wss://router.example.org:7443/room-->  nginx --> door --TLS as room-<slot>--> zenohd tls/7448
+   --wss://router.example.org:7443/room-->  nginx --> door --TLS as room-<slot>-s<seat>--> zenohd tls/7448
                                                                                      ^
  asterism-games (project "asterism-games")                                           |
-   supervisor  reads /rooms/rooms.json (which rooms are open, what they open)        |
-   + one host process per room that opens the table --TLS as room-<slot>, namespace room/<slot>
+   supervisor  reads /rooms/rooms.json (which rooms are open, what they open, seats) |
+   + one host process per room that opens the table --TLS as games (its own .tar), namespace room/<slot>
+                                                      (a console before 0.3.0: as room-<slot>)
    + one host process for the permanent tables -------TLS as games (its own .tar), no namespace
    GET /status on 7460 <-- the console (the rooms' page)
    /state (its volume): rooms/<slot>/, permanent/ the saved tables <-- the console's daily backup (read-only)
@@ -45,7 +46,9 @@ Names and addresses below are placeholders: `router.example.org`,
 
 - The console 0.2.2 or later running (`docker compose ps` in its
   `deploy/vps` shows zenohd, door, console, bridge, signer, backup), with
-  room slots made and applied.
+  room slots made and applied. With the console 0.3.0 (seats), the host
+  needs its own certificate for the rooms too: section 7's `games.tar`
+  (the same row), section 8 "From 0.4.0 to 0.5.0".
 - About 400 MB of free memory and 300 MB of disk for the image.
 - git and Docker with compose v2.24 or later, as for the console.
 
@@ -115,7 +118,9 @@ In the console's `deploy/vps`:
 1. Admin > Rooms says "The game host (asterism-games 0.3.0, up since ...)".
 2. Make a room with "Opens: Mahjong". Within a second the host's log says
    `room 01: room <id> opens /app/game/mahjong/mahjong.app.rb: host pid ...`
-   and `room 01: games: games/games up (mahjong1) via credentials in room/01`.
+   and `room 01: games: games/games up (mahjong1) via tls/zenohd:7448 in room/01`
+   (0.5.0 with a console 0.3.0: the line before ends "(its own certificate
+   games.tar, 16 seats, secrets checked)").
    The rooms' list shows `mahjong1: in its lobby, 0 seated ...`.
 3. Open the room's link: the table screen lists `games/games/mahjong1`.
    Sit, fill the empty seats with CPUs (the owner's C) and start.
@@ -198,6 +203,33 @@ is at once: the tables are saved on every change, so a game in progress goes
 on from the same turn after a few seconds, and the players' screens come
 back to it by themselves. To go back, run it with the old ref (it prints
 it); the old image stays (`docker image ls asterism-games`).
+
+### From 0.4.0 to 0.5.0 (the console's seats)
+
+0.5.0 joins the rooms with the host's own certificate when the console
+lists the host in `rooms.json` (`"hosts"`, the console 0.3.0's
+`ASTERISM_ROOM_HOSTS`), and takes a seat's caller as it comes (README "Who
+joins"). With a console before 0.3.0 it works as 0.4.0.
+
+1. Update the game host **before** the console: `./update.sh v0.5.0` (or
+   `main`). A host 0.4.0 under a console 0.3.0 can no longer write its
+   tables in the rooms (the slot's certificate has a deny on the host's
+   names).
+2. The certificate: `credentials/games.tar` of section 7 (the permanent
+   tables' row `games`), named by `ASTERISM_GAMES_PERMANENT_CREDENTIALS`;
+   the rooms use it too. Only rooms and no permanent tables: put the file
+   there all the same and name it with `ASTERISM_GAMES_ROOM_CREDENTIALS`
+   instead (the row needs the role `games-host` only for the permanent
+   tables). The row's name must be the host's node in the rooms
+   (`rooms.node`, `games`) and in the console's `ASTERISM_ROOM_HOSTS`.
+3. Update the console (its docs/install.md, "From 0.2.3 to 0.3.0"). Within
+   a second of the console's new `rooms.json` each room's host starts again
+   ("the room's seats or hosts changed in rooms.json", then
+   "... (its own certificate games.tar, 16 seats, secrets checked)").
+4. Once the browser build with seats is published and the console's
+   `WS_DOOR_ROOM_LEGACY` is back to 0: `ASTERISM_GAMES_ROOM_SECRET_IDS=0` in
+   `.env` and `docker compose up -d` (old pages' IDs are then refused at
+   the tables; nothing else changes).
 
 ## 9. Backups and restoring
 

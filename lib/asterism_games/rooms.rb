@@ -18,11 +18,28 @@ module AsterismGames
   #
   # A room whose link opens one of the configured apps (the mahjong table's
   # screen) gets the configured tables: this supervisor forks one host
-  # process (Host) for the room, which joins the router with the slot's
-  # certificate in the room's key space and serves the tables there, as
-  # browsers in the room see them (asterism/games/games/mahjong1). One
-  # process per room, since the asterism gem keeps one connection a
-  # process. Other rooms get nothing.
+  # process (Host) for the room, which joins the router in the room's key
+  # space (namespace room/<slot>) and serves the tables there, as browsers
+  # in the room see them (asterism/games/games/mahjong1). One process per
+  # room, since the asterism gem keeps one connection a process. Other
+  # rooms get nothing.
+  #
+  # Which certificate (console 0.3.0, its docs/rooms.md "Seats"): when
+  # rooms.json lists this host's node in "hosts", the router keeps the
+  # rooms' asterism/<node>... for the host's own certificate (the
+  # permanent tables' games.tar, or rooms.credentials) and the process
+  # joins with it; nobody in the room can write a table's keys or answer
+  # its calls. Otherwise (a console before 0.3.0) it joins with the slot's
+  # certificate, certs/room-<slot>.tar, as before.
+  #
+  # Who the tables trust (README "Who joins"): in a slot with seats
+  # (rooms.json "seats"), the router binds every page's calls to its seat's
+  # node ID (<seat_node_prefix><slot><seat>, wasm-0103), and the host's own
+  # names (<node>..., its bots) to its certificate: those callers are taken
+  # as they are. Others (pages from before the seats, wasm-<6 hex>) are
+  # checked with their secret while rooms.secret_ids is on. A host whose
+  # trust changes (the console was updated during the room) is started
+  # again.
   #
   # A room's tables are saved under state_dir/rooms/<slot>/ with the room's
   # ID (room.json). When the slot holds another room, or the room was
@@ -53,7 +70,8 @@ module AsterismGames
         next unless slot.to_s.match?(/\A\d{2}\z/) && r.is_a?(Hash) && r["room"].is_a?(String)
         next if revoked.include?(r["room"]) || r["until"].to_i <= now
         next unless apps.include?(r["app"].to_s)
-        out[slot.to_s] = { "room" => r["room"], "until" => r["until"].to_i, "app" => r["app"].to_s }
+        out[slot.to_s] = { "room" => r["room"], "until" => r["until"].to_i, "app" => r["app"].to_s,
+                           "seats" => r["seats"].to_i.clamp(0, 99) }
       end
     end
 
@@ -131,7 +149,12 @@ module AsterismGames
       @children.keys.each do |slot|
         c = @children[slot]
         w = wanted && wanted[slot]
-        next if wanted.nil? || (w && w["room"] == c["room"])
+        next if wanted.nil?
+        if w && w["room"] == c["room"]
+          next if c["trust"].nil? || c["trust"] == trust_for(slot, w)
+          stop_child(slot, "the room's seats or hosts changed in rooms.json")
+          next
+        end
         stop_child(slot, w ? "the slot holds another room" : "the room is closed or ended")
       end
       clean_dirs(now)
@@ -187,24 +210,48 @@ module AsterismGames
       end
       FileUtils.mkdir_p(d)
       write_json(File.join(d, "room.json"), { "room" => room["room"], "until" => room["until"], "slot" => slot })
-      tar = File.join(certs_dir, "room-#{slot}.tar")
+      trust = trust_for(slot, room)
+      tar = trust["own"] ? @rooms["credentials"] : File.join(certs_dir, "room-#{slot}.tar")
       unless File.exist?(tar)
         @log.call("games: room #{slot}: no #{tar}; trying again later")
         c["next_at"] = now + BACKOFF_MAX_S
         return
       end
-      cfg = child_config(slot, tar, d, room["room"])
-      c.merge!("room" => room["room"], "until" => room["until"], "since" => Time.now.utc.iso8601, "next_at" => nil)
+      cfg = child_config(slot, tar, d, room["room"], trust)
+      c.merge!("room" => room["room"], "until" => room["until"], "since" => Time.now.utc.iso8601, "next_at" => nil,
+               "trust" => trust)
       c["pid"] = @spawn.call(slot, cfg)
-      @log.call("games: room #{slot}: room #{room['room']} opens #{room['app']}: host pid #{c['pid']}")
+      @log.call("games: room #{slot}: room #{room['room']} opens #{room['app']}: host pid #{c['pid']} " \
+                "(#{trust['own'] ? "its own certificate #{File.basename(tar)}" : 'the slot certificate'}, " \
+                "#{trust['seats'].size} seats#{', secrets checked' if @rooms['secret_ids']})")
+    end
+
+    # Whom a room's host trusts and how it joins (from rooms.json):
+    # {"own" => joins with its own certificate, "seats" => the seats' node
+    # IDs, "prefix" => its own names (nil: none)}.
+    def trust_for(slot, room)
+      hosts = @data.is_a?(Hash) ? Array(@data["hosts"]) : []
+      listed = hosts.include?(@rooms["node"])
+      own = listed && !@rooms["credentials"].to_s.empty?
+      if listed && !own && !@noted_no_credentials
+        @noted_no_credentials = true
+        @log.call("games: rooms: the console keeps #{@rooms['node']}'s names for its own certificate, but no " \
+                  "rooms.credentials (or permanent.credentials) is set: the tables cannot be served in the rooms")
+      end
+      prefix = @data.is_a?(Hash) && @data["seat_node_prefix"].to_s.match?(/\A[A-Za-z0-9][A-Za-z0-9_.-]{0,20}\z/) ? @data["seat_node_prefix"] : "wasm-"
+      seats = (1..room["seats"].to_i).map { |i| format("%s%s%02d", prefix, slot, i) }
+      { "own" => own, "seats" => seats, "prefix" => listed ? @rooms["node"] : nil }
     end
 
     # room_id: the room's ID, with which its tables check who joins (README
-    # "Rooms", "Who joins").
-    def child_config(slot, tar, dir, room_id = nil)
+    # "Rooms", "Who joins"); trust: trust_for's.
+    def child_config(slot, tar, dir, room_id = nil, trust = { "own" => false, "seats" => [], "prefix" => nil })
+      router = @rooms["router"] || (trust["own"] && @permanent ? @permanent["router"] : nil)
       { "node" => @rooms["node"], "app" => @config["app"], "credentials" => tar,
-        "credentials_router" => @rooms["router"], "namespace" => "room/#{slot}", "state_dir" => dir,
-        "status_file" => File.join(dir, "host.json"), "tables" => @rooms["tables"], "room_id" => room_id }
+        "credentials_router" => router, "namespace" => "room/#{slot}", "state_dir" => dir,
+        "status_file" => File.join(dir, "host.json"), "tables" => @rooms["tables"], "room_id" => room_id,
+        "trusted_nodes" => trust["seats"], "trusted_prefix" => trust["prefix"], "secret_ids" => @rooms["secret_ids"],
+        "seat_reuse_ms" => @rooms["seat_reuse_seconds"].to_i * 1000 }
     end
 
     # The permanent tables' host (when configured and not running): its

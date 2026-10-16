@@ -48,7 +48,7 @@ module AsterismGames
 
       def mine(secret = nil)
         node = caller_node
-        r = @table.mine(node, secret)
+        r = @table.mine(node, secret, @clock.call)
         @table.touch(node, @clock.call) if r && !r["error"]
         r
       end

@@ -11,9 +11,15 @@
 #   bundle exec bin/mahjong-bots [--router tcp/127.0.0.1:7447] [--table games/games/mahjong2]
 #                                [--players 4] [--think-ms 500] [--games 1] [--prefix bot-NAME]
 #                                [--rules 0=1,1=0] [--result-ms 0] [--start-ms 0]
+#                                [--credentials games.tar --namespace room/01]
+#                                    # in a room (console 0.3.0): the host's own certificate,
+#                                    # node IDs games-bot<pid>-<i>, names the router keeps for
+#                                    # that certificate, so the table takes them as they are
+#                                    # (README "Who joins")
 #                                [--credentials room-01.tar --namespace room/01 --room <room ID>]
-#                                    # in a room: each bot makes a secret, and its node ID
-#                                    # comes from it as a browser's does (README "Who joins")
+#                                    # in a room with the slot's certificate (a console before
+#                                    # 0.3.0): each bot makes a secret, and its node ID comes
+#                                    # from it as a browser's did
 #                                [--credentials fmruby-aaaaaa.tar --node fmruby-aaaaaa]
 #                                    # one player as a board with its own certificate
 #                                    # (the permanent tables, README "Permanent tables")
@@ -46,6 +52,11 @@ ARGV.each_slice(2) do |k, v|
 end
 $stdout.sync = true
 opts[:players] = 1 if opts[:node] # one node ID, one player
+# In a room with the host's own certificate: names under the certificate's
+# (the console keeps <host>$* in the rooms for it).
+if opts[:credentials] && opts[:namespace] && !opts[:room] && !opts[:node] && !ARGV.include?("--prefix")
+  opts[:prefix] = "#{Asterism::Credentials.load(opts[:credentials], warn: false).name}-bot#{Process.pid}"
+end
 
 def play(i, opts)
   node = opts[:node] || "#{opts[:prefix]}-#{i}"

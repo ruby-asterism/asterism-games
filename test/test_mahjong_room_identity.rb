@@ -112,4 +112,43 @@ class TestMahjongRoomIdentity < Minitest::Test
       assert_nil host2.games["mahjong1"].opts["room_id"]
     end
   end
+
+  # ------------------------------------------- seats (console 0.3.0)
+
+  def seat_table(**opts)
+    room_table(trusted_nodes: %w[wasm-0101 wasm-0102], trusted_prefix: "games", seat_reuse_ms: 60_000, **opts)
+  end
+
+  def test_a_seat_and_the_hosts_names_join_without_a_secret
+    t = seat_table
+    a = t.join("wasm-0101", "A", 0)
+    assert a["token"], "the router binds the seat's name"
+    assert_equal a["token"], t.mine("wasm-0101", nil, 10)["token"]
+    assert_equal a["token"], t.join("wasm-0101", "A", 10, "ff" * 16)["token"], "a secret changes nothing for a seat"
+    assert t.join("games-bot-0", "Bot", 0)["token"], "the host's bots"
+    assert_equal({ "error" => "identity" }, t.join("wasm-0103", "X", 0), "not a seat of this room")
+    assert_equal({ "error" => "identity" }, t.join("wasm-abcdef", "X", 0), "an old page without its secret")
+  end
+
+  def test_old_pages_with_their_secret_still_join_until_secret_ids_is_off
+    t = seat_table
+    assert t.join(id(SECRET_A), "A", 0, SECRET_A)["token"]
+    off = seat_table(secret_ids: false)
+    assert_equal({ "error" => "identity" }, off.join(id(SECRET_A), "A", 0, SECRET_A))
+    assert off.join("wasm-0102", "B", 0)["token"], "the seats still join"
+  end
+
+  def test_a_seat_silent_for_long_is_a_new_page_and_does_not_get_the_old_hand
+    t = seat_table(cpu_ms: 0)
+    a = t.join("wasm-0101", "A", 0)
+    assert_equal "ok", t.sit(a["token"], 0, 0)
+    assert_equal a["token"], t.mine("wasm-0101", nil, 50_000)["token"], "silent less than seat_reuse_ms"
+    # The member called at 50 s; the door gave the seat away after an hour.
+    assert_nil t.mine("wasm-0101", nil, 50_000 + 60_001), "the old membership is gone"
+    b = t.join("wasm-0101", "B", 50_000 + 60_002)
+    refute_equal a["token"], b["token"]
+    assert_equal(-1, b["seat"], "not seated in A's seat")
+    assert_nil t.node_of(a["token"]), "A's token works no more"
+    assert_nil t.seat_of(a["token"])
+  end
 end

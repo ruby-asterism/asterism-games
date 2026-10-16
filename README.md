@@ -103,10 +103,18 @@ An Asterism console (0.2.2 and later) makes rooms: a key space of its own
   (`games/games/mahjong1`).
 - **One process per room.** The asterism gem keeps one connection a
   process, so the supervisor forks a host process (Host) per room. It joins
-  the router with the slot's certificate (`certs/room-<slot>.tar`, in the
-  same volume, read-only) in the room's namespace (`room/<slot>`): its keys
-  are the room's, and nothing of it reaches other rooms or the registered
-  side (the router's ACL). At most `rooms.max` rooms have tables (3); a room
+  the router in the room's namespace (`room/<slot>`): its keys are the
+  room's, and nothing of it reaches other rooms or the registered side (the
+  router's ACL). **Which certificate** (0.5.0): when `rooms.json` lists the
+  host's node in `"hosts"` (a console 0.3.0, its `ASTERISM_ROOM_HOSTS`),
+  the router keeps the rooms' `asterism/games...` for the host's own
+  certificate, and the process joins with it: `rooms.credentials`, else the
+  permanent tables' `.tar` (`permanent.credentials`; the same row `games`
+  of the console's registry), at `rooms.router` or the permanent tables'
+  router. With a console before 0.3.0 it joins with the slot's certificate
+  (`certs/room-<slot>.tar`, in the same volume, read-only), as before. A
+  console that lists the host while the host has no certificate set: the
+  log says so and the rooms get no table that works. At most `rooms.max` rooms have tables (3); a room
   beyond that gets none (the status says so). A host process that stops is
   started again after 1, 2, 4 ... 30 s.
 - **A slot used again.** The tables of a room are saved under
@@ -132,34 +140,66 @@ An Asterism console (0.2.2 and later) makes rooms: a key space of its own
 
 ### Who joins
 
-In a room every connection holds the slot's one certificate, so the router
-lets any member call under any node ID, and a seat goes with the node ID:
-without more, a member could join under another member's ID and get that
-member's token and hand. So a browser in a room has a secret of its own for
-the room (the browser build makes 16 random bytes once per room and keeps
-them in the browser's storage under the room's ID), and its node ID is
-`wasm-` and the first six hex digits of SHA-256(`<room ID>:<secret>`): the
-same shape as every browser ID, the same after a reload, another in another
-room. The table app sends the secret with `join` and `mine` (an extra
-argument; the methods take it or not). The host knows the room's ID (the
-supervisor passes it to the room's host, `room_id`) and works the node ID
-out again: a `join` or `mine` whose caller's node ID does not come from the
-secret given answers `{"error" => "identity"}` (the screen says to open the
-room's link again). The member keeps the SHA-256 of its secret (saved with
-the table; the secret itself is not), so two secrets that happen to give the
-same six digits are told apart (`"taken"`). Outside the rooms nothing is
-checked (a home network; the permanent tables, where a board's certificate
-is its node ID). `bin/mahjong-bots --room <room ID>` makes the same kind of
-secret and ID for each bot.
+A seat at a table goes with the node ID of the member that took it: a
+member's `join` and `mine` give back its token, and with it its hand. So
+the table must know that a call's caller (`Asterism.current_call.from`, the
+last chunk of the call's key) is who it says.
 
-- A table app from before (no secret) cannot join a table in a room on this
-  host: it is told `"identity"`.
-- **What is still open**: every connection in a room is the same subject at
-  the router, so a member could declare a queryable or a state put on the
-  host's own keys (`room/<slot>/asterism/games/...`) and collect the
-  secrets that other pages send with `join`. The fix is a host certificate
-  of its own per slot, and an ACL that lets only it declare the queryable
-  and put on the games keys (planned separately).
+**With seats** (a console 0.3.0: `rooms.json` says how many seats the
+room's slot has, `"seats"`, and the seats' node prefix): the console's door
+gives each page in a room a seat and connects it with the seat's
+certificate, and the router lets a seat call only under its own node ID,
+`<prefix><slot><seat>` (`wasm-0103`), and lets only the host's certificate
+call under the host's names (`games...`, the host and its bots). The room's
+host takes those callers as they come, with no secret, as a board's
+certificate is taken on the permanent tables. The supervisor hands the
+room's host the seats' node IDs (`wasm-0101` .. `wasm-0116`) and the host's
+name; a room whose seats or hosts change in `rooms.json` (the console was
+updated during the room) gets its host started again. A seat may go to
+another page after nobody was on it for a while (the door's
+`WS_DOOR_SEAT_IDLE`, 30 minutes): a seat's node ID that has not called the
+table for `rooms.seat_reuse_seconds` (1800) is a new page, and the old
+member leaves (its seat is played by a CPU in a game) before the new one
+joins.
+
+**Before the seats** (pages of the browser build from before them, or a
+console before 0.3.0), every connection in a room held the slot's one
+certificate, so the router let any member call under any node ID. Such a
+browser has a secret of its own for the room (the browser build makes 16
+random bytes once per room and keeps them in the browser's storage under
+the room's ID), and its node ID is `wasm-` and the first six hex digits of
+SHA-256(`<room ID>:<secret>`): the same after a reload, another in another
+room. The table app sends the secret with `join` and `mine` (an extra
+argument; the methods take it or not). The host knows the room's ID
+(`room_id`) and works the node ID out again: a `join` or `mine` whose
+caller's node ID does not come from the secret given answers
+`{"error" => "identity"}` (the screen says to open the room's link again).
+The member keeps the SHA-256 of its secret (saved with the table; the
+secret itself is not), so two secrets that happen to give the same six
+digits are told apart (`"taken"`). These callers are still let in while
+`rooms.secret_ids` is on (the default): a console 0.3.0 with
+`WS_DOOR_ROOM_LEGACY=1` lets such pages into a room, and they keep
+working. **Switching it off** once every page takes a seat (the browser
+build with seats is published and the console's `WS_DOOR_ROOM_LEGACY` is
+0): `rooms.secret_ids: false` (`ASTERISM_GAMES_ROOM_SECRET_IDS=0`); then
+only the seats and the host's names join a room's table.
+
+Outside the rooms nothing is checked (a home network; the permanent
+tables, where a board's certificate is its node ID).
+
+- **Bots in a room.** `bin/mahjong-bots --credentials games.tar --namespace
+  room/01` (the host's own certificate): the bots are `games-bot<pid>-<i>`,
+  names the router keeps for that certificate, so the table takes them as
+  they are. With the slot's certificate (a console before 0.3.0) they need
+  `--room <room ID>`: each makes a secret and its node ID from it, as an
+  old page does.
+- **What the router now keeps closed** (console 0.3.0): a member cannot
+  declare a queryable, put a state or a liveliness token, or reply on the
+  host's keys (`room/<slot>/asterism/games...`), so it cannot pose as the
+  table and collect what other pages send; nor can a page from before the
+  seats (the slot's certificate has a deny on the host's and the seats'
+  names). Among the old pages themselves (all on the slot's certificate)
+  the secret check above is what tells them apart.
 
 | Key (`rooms:`) | Environment | Default | |
 |---|---|---|---|
@@ -170,6 +210,9 @@ secret and ID for each bot.
 | `router` | `ASTERISM_GAMES_ROOM_ROUTER` | the certificate's (`tls/zenohd:7448`) | the router |
 | `status_listen` | `ASTERISM_GAMES_STATUS_LISTEN` | none | host:port of `GET /status` |
 | `tables` | | one table `mahjong1` | as `tables` above; the `MAHJONG_*` environment applies |
+| `credentials` | `ASTERISM_GAMES_ROOM_CREDENTIALS` | `permanent.credentials` | the host's own `.tar` for the rooms (used when `rooms.json` lists the host in `"hosts"`) |
+| `secret_ids` | `ASTERISM_GAMES_ROOM_SECRET_IDS` (`1` / `0`) | true | callers that are neither a seat nor the host's are checked with their secret ("Who joins"); false: refused |
+| `seat_reuse_seconds` | `ASTERISM_GAMES_ROOM_SEAT_REUSE_SECONDS` | 1800 | a seat's node ID silent this long at a table is a new page |
 
 Memory (CRuby 3.2, the image, measured): the supervisor about 43 MB RSS,
 each room's host about 45-50 MB more (the forked process shares the loaded

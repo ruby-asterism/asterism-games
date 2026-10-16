@@ -29,9 +29,9 @@ class TestRooms < Minitest::Test
     FileUtils.rm_rf(@dir)
   end
 
-  def write_rooms(slots, revoked = [])
+  def write_rooms(slots, revoked = [], extra = {})
     path = File.join(@rooms_dir, "rooms.json")
-    File.write("#{path}.tmp", JSON.generate({ "format" => 1, "slots" => slots, "revoked" => revoked }))
+    File.write("#{path}.tmp", JSON.generate({ "format" => 1, "slots" => slots, "revoked" => revoked }.merge(extra)))
     File.rename("#{path}.tmp", path)
     # a new mtime even within the same second
     t = Time.now + @spawned.size + rand
@@ -330,5 +330,60 @@ class TestRooms < Minitest::Test
     assert_equal "games", host.node
     host = AsterismGames::Host.new(cfg.merge("node" => "games2", "credentials" => tar), log: ->(_m) {})
     assert_equal "games2", host.node, "the setting wins"
+  end
+
+  # ------------------------------------------------- seats (console 0.3.0)
+
+  def test_before_the_seats_nothing_is_trusted
+    write_rooms({ "01" => room("aaaa") })
+    @rooms.check(@now)
+    c = @spawned.first[1]
+    assert_equal [[], nil, true], c.values_at("trusted_nodes", "trusted_prefix", "secret_ids")
+  end
+
+  def test_with_hosts_and_seats_the_host_joins_with_its_own_certificate_and_trusts_the_seats
+    permanent_rooms
+    put_tar
+    write_rooms({ "01" => room("aaaa").merge("seats" => 3) }, [], { "seat_node_prefix" => "wasm-", "hosts" => ["games"] })
+    @rooms.check(@now)
+    who, c = @spawned.find { |w, _| w == "01" }
+    assert_equal "01", who
+    assert_equal @tar, c["credentials"], "the host's own certificate, the permanent tables' one"
+    assert_equal "tls/zenohd:7448", c["credentials_router"], "the permanent tables' router"
+    assert_equal "room/01", c["namespace"]
+    assert_equal %w[wasm-0101 wasm-0102 wasm-0103], c["trusted_nodes"]
+    assert_equal "games", c["trusted_prefix"]
+    assert_equal 1_800_000, c["seat_reuse_ms"]
+    host = AsterismGames::Host.new(c.merge("state_dir" => File.join(@dir, "h")), log: ->(_m) {})
+    assert_equal %w[wasm-0101 wasm-0102 wasm-0103], host.games["mahjong1"].opts["trusted_nodes"]
+  end
+
+  def test_a_room_whose_seats_change_gets_its_host_again
+    write_rooms({ "01" => room("aaaa") })
+    @rooms.check(@now)
+    assert_equal 1, @spawned.count { |w, _| w == "01" }
+    write_rooms({ "01" => room("aaaa").merge("seats" => 2) }, [], { "seat_node_prefix" => "wasm-" })
+    @rooms.check(@now + 1)
+    @rooms.check(@now + 2)
+    assert_equal 2, @spawned.count { |w, _| w == "01" }
+    assert_equal %w[wasm-0101 wasm-0102], @spawned.last[1]["trusted_nodes"]
+    assert(@logs.any? { _1.include?("seats or hosts changed") })
+  end
+
+  def test_listed_as_a_host_without_a_certificate_says_so
+    write_rooms({ "01" => room("aaaa") }, [], { "hosts" => ["games"] })
+    @rooms.check(@now)
+    c = @spawned.first[1]
+    assert_equal File.join(@rooms_dir, "certs", "room-01.tar"), c["credentials"]
+    assert(@logs.any? { _1.include?("no rooms.credentials") })
+  end
+
+  def test_room_settings_from_the_environment
+    env = { "ASTERISM_GAMES_ROOMS_DIR" => "/r", "ASTERISM_GAMES_ROOM_SECRET_IDS" => "0",
+            "ASTERISM_GAMES_ROOM_SEAT_REUSE_SECONDS" => "60", "ASTERISM_GAMES_ROOM_CREDENTIALS" => "/c/own.tar" }
+    r = AsterismGames::Config.new({}, env)["rooms"]
+    assert_equal [false, 60, "/c/own.tar"], r.values_at("secret_ids", "seat_reuse_seconds", "credentials")
+    r = AsterismGames::Config.new({ "permanent" => { "credentials" => "/c/games.tar" } }, { "ASTERISM_GAMES_ROOMS_DIR" => "/r" })["rooms"]
+    assert_equal [true, "/c/games.tar"], r.values_at("secret_ids", "credentials"), "the permanent tables' certificate"
   end
 end

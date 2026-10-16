@@ -51,6 +51,10 @@ module AsterismGames
         "spectators" => 12,       # members without a seat at most (a room lets 16 pages in: 4 seats + 12)
         "spectator_delay_ms" => 0, # what spectators see is this old (README "Spectators")
         "room_id" => nil,         # in a room: its ID, against which joins are checked (README "Who joins")
+        "trusted_nodes" => [],    # in a room: node IDs the router binds to their callers (the seats)
+        "trusted_prefix" => nil,  # in a room: the host's own names (it and its bots), bound likewise
+        "secret_ids" => true,     # in a room: other callers are checked with their secret
+        "seat_reuse_ms" => 1_800_000, # a seat's node ID silent this long is a new page on that seat
         "rule" => {}              # riichi_engine rule keys over Engine::RULE_DEFAULTS
       }.freeze
 
@@ -131,14 +135,14 @@ module AsterismGames
         node = node.to_s
         bad = identity_error(node, secret)
         return { "error" => bad } if bad
-        m = @members[node]
+        m = reused_seat(node, now)
         if m && m["key"] && m["key"] != secret_key(secret)
           return { "error" => "taken" }
         elsif m.nil?
           return { "error" => "full" } if @members.size >= MAX_MEMBERS
           return { "error" => "spectators" } if spectators_full?
           m = @members[node] = { "token" => SecureRandom.hex(16), "at" => @join_count += 1 }
-          m["key"] = secret_key(secret) if room?
+          m["key"] = secret_key(secret) if room? && !trusted?(node)
         end
         m["name"] = clean_name(name, node)
         m["seen"] = now
@@ -150,11 +154,11 @@ module AsterismGames
 
       # The caller's membership, or nil (nothing is created); in a room the
       # secret has to agree, as for join.
-      def mine(node, secret = nil)
+      def mine(node, secret = nil, now = nil)
         node = node.to_s
         bad = identity_error(node, secret)
         return { "error" => bad } if bad
-        m = @members[node]
+        m = now ? reused_seat(node, now) : @members[node]
         return nil unless m
         return { "error" => "taken" } if m["key"] && m["key"] != secret_key(secret)
         member_reply(node)
@@ -162,11 +166,18 @@ module AsterismGames
 
       # ------------------------------------------------------------ who joins (rooms)
       #
-      # In a room every connection holds the room's one certificate, so the
-      # router lets any member call under any node ID. A browser in a room
-      # has a secret of its own for the room, and its node ID is "wasm-" and
-      # the first six hex digits of SHA-256("<room ID>:<secret>"); join and
-      # mine carry the secret, and the table works the ID out again. Outside
+      # With seats (the console's 0.3.0) the router binds a page's calls to
+      # its seat's node ID (wasm-0103), and the host's own names to the
+      # host's certificate: those callers (trusted_nodes, trusted_prefix)
+      # are taken as they are, as outside a room.
+      #
+      # Before the seats every connection of a room held the room's one
+      # certificate, so the router let any member call under any node ID. A
+      # browser in a room has a secret of its own for the room, and its node
+      # ID is "wasm-" and the first six hex digits of SHA-256("<room
+      # ID>:<secret>"); join and mine carry the secret, and the table works
+      # the ID out again. Such callers are still let in while secret_ids is
+      # on (the pages of the browser build from before the seats). Outside
       # a room (no room_id) nothing is checked: a board's certificate is its
       # node ID there. The member keeps the SHA-256 of its secret: two
       # secrets that give the same six digits are told apart ("taken").
@@ -175,9 +186,32 @@ module AsterismGames
         !@opts["room_id"].to_s.empty?
       end
 
+      # A caller the router has bound to its name in this room.
+      def trusted?(node)
+        return false unless room?
+        return true if Array(@opts["trusted_nodes"]).include?(node)
+        prefix = @opts["trusted_prefix"].to_s
+        !prefix.empty? && node.start_with?(prefix)
+      end
+
+      # The member of a node, or nil; a seat's node ID that has not called
+      # for seat_reuse_ms is another page now (the door gave the seat away
+      # after as long without a connection): the old member leaves (its
+      # seat goes to a CPU in a game) and nil is returned.
+      def reused_seat(node, now)
+        m = @members[node]
+        return m unless m && trusted?(node) && Array(@opts["trusted_nodes"]).include?(node)
+        return m unless m["seen"] && now - m["seen"] > @opts["seat_reuse_ms"].to_i
+        @log&.call("mahjong: #{@name}: #{node} was silent for #{(now - m['seen']) / 60_000} min: a new page on that seat")
+        leave(m["token"])
+        nil
+      end
+
       # Why a join or mine from node with secret is refused, or nil.
       def identity_error(node, secret)
         return nil unless room?
+        return nil if trusted?(node)
+        return "identity" unless @opts["secret_ids"]
         return "identity" unless secret.is_a?(String) && secret.match?(/\A[0-9a-f]{32}\z/)
         return "identity" unless node == self.class.room_node_id(@opts["room_id"], secret)
         nil

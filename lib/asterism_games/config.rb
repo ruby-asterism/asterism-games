@@ -27,7 +27,20 @@ module AsterismGames
       "node" => "games",                                     # the host's node ID in a room
       "router" => nil,                                       # over the slot certificate's router
       "status_listen" => nil,                                # host:port for GET /status
-      "tables" => [{ "name" => "mahjong1", "game" => "mahjong" }]
+      "tables" => [{ "name" => "mahjong1", "game" => "mahjong" }],
+      # The host's own certificate in the rooms (README "Rooms", console
+      # 0.3.0 lists the host in rooms.json "hosts"): its .tar, else the
+      # permanent tables' one; the slot's certificate only when the console
+      # does not list the host.
+      "credentials" => nil,
+      # Callers whose node ID comes from a secret (wasm-<6 hex>, pages from
+      # before the seats) are still checked and let in: README "Who joins".
+      # false once every page takes a seat.
+      "secret_ids" => true,
+      # A seat's node ID silent this long at a table is a new page on that
+      # seat (the console's door gives an idle seat to another page after
+      # WS_DOOR_SEAT_IDLE, 1800 s).
+      "seat_reuse_seconds" => 1800
     }.freeze
     ROOM_ENV_KEYS = {
       "ASTERISM_GAMES_ROOMS_DIR" => ["dir", :s],
@@ -35,7 +48,10 @@ module AsterismGames
       "ASTERISM_GAMES_ROOM_MAX" => ["max", :i],
       "ASTERISM_GAMES_ROOM_NODE" => ["node", :s],
       "ASTERISM_GAMES_ROOM_ROUTER" => ["router", :s],
-      "ASTERISM_GAMES_STATUS_LISTEN" => ["status_listen", :s]
+      "ASTERISM_GAMES_STATUS_LISTEN" => ["status_listen", :s],
+      "ASTERISM_GAMES_ROOM_CREDENTIALS" => ["credentials", :s],
+      "ASTERISM_GAMES_ROOM_SECRET_IDS" => ["secret_ids", :bool],
+      "ASTERISM_GAMES_ROOM_SEAT_REUSE_SECONDS" => ["seat_reuse_seconds", :i]
     }.freeze
 
     # The permanent tables next to the rooms (README "Permanent tables"):
@@ -106,6 +122,9 @@ module AsterismGames
       @data["tables"] = Array(@data["tables"]).map { |t| table_options(t, env) }
       @data["rooms"] = room_options(@data["rooms"], env)
       @data["permanent"] = permanent_options(@data["permanent"], env)
+      return unless @data["rooms"]
+      @data["rooms"]["credentials"] = @data["permanent"]["credentials"] if @data["rooms"]["credentials"].to_s.empty? && @data["permanent"]
+      @data["rooms"]["credentials"] = nil if @data["rooms"]["credentials"].to_s.empty?
     end
 
     # The permanent section with its defaults and the environment, or nil
@@ -139,10 +158,13 @@ module AsterismGames
         r[key] = case kind
                  when :list then v.split(",").map(&:strip).reject(&:empty?)
                  when :i then Integer(v)
+                 when :bool then %w[1 true yes].include?(v.downcase)
                  else v
                  end
       end
       return nil if r["dir"].to_s.empty?
+      r["secret_ids"] = r["secret_ids"] ? true : false
+      r["seat_reuse_seconds"] = r["seat_reuse_seconds"].to_i
       r["apps"] = Array(r["apps"]).map(&:to_s)
       r["max"] = r["max"].to_i
       raise ArgumentError, "rooms.max must be 1 or more" if r["max"] < 1
