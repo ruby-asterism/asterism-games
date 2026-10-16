@@ -45,7 +45,7 @@ module AsterismGames
         # A room's tables check who joins against the room's ID, and trust
         # the callers the router binds to their names (README "Who joins").
         if config["room_id"]
-          t = t.merge(config.slice("room_id", "trusted_nodes", "trusted_prefix", "secret_ids", "seat_reuse_ms").compact)
+          t = t.merge(config.slice("room_id", "trusted_nodes", "trusted_prefix", "seat_reuse_ms").compact)
         end
         name = t["name"]
         g = klass.new(name, t.reject { |k, _| %w[name game].include?(k) }, store: @store, log: @log)

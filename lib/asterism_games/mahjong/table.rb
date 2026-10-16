@@ -66,7 +66,7 @@ module AsterismGames
       SAVE_FORMAT = 2
       MAX_ROUNDS = 40 # a hanchan has far fewer; a guard against a loop
       ASSIST_LEVELS = 0..3 # README "Assist"
-      ASSIST_DEFAULT = 1   # the riichi help, for a screen that does not ask
+      ASSIST_DEFAULT = 1   # the riichi help (view's default; a screen always says its level)
 
       DEFAULTS = Game::DEFAULTS.merge(
         "turn_ms" => 5_000,       # a human's time for a move (a discard, riichi, a kan, a win)
@@ -82,7 +82,7 @@ module AsterismGames
         "spectator_delay_ms" => 0, # what spectators see is this old (README "Spectators")
         "rule" => {}              # riichi_engine rule keys over Engine::RULE_DEFAULTS
         # and Game::DEFAULTS: away_ms (10 s), the rooms' room_id, trusted_nodes,
-        # trusted_prefix, secret_ids and seat_reuse_ms (README "Who joins")
+        # trusted_prefix and seat_reuse_ms (README "Who joins")
       ).freeze
 
       # The local rules the owner chooses in the lobby (README "Local
@@ -91,9 +91,8 @@ module AsterismGames
       # (9 sets two keys together, 11 three), 10 is the host's own time for
       # a move and the bank (time_code), 15 the table's CPUs (RULE_CPU) and
       # 16 the spectators' delay in seconds.
-      # The view's "ru" has items 0-10, "rx" items 11-14 and "ry" the rest:
-      # a table app that knows 11 items reads "ru" as before and does not
-      # see the others, one that knows 15 reads "rx" as before.
+      # The view's "ru" has items 0-10, "rx" items 11-14 and "ry" the rest
+      # (the table app reads the three and puts them together).
       # The screen shows them in an order of its own (the numbers stay).
       RULE_ITEMS = [
         ["game", "game_type"],          # 0 hanchan, 1 tonpuu
@@ -125,11 +124,9 @@ module AsterismGames
       # Item 10's choices, [seconds for a move, seconds of the bank] (bank 0:
       # a fixed time per move): Mahjong Soul's default 5+20 first. The
       # value of the item is time_code: the seconds for a move plus 1000
-      # times the bank, so a fixed time is just its seconds.
+      # times the bank, so a fixed time is just its seconds. The table app
+      # offers the lobby view's "tc".
       RULE_TIMES = [[5, 20], [5, 0], [30, 0], [60, 0], [600, 0]].freeze
-      # The fixed times a table app before MJ-E3 offers (it shows the seconds
-      # for a move and steps through these); the host takes them too.
-      RULE_TURNS = [10, 20, 30, 60].freeze
       # The public view's keys that belong to the game (a spectator's delayed
       # view takes them from the past, the rest is now).
       GAME_KEYS = %w[st sv r sc ri dora kw fu hc ls ev dl res fin fr].freeze
@@ -292,7 +289,7 @@ module AsterismGames
         item = item.to_i
         return "no rule" unless (0...RULE_ITEMS.size).cover?(item)
         value = value.to_i
-        return "value" unless rule_choices(item).include?(value) || (RULE_ITEMS[item][0] == "turn" && RULE_TURNS.include?(value))
+        return "value" unless rule_choices(item).include?(value)
         return "no change" if rule_values[item] == value
         name, key = RULE_ITEMS[item]
         base = base_rule
@@ -921,9 +918,9 @@ module AsterismGames
         v["ru"] = ru[0, RULE_RU]
         v["rx"] = ru[RULE_RU...RULE_RX]
         v["ry"] = ru[RULE_RX..]
-        # Item 10 in "ru" is the seconds for a move (what a table app before
-        # MJ-E3 shows); "tb" is the bank's seconds, and in the lobby "tc" the
-        # item's choices (time_code).
+        # Item 10 in "ru" is the seconds for a move; "tb" is the bank's
+        # seconds (the table app adds them up again), and in the lobby "tc"
+        # the item's choices (time_code).
         v["ru"][10] = ru[10] % 1000
         v["tb"] = ru[10] / 1000
         if @status == "wait"

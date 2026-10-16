@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "digest"
 require "securerandom"
 
 module AsterismGames
@@ -42,9 +41,8 @@ module AsterismGames
   # Members: join gives a node a token; the token is what every later call
   # of that member brings. In a room (room_id set) a joining node is checked
   # (README "Who joins"): the seats' node IDs and the host's own names are
-  # bound to their callers by the router and taken as they are; other
-  # callers (pages from before the seats) must bring the secret their node
-  # ID comes from, while secret_ids is on.
+  # bound to their callers by the router and taken as they are; nobody
+  # else joins.
   class Game
     SAVE_FORMAT = 1
     MAX_MEMBERS = 16
@@ -55,7 +53,6 @@ module AsterismGames
       "room_id" => nil,         # in a room: its ID, against which joins are checked (README "Who joins")
       "trusted_nodes" => [],    # in a room: node IDs the router binds to their callers (the seats)
       "trusted_prefix" => nil,  # in a room: the host's own names (it and its bots), bound likewise
-      "secret_ids" => true,     # in a room: other callers are checked with their secret
       "seat_reuse_ms" => 1_800_000 # a seat's node ID silent this long is a new page on that seat
     }.freeze
 
@@ -95,12 +92,6 @@ module AsterismGames
         @file_settings = file.freeze if file
         @env_settings = env.freeze if env
         { file: @file_settings || {}, env: @env_settings || {} }
-      end
-
-      # The node ID a browser's secret gives in a room (the browser build
-      # of before the seats worked out the same).
-      def room_node_id(room_id, secret)
-        "wasm-#{Digest::SHA256.hexdigest("#{room_id}:#{secret}")[0, 6]}"
       end
     end
 
@@ -213,20 +204,16 @@ module AsterismGames
 
     # A node joins the table (or gets its membership back). Returns
     # member_reply, or {"error" => why}: "full", what join_refusal says, in
-    # a room "identity" when the node ID does not come from the secret and
-    # "taken" when the member has another one.
-    def join(node, name, now, secret = nil)
+    # a room "identity" for a caller that is neither a seat nor the host's.
+    def join(node, name, now)
       node = node.to_s
-      bad = identity_error(node, secret)
+      bad = identity_error(node)
       return { "error" => bad } if bad
       m = reused_seat(node, now)
-      if m && m["key"] && m["key"] != secret_key(secret)
-        return { "error" => "taken" }
-      elsif m.nil?
+      if m.nil?
         why = join_refusal(node)
         return { "error" => why } if why
         m = @members[node] = { "token" => SecureRandom.hex(16), "at" => @join_count += 1 }
-        m["key"] = secret_key(secret) if room? && !trusted?(node)
       end
       m["name"] = clean_name(name, node)
       m["seen"] = now
@@ -236,14 +223,13 @@ module AsterismGames
     end
 
     # The caller's membership, or nil (nothing is created); in a room the
-    # secret has to agree, as for join.
-    def mine(node, secret = nil, now = nil)
+    # caller is checked as for join.
+    def mine(node, now = nil)
       node = node.to_s
-      bad = identity_error(node, secret)
+      bad = identity_error(node)
       return { "error" => bad } if bad
       m = now ? reused_seat(node, now) : @members[node]
       return nil unless m
-      return { "error" => "taken" } if m["key"] && m["key"] != secret_key(secret)
       member_reply(node)
     end
 
@@ -330,18 +316,9 @@ module AsterismGames
     # With seats (the console's 0.3.0) the router binds a page's calls to
     # its seat's node ID (wasm-0103), and the host's own names to the
     # host's certificate: those callers (trusted_nodes, trusted_prefix)
-    # are taken as they are, as outside a room.
-    #
-    # Before the seats every connection of a room held the room's one
-    # certificate, so the router let any member call under any node ID. A
-    # browser in a room has a secret of its own for the room, and its node
-    # ID is "wasm-" and the first six hex digits of SHA-256("<room
-    # ID>:<secret>"); join and mine carry the secret, and the table works
-    # the ID out again. Such callers are still let in while secret_ids is
-    # on (the pages of the browser build from before the seats). Outside
-    # a room (no room_id) nothing is checked: a board's certificate is its
-    # node ID there. The member keeps the SHA-256 of its secret: two
-    # secrets that give the same six digits are told apart ("taken").
+    # are taken as they are, as outside a room, and nobody else joins.
+    # Outside a room (no room_id) nothing is checked: a board's certificate
+    # is its node ID there.
 
     def room?
       !@opts["room_id"].to_s.empty?
@@ -369,18 +346,9 @@ module AsterismGames
       nil
     end
 
-    # Why a join or mine from node with secret is refused, or nil.
-    def identity_error(node, secret)
-      return nil unless room?
-      return nil if trusted?(node)
-      return "identity" unless @opts["secret_ids"]
-      return "identity" unless secret.is_a?(String) && secret.match?(/\A[0-9a-f]{32}\z/)
-      return "identity" unless node == self.class.room_node_id(@opts["room_id"], secret)
-      nil
-    end
-
-    def secret_key(secret)
-      secret.is_a?(String) ? Digest::SHA256.hexdigest(secret) : nil
+    # Why a join or mine from node is refused, or nil.
+    def identity_error(node)
+      room? && !trusted?(node) ? "identity" : nil
     end
   end
 end

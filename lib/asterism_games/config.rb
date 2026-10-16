@@ -9,10 +9,10 @@ module AsterismGames
   #
   # The games come from the registry (AsterismGames.games): a table's
   # "game" defaults to the first game registered, the tables the settings
-  # do not name are that game's (Game.tables), a room opens the tables
-  # when its link opens one of the games' screens (Game.screens), and each
-  # game says which table keys the file and the environment may set
-  # (Game.settings).
+  # do not name are that game's (Game.tables), a room whose link opens a
+  # game's screen (Game.screens) gets that game's tables of rooms.tables
+  # (Config.tables_for_app), and each game says which table keys the file
+  # and the environment may set (Game.settings).
   class Config
     DEFAULTS = {
       "router" => "tcp/127.0.0.1:7447",
@@ -30,21 +30,17 @@ module AsterismGames
     # the tables above.
     ROOM_DEFAULTS = {
       "dir" => nil,                                          # the console's rooms volume (rooms.json, certs/)
-      "apps" => nil,                                         # a room opening one of these gets the tables (nil: the games' screens)
+      "apps" => nil,                                         # a room opening one of these gets its game's tables (nil: the games' screens)
       "max" => 3,                                            # rooms with tables at once
       "node" => "games",                                     # the host's node ID in a room
       "router" => nil,                                       # over the slot certificate's router
       "status_listen" => nil,                                # host:port for GET /status
-      "tables" => nil,                                       # nil: the first game's first table
+      "tables" => nil,                                       # nil: each game's first table
       # The host's own certificate in the rooms (README "Rooms", console
       # 0.3.0 lists the host in rooms.json "hosts"): its .tar, else the
       # permanent tables' one; the slot's certificate only when the console
       # does not list the host.
       "credentials" => nil,
-      # Callers whose node ID comes from a secret (wasm-<6 hex>, pages from
-      # before the seats) are still checked and let in: README "Who joins".
-      # false once every page takes a seat.
-      "secret_ids" => true,
       # A seat's node ID silent this long at a table is a new page on that
       # seat (the console's door gives an idle seat to another page after
       # WS_DOOR_SEAT_IDLE, 1800 s).
@@ -58,7 +54,6 @@ module AsterismGames
       "ASTERISM_GAMES_ROOM_ROUTER" => ["router", :s],
       "ASTERISM_GAMES_STATUS_LISTEN" => ["status_listen", :s],
       "ASTERISM_GAMES_ROOM_CREDENTIALS" => ["credentials", :s],
-      "ASTERISM_GAMES_ROOM_SECRET_IDS" => ["secret_ids", :bool],
       "ASTERISM_GAMES_ROOM_SEAT_REUSE_SECONDS" => ["seat_reuse_seconds", :i]
     }.freeze
 
@@ -96,17 +91,41 @@ module AsterismGames
       AsterismGames.games.keys.first
     end
 
-    # The tables of the default game ([{"name", "game"}]; first: only the first).
-    def self.default_tables(first: false)
+    # The tables of the default game ([{"name", "game"}]).
+    def self.default_tables
       name = default_game
       names = name ? AsterismGames.game(name).tables : []
-      names = names.first(1) if first
       names.map { |n| { "name" => n, "game" => name } }
     end
 
-    # The table apps of every game (a room opening one gets the tables).
+    # A room's tables when the settings name none: each game's first table.
+    def self.default_room_tables
+      AsterismGames.games.filter_map do |name, klass|
+        first = klass.tables.first
+        first && { "name" => first, "game" => name }
+      end
+    end
+
+    # The table apps of every game (a room opening one gets that game's tables).
     def self.default_apps
       AsterismGames.games.values.flat_map(&:screens).uniq
+    end
+
+    # The tables a room whose link opens app gets: those of tables whose
+    # game lists app in its screens (README "Rooms").
+    def self.tables_for_app(tables, app)
+      Array(tables).select do |t|
+        klass = AsterismGames.game(t["game"])
+        klass && klass.screens.include?(app.to_s)
+      end
+    end
+
+    # The game of a table named in the environment: "name:game", else the
+    # game whose own tables have that name, else the default game.
+    def self.game_of_name(text)
+      name, game = text.split(":", 2).map(&:strip)
+      game ||= AsterismGames.games.find { |_g, klass| klass.tables.include?(name) }&.first || default_game
+      { "name" => name, "game" => game }
     end
 
     attr_reader :data
@@ -138,7 +157,7 @@ module AsterismGames
         v = env[k]
         next if v.nil? || v.empty?
         p[key] = if kind == :names
-                   v.split(",").map(&:strip).reject(&:empty?).map { |n| { "name" => n, "game" => self.class.default_game } }
+                   v.split(",").map(&:strip).reject(&:empty?).map { |n| self.class.game_of_name(n) }
                  else
                    v
                  end
@@ -166,13 +185,12 @@ module AsterismGames
                  end
       end
       return nil if r["dir"].to_s.empty?
-      r["secret_ids"] = r["secret_ids"] ? true : false
       r["seat_reuse_seconds"] = r["seat_reuse_seconds"].to_i
       r["apps"] = self.class.default_apps if r["apps"].nil?
       r["apps"] = Array(r["apps"]).map(&:to_s)
       r["max"] = r["max"].to_i
       raise ArgumentError, "rooms.max must be 1 or more" if r["max"] < 1
-      r["tables"] = self.class.default_tables(first: true) if r["tables"].nil?
+      r["tables"] = self.class.default_room_tables if r["tables"].nil?
       r["tables"] = Array(r["tables"]).map { |t| table_options(t, env) }
       r
     end

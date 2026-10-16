@@ -1,0 +1,261 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# An othello table in a terminal (README "The othello table"): CRuby and the
+# asterism gem only. It joins the table, shows the board as text at every
+# change (the state the host puts) and reads commands: watch, or sit and
+# type the squares ("d3").
+#
+#   bundle exec bin/othello-tty [--router tcp/127.0.0.1:7447] [--table games/games/othello1]
+#                               [--name NAME] [--node NODE]
+#                               [--credentials alice.tar]      # a router over mutual TLS (a console's
+#                                                              # .tar; the node is its name)
+#                               [--namespace room/01]          # inside a room's key space
+#                               [--commands "sit,cpu,start,auto"]   # run these first
+#                               [--until-over]                 # quit when a game it saw played is over
+#
+# Commands (one per line): d3 (play there), sit [0|1], stand, cpu (fill the
+# empty seat; the owner), start (the owner), resign, auto (let the client
+# play your moves: the first legal square; again to stop), view, help, quit.
+# Without --table it takes the first othello table it finds.
+require "asterism"
+require "socket"
+
+opts = { router: "tcp/127.0.0.1:7447", table: nil, name: nil, node: nil, credentials: nil, namespace: nil,
+         commands: [], until_over: false }
+args = ARGV.dup
+until args.empty?
+  k = args.shift
+  case k
+  when "--router" then opts[:router] = args.shift
+  when "--table" then opts[:table] = args.shift
+  when "--name" then opts[:name] = args.shift
+  when "--node" then opts[:node] = args.shift
+  when "--credentials" then opts[:credentials] = args.shift
+  when "--namespace" then opts[:namespace] = args.shift
+  when "--commands" then opts[:commands] = args.shift.to_s.split(",").map(&:strip)
+  when "--until-over" then opts[:until_over] = true
+  when "-h", "--help" then puts File.read(__FILE__)[/^# An othello.*?(?=^require)/m].gsub(/^# ?/, "")
+                           exit
+  else abort "unknown option #{k} (--help)"
+  end
+end
+
+# The screen and the commands of one table.
+class OthelloTty
+  HOST_APP = "games"
+  VIEW_EVERY_S = 2.0
+
+  def initialize(net, path, name, out: $stdout)
+    @net = net
+    @path = path
+    @name = name
+    @out = out
+    @table = net[path, timeout: 3.0]
+    @lock = Mutex.new
+    @view = nil
+    @token = nil
+    @note = ""
+    @auto = false
+    @wake = Queue.new
+    @played = false
+  end
+
+  # A game was played and is over now (--until-over).
+  def finished? = @played && @view && @view["st"] == "over"
+
+  def start
+    r = @table.join(@name)
+    raise "join: #{r['error']}" unless r.is_a?(Hash) && r["token"]
+    @token = r["token"]
+    host, app, tname = @path.split("/")
+    # The state the host puts after every change (and every 5 s): a newer
+    # one wakes the thread that asks the view (no call waits on the
+    # receiving thread).
+    @net.session.subscribe("asterism/#{host}/#{app}/#{tname}/state") do |sample|
+      v = Asterism::Codec.unpack(sample.payload)
+      @wake << true if v.is_a?(Hash) && (@view.nil? || v["v"] != @view["v"])
+    end
+    refresh
+    # And a view every VIEW_EVERY_S anyway: the host sees that this member
+    # is still here.
+    @ticker = Thread.new do
+      loop do
+        @wake.pop(timeout: VIEW_EVERY_S)
+        @wake.clear
+        refresh
+      rescue Asterism::Error => e
+        say("no answer from the table (#{e.class})")
+      end
+    end
+  end
+
+  def stop
+    @ticker&.kill
+    @table.leave(@token) if @token
+  rescue Asterism::Error
+    nil
+  end
+
+  # Asks the member's view and draws it.
+  def refresh
+    v = @table.view(@token)
+    @lock.synchronize do
+      @view = v
+      @played = true if v.is_a?(Hash) && v["st"] == "play"
+      draw
+    end
+    play_auto
+  end
+
+  def say(text)
+    @lock.synchronize do
+      @note = text
+      draw
+    end
+  end
+
+  # One command line; false to quit.
+  def command(line)
+    words = line.to_s.strip.downcase.split
+    return true if words.empty?
+    r = case words[0]
+        when "quit", "exit", "q" then return false
+        when "help", "?" then "d3 | sit [0|1] | stand | cpu | start | resign | auto | view | quit"
+        when "sit" then @table.sit(@token, (words[1] || -1).to_i)
+        when "stand" then @table.stand(@token)
+        when "cpu" then @table.cpu(@token, -1, true)
+        when "start" then @table.start(@token)
+        when "resign" then @table.resign(@token)
+        when "auto" then (@auto = !@auto) ? "auto: on" : "auto: off"
+        when "view" then "ok"
+        when /\A[a-h][1-8]\z/ then move(words[0])
+        else "? (help)"
+        end
+    say("#{line.strip}: #{r}")
+    refresh
+    true
+  rescue Asterism::Error => e
+    say("#{line.strip}: #{e.class}: #{e.message}")
+    true
+  end
+
+  def move(square)
+    v = @view or return "no view yet"
+    @table.move(@token, v["n"].to_i, square)
+  end
+
+  # auto: plays the first legal square when it is this member's turn.
+  def play_auto
+    return unless @auto
+    v = @view
+    return unless v && v["st"] == "play" && v["tn"] == v["me"] && v["lg"].to_s.size >= 2
+    sq = v["lg"][0, 2]
+    r = @table.move(@token, v["n"].to_i, sq)
+    say("auto #{sq}: #{r}")
+    @wake << true
+  end
+
+  # ------------------------------------------------------------ the screen
+
+  def draw
+    v = @view
+    return unless v.is_a?(Hash)
+    return @out.puts("table: #{v['error']}") if v["error"]
+    me = v["me"].to_i
+    names = v["nm"] || ["", ""]
+    lines = []
+    lines << "#{@path}  #{status_text(v)}"
+    bd = v["bd"]
+    hints = me >= 0 && v["tn"] == me ? v["lg"].to_s.scan(/../) : []
+    lines << "    a b c d e f g h"
+    8.times do |y|
+      row = (0...8).map do |x|
+        c = bd ? bd[y * 8 + x] : "."
+        code = "#{'abcdefgh'[x]}#{y + 1}"
+        c == "B" ? "X" : (c == "W" ? "O" : (hints.include?(code) ? "*" : "."))
+      end
+      lines << "  #{y + 1} #{row.join(' ')}"
+    end
+    cnt = v["cnt"] || [0, 0]
+    2.times do |i|
+      who = names[i].to_s.empty? ? "(empty)" : names[i]
+      tags = []
+      tags << "you" if i == me
+      tags << "CPU" if v["sk"].to_a[i] == 2
+      tags << "owner" if v["ow"] == i
+      tags << "away" if v["aw"].to_i[i] == 1
+      turn = v["tn"] == i ? " <" : ""
+      colour = v["st"] == "wait" ? "seat#{i + 1}" : (i.zero? ? "black" : "white")
+      lines << format("  %s %-5s %-24s %2d%s", i.zero? ? "X" : "O", colour,
+                      "#{who}#{" (#{tags.join(', ')})" unless tags.empty?}", cnt[i], turn)
+    end
+    watchers = (v["mb"] || []).select { |m| m[1] == -1 }.map(&:first)
+    lines << "  watching: #{watchers.join(', ')}" unless watchers.empty?
+    lines << "  #{@note}" unless @note.empty?
+    lines << "  #{prompt(v, me)}"
+    @out.print("\e[H\e[2J") if @out.tty?
+    @out.puts(lines)
+    @out.flush
+  end
+
+  def status_text(v)
+    case v["st"]
+    when "wait" then "lobby (sit, cpu, start)"
+    when "play"
+      t = v["dl"] ? format(", %d s left", (v["dl"].to_i + 999) / 1000) : ""
+      "move #{v['n'].to_i + 1}, last #{v['last'] || '-'}#{t}"
+    when "over"
+      r = v["res"] || {}
+      w = r["w"].to_i
+      who = w.negative? ? "a draw" : "#{(v['nm'] || [])[w]} (#{w.zero? ? 'black' : 'white'}) wins"
+      "over: #{who}, #{r['b']}-#{r['wc']}#{' by resignation' if r['why'] == 'resign'}"
+    else v["st"].to_s
+    end
+  end
+
+  def prompt(v, me)
+    return "watching (sit to play; help)" if me.negative? && v["st"] != "play"
+    return "watching" if me.negative?
+    return "your move: a square (* marks them), or resign" if v["st"] == "play" && v["tn"] == me
+    return "waiting for the other player" if v["st"] == "play"
+    return "seated (start: the owner plays again; stand: leave the seat)" if v["st"] == "over"
+    "seated (the colours are drawn at the start)"
+  end
+end
+
+node = opts[:node] || (opts[:credentials] ? nil : "tty-#{Socket.gethostname[/\A[A-Za-z0-9_-]+/]}-#{Process.pid}")
+connect = { app: "game" }
+connect[:node] = node if node
+connect[:credentials] = opts[:credentials] if opts[:credentials]
+connect[:config] = { "namespace" => opts[:namespace] } if opts[:namespace]
+locator = opts[:credentials] && !ARGV.include?("--router") ? nil : opts[:router]
+
+Asterism.connect(locator, **connect) do |net|
+  net.on_error { |e, where| warn "othello-tty: #{where}: #{e.class}: #{e.message}" }
+  net.start
+  path = opts[:table]
+  10.times do
+    break if path
+    path = net.each("*/#{OthelloTty::HOST_APP}/*").map(&:asterism_path).sort.find { |p| p.split("/")[2].start_with?("othello") }
+    sleep 1 unless path
+  end
+  abort "othello-tty: no othello table found (--table <host>/games/<table>)" unless path
+  tty = OthelloTty.new(net, path, opts[:name] || net.node_id)
+  tty.start
+  trap("INT") { exit }
+  begin
+    opts[:commands].each { |c| tty.command(c) }
+    reader = Thread.new do
+      quit = false
+      while (line = $stdin.gets)
+        break quit = true unless tty.command(line)
+      end
+      # The end of a pipe or a file: stay (auto plays on) until Ctrl-C.
+      sleep unless quit || $stdin.tty?
+    end
+    sleep 0.2 while reader.alive? && !(opts[:until_over] && tty.finished?)
+  ensure
+    tty.stop
+  end
+end

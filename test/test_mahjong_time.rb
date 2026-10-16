@@ -32,7 +32,7 @@ class TestMahjongTime < Minitest::Test
     assert_equal 20_000, T::DEFAULTS["bank_ms"]
     t = T.new("t", { "humans" => 4 })
     assert_equal 20_005, t.rule_values[TURN], "5 s a move, a bank of 20 s"
-    assert_equal 5, t.public_view(0)["ru"][TURN], "a table app before MJ-E3 shows the seconds for a move"
+    assert_equal 5, t.public_view(0)["ru"][TURN], "the seconds for a move (the bank is in tb)"
     assert_equal 20, t.public_view(0)["tb"]
   end
 
@@ -183,16 +183,17 @@ class TestMahjongTime < Minitest::Test
     t.sit(tok, -1, 0)
     assert_equal "ok", t.set_rule(tok, TURN, 60)
     assert_equal [60, 0], [t.public_view(0)["ru"][TURN], t.public_view(0)["tb"]]
-    assert_equal "ok", t.set_rule(tok, TURN, 30), "a table app before MJ-E3 steps through 10, 20, 30, 60"
+    assert_equal "value", t.set_rule(tok, TURN, 20), "only the lobby's choices (tc)"
+    assert_equal "ok", t.set_rule(tok, TURN, 30)
     assert_equal [30_000, 0], [t.turn_ms, t.bank_ms]
     assert_equal "ok", t.set_rule(tok, TURN, 20_005)
     assert_empty t.instance_variable_get(:@time_choice).to_a, "the host's value again: no choice kept"
-    t.set_rule(tok, TURN, 20)
+    t.set_rule(tok, TURN, 30)
     t.cpu(tok, -1, true)
     t.start(tok, 0)
     seat = t.seat_of(tok)
     now = to_move(t, seat, 0)
-    assert_equal [1 << seat, 20_000], t.public_view(now)["dl"]
+    assert_equal [1 << seat, 30_000], t.public_view(now)["dl"]
   end
 
   # ------------------------------------------------------------ saving

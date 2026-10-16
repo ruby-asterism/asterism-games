@@ -1,0 +1,68 @@
+# frozen_string_literal: true
+
+require_relative "../remote"
+
+module AsterismGames
+  module Othello
+    # The othello table as an Asterism object (<node>/<app>/<table>), on
+    # the framework's Remote (join, mine, leave). Every method takes the
+    # caller's node ID as from: (Asterism fills it in).
+    #
+    #   join(name)              -> {"token", "seat", "owner"} or {"error" => why}
+    #   mine                    -> the same for a node that joined, or nil
+    #   sit(token, seat)        -> "ok" or why not (seat -1: the free seat)
+    #   stand(token)            -> "ok" or why not
+    #   cpu(token, seat, on)    -> "ok" or why not (the owner; seat -1: every seat)
+    #   start(token)            -> "ok" or why not (the owner, both seats taken)
+    #   move(token, n, square)  -> "ok" or why not ("token", "stale", "illegal",
+    #                              "not your turn", "not playing", "not seated");
+    #                              n: the view's "n", square: "d3"
+    #   resign(token)           -> "ok" or why not
+    #   view(token)             -> the table's view and "me" (the member's seat), or {"error" => "token"}
+    #   table                   -> the table's view (what the state key has)
+    #   leave(token)            -> true / false
+    class Remote < AsterismGames::Remote
+      METHODS = exposes(join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, move: 3, resign: 1, view: 1, table: 0,
+                        leave: 1)
+
+      def sit(token, seat, from: nil)
+        mark(token, from)
+        @game.sit(token, seat.to_i, now)
+      end
+
+      def stand(token, from: nil)
+        mark(token, from)
+        @game.stand(token)
+      end
+
+      def cpu(token, seat, on, from: nil)
+        mark(token, from)
+        @game.cpu(token, seat.to_i, on ? true : false)
+      end
+
+      def start(token, from: nil)
+        mark(token, from)
+        @game.start(token, now)
+      end
+
+      def move(token, n, square, from: nil)
+        mark(token, from)
+        @game.move(token, n, square.to_s, now)
+      end
+
+      def resign(token, from: nil)
+        mark(token, from)
+        @game.resign(token, now)
+      end
+
+      def view(token, from: nil)
+        mark(token, from)
+        @game.member_view(token, now) || { "error" => "token" }
+      end
+
+      def table(from: nil)
+        @game.public_view(now)
+      end
+    end
+  end
+end

@@ -29,3 +29,8 @@ tables:
     #   uma: [15000, 5000, -5000, -15000]
   - name: mahjong2
     game: mahjong
+  - name: othello1
+    game: othello
+    turn_seconds: 0          # a player's time for a move (0: none; over 0 the CPU plays a move whose time ran out)
+    # cpu_ms: 700            # the CPU's pause before it plays
+    # spectators: 14         # members without a seat at most

@@ -19,15 +19,20 @@ It is two parts, in this repository for now:
   subclasses `AsterismGames::Game` and `AsterismGames::Remote` and writes
   only its rules and the methods it exposes ("Writing a game"). The
   framework requires no game; it is meant to become a gem of its own.
-- **The games**: the first is riichi mahjong (`lib/asterism_games/mahjong/`:
-  four players, seats nobody takes are played by CPUs), built on the
+- **The games**: riichi mahjong (`lib/asterism_games/mahjong/`: four
+  players, seats nobody takes are played by CPUs), built on the
   [riichi_engine](https://github.com/HenrikStephensen/riichi_engine) gem (a
-  fork with fixes, see "riichi_engine" below), which only the game needs.
-  The table screens are Family mruby apps (fmruby-core's
-  `flash/app/game/mahjong/`), on the boards and in the browser build.
+  fork with fixes, see "riichi_engine" below), which only that game needs;
+  and othello (`lib/asterism_games/othello/`: two seats and the spectators,
+  the smallest game on the framework, "The othello table"). The table
+  screens are Family mruby apps (fmruby-core's `flash/app/game/mahjong/`
+  and `flash/app/game/othello/`), on the boards and in the browser build;
+  `bin/othello-tty` is an othello table in a terminal, with CRuby and the
+  asterism gem only.
 
 ```
  bin/asterism-games  ──requires──>  asterism_games/mahjong  ──>  riichi_engine
+        │            ──requires──>  asterism_games/othello
         │                                   │ (Table < Game, Remote < Remote)
         └──requires──>  asterism_games  <───┘
                         (Host, Rooms, Config, Store, Game, Remote)  ──>  asterism
@@ -45,6 +50,7 @@ published yet.
 |---|---|
 | `bin/asterism-games` | the host (loads the framework and the games) |
 | `bin/mahjong-bots` | players without screens, for trying a table (one process each) |
+| `bin/othello-tty` | an othello table in a terminal: the board as text, watch or play by typing squares ("The othello table") |
 | `lib/asterism_games.rb` | the framework, without any game |
 | `lib/asterism_games/game.rb` | the base of a game: the registry, the members and tokens, who joins in a room, the views, the time, saving ("Writing a game") |
 | `lib/asterism_games/remote.rb` | the base of the exposed object: the methods and their numbers of arguments, the caller (`from:`), `join` / `mine` / `leave` |
@@ -54,6 +60,8 @@ published yet.
 | `lib/asterism_games/store.rb` | saved states, one JSON file per table |
 | `lib/asterism_games/mahjong.rb` | the mahjong game: requiring it registers `mahjong` |
 | `lib/asterism_games/mahjong/` | `table.rb` (seats, rounds, views, time, the table's settings), `engine.rb` (the calls into riichi_engine), `remote.rb` (the exposed object), `tiles.rb` (tile numbers) |
+| `lib/asterism_games/othello.rb` | the othello game: requiring it registers `othello` |
+| `lib/asterism_games/othello/` | `board.rb` (the rules, a game as a history, the CPU), `table.rb` (seats, the owner, time, views, saving), `remote.rb` (the exposed object) |
 | `config/example.yml` | settings to copy |
 | `config/rooms.yml` | the settings of the server's image (rooms) |
 | `deploy/vps/` | the server's image, compose file, `update.sh` (docs/install.md) |
@@ -74,7 +82,8 @@ ASTERISM_GAMES_CONFIG=config/example.yml bundle exec bin/asterism-games
 The host connects to the router in the settings (by default
 `tcp/127.0.0.1:7447`, a zenohd on this machine) as the node `games` and the
 application `games`, and exposes each table as an object:
-`games/games/mahjong1` and `games/games/mahjong2` (the default settings). Ctrl-C (or SIGTERM) saves and stops. Started again,
+`games/games/mahjong1` and `games/games/mahjong2` (the default settings;
+`config/example.yml` adds `games/games/othello1`). Ctrl-C (or SIGTERM) saves and stops. Started again,
 it goes on from the saved state (the same round, the same turn, the same
 seats and tokens). When the router goes away, it connects again every 3 s.
 
@@ -115,6 +124,8 @@ mahjong table):
 | `spectator_delay_minutes` | `MAHJONG_SPECTATOR_DELAY_MINUTES` | 0 | spectators see the game (and the four hands) this much later ("Spectators"); `spectator_delay_seconds` / `MAHJONG_SPECTATOR_DELAY_SECONDS` as before, in seconds |
 | `rule` | | (below) | riichi_engine rule keys over the host's defaults ("Rules"); the owner's local rules go over them ("Local rules") |
 
+An othello table's keys: "The othello table".
+
 ## Rooms
 
 An Asterism console (0.2.2 and later) makes rooms: a key space of its own
@@ -123,14 +134,20 @@ An Asterism console (0.2.2 and later) makes rooms: a key space of its own
 `ASTERISM_GAMES_ROOMS_DIR`) the host serves tables in rooms instead of the
 `tables` above.
 
-- **Which rooms.** The console writes the open rooms to `rooms.json` in its
-  "rooms" volume, with the app each room's link opens. A room that opens
-  one of `rooms.apps` (the mahjong table's screen,
-  `/app/game/mahjong/mahjong.app.rb`) gets the tables of `rooms.tables` (one
-  table, `mahjong1`); other rooms get nothing. The admin chooses the app
-  when making the room (Admin > Rooms, "Opens": Mahjong), so a table needs
-  no step beyond the one a room needs anyway. The people in the room open
-  the link and see the table in the screen's list, as on a home network
+- **Which rooms, which tables.** The console writes the open rooms to
+  `rooms.json` in its "rooms" volume, with the app each room's link opens.
+  A room that opens one of `rooms.apps` (by default every game's table
+  screen, `Game.screens`: `/app/game/mahjong/mahjong.app.rb`,
+  `/app/game/othello/othello.app.rb`) gets the tables of `rooms.tables`
+  whose game has that screen: a room opening the mahjong screen gets the
+  mahjong tables, one opening the othello screen the othello tables. Without
+  `rooms.tables` each game's first table is there (`mahjong1`, `othello1`),
+  so each room gets one table of its game. Other rooms (another app, or a
+  game with no table in `rooms.tables`) get nothing. The admin chooses the
+  app when making the room (Admin > Rooms, "Opens": Mahjong; the console's
+  `ASTERISM_ROOM_APPS` lists what may be chosen), so a table needs no step
+  beyond the one a room needs anyway. The people in the room open the link
+  and see the table in the screen's list, as on a home network
   (`games/games/mahjong1`).
 - **One process per room.** The asterism gem keeps one connection a
   process, so the supervisor forks a host process (Host) per room. It joins
@@ -194,27 +211,10 @@ table for `rooms.seat_reuse_seconds` (1800) is a new page, and the old
 member leaves (its seat is played by a CPU in a game) before the new one
 joins.
 
-**Before the seats** (pages of the browser build from before them, or a
-console before 0.3.0), every connection in a room held the slot's one
-certificate, so the router let any member call under any node ID. Such a
-browser has a secret of its own for the room (the browser build makes 16
-random bytes once per room and keeps them in the browser's storage under
-the room's ID), and its node ID is `wasm-` and the first six hex digits of
-SHA-256(`<room ID>:<secret>`): the same after a reload, another in another
-room. The table app sends the secret with `join` and `mine` (an extra
-argument; the methods take it or not). The host knows the room's ID
-(`room_id`) and works the node ID out again: a `join` or `mine` whose
-caller's node ID does not come from the secret given answers
-`{"error" => "identity"}` (the screen says to open the room's link again).
-The member keeps the SHA-256 of its secret (saved with the table; the
-secret itself is not), so two secrets that happen to give the same six
-digits are told apart (`"taken"`). These callers are still let in while
-`rooms.secret_ids` is on (the default): a console 0.3.0 with
-`WS_DOOR_ROOM_LEGACY=1` lets such pages into a room, and they keep
-working. **Switching it off** once every page takes a seat (the browser
-build with seats is published and the console's `WS_DOOR_ROOM_LEGACY` is
-0): `rooms.secret_ids: false` (`ASTERISM_GAMES_ROOM_SECRET_IDS=0`); then
-only the seats and the host's names join a room's table.
+Nobody else joins a room's table: a `join` or `mine` from another caller
+answers `{"error" => "identity"}` (the screen says to open the room's link
+again). The pages of the browser build from before the seats (a node ID
+worked out from a secret) are not taken any more (games 0.7.0).
 
 Outside the rooms nothing is checked (a home network; the permanent
 tables, where a board's certificate is its node ID).
@@ -222,28 +222,24 @@ tables, where a board's certificate is its node ID).
 - **Bots in a room.** `bin/mahjong-bots --credentials games.tar --namespace
   room/01` (the host's own certificate): the bots are `games-bot<pid>-<i>`,
   names the router keeps for that certificate, so the table takes them as
-  they are. With the slot's certificate (a console before 0.3.0) they need
-  `--room <room ID>`: each makes a secret and its node ID from it, as an
-  old page does.
+  they are.
 - **What the router now keeps closed** (console 0.3.0): a member cannot
   declare a queryable, put a state or a liveliness token, or reply on the
   host's keys (`room/<slot>/asterism/games...`), so it cannot pose as the
   table and collect what other pages send; nor can a page from before the
   seats (the slot's certificate has a deny on the host's and the seats'
-  names). Among the old pages themselves (all on the slot's certificate)
-  the secret check above is what tells them apart.
+  names).
 
 | Key (`rooms:`) | Environment | Default | |
 |---|---|---|---|
 | `dir` | `ASTERISM_GAMES_ROOMS_DIR` | none (no rooms) | the console's rooms volume: `rooms.json`, `certs/` |
-| `apps` | `ASTERISM_GAMES_ROOM_APPS` (comma separated) | the games' screens (`/app/game/mahjong/mahjong.app.rb`) | a room whose link opens one of these gets the tables |
+| `apps` | `ASTERISM_GAMES_ROOM_APPS` (comma separated) | the games' screens (`/app/game/mahjong/mahjong.app.rb`, `/app/game/othello/othello.app.rb`) | a room whose link opens one of these gets the tables of the game with that screen |
 | `max` | `ASTERISM_GAMES_ROOM_MAX` | 3 | rooms with tables at once |
 | `node` | `ASTERISM_GAMES_ROOM_NODE` | `games` | the host's node ID in a room |
 | `router` | `ASTERISM_GAMES_ROOM_ROUTER` | the certificate's (`tls/zenohd:7448`) | the router |
 | `status_listen` | `ASTERISM_GAMES_STATUS_LISTEN` | none | host:port of `GET /status` |
-| `tables` | | the first game's first table (`mahjong1`) | as `tables` above; the `MAHJONG_*` environment applies |
+| `tables` | | each game's first table (`mahjong1`, `othello1`) | as `tables` above; a room gets those of the game its link opens; the `MAHJONG_*` and `OTHELLO_*` environment applies |
 | `credentials` | `ASTERISM_GAMES_ROOM_CREDENTIALS` | `permanent.credentials` | the host's own `.tar` for the rooms (used when `rooms.json` lists the host in `"hosts"`) |
-| `secret_ids` | `ASTERISM_GAMES_ROOM_SECRET_IDS` (`1` / `0`) | true | callers that are neither a seat nor the host's are checked with their secret ("Who joins"); false: refused |
 | `seat_reuse_seconds` | `ASTERISM_GAMES_ROOM_SEAT_REUSE_SECONDS` | 1800 | a seat's node ID silent this long at a table is a new page |
 
 Memory (CRuby 3.2, the image, measured): the supervisor about 43 MB RSS,
@@ -294,7 +290,7 @@ list (`games/games/mahjong1`, `games/games/mahjong2`), as on a home network.
 | `credentials` | `ASTERISM_GAMES_PERMANENT_CREDENTIALS` | none (no permanent tables) | the host's `.tar` from the console |
 | `router` | `ASTERISM_GAMES_PERMANENT_ROUTER` | the certificate's (`tls/zenohd:7448` in the image) | the router |
 | `node` | `ASTERISM_GAMES_PERMANENT_NODE` | the certificate's name | the host's node ID |
-| `tables` | `ASTERISM_GAMES_PERMANENT_TABLES` (names, comma separated) | `mahjong1`, `mahjong2` | as `tables` above; the `MAHJONG_*` environment applies |
+| `tables` | `ASTERISM_GAMES_PERMANENT_TABLES` (names, comma separated; a name finds its game, or `name:game`) | `mahjong1`, `mahjong2` (the image's `config/rooms.yml`: and `othello1`) | as `tables` above; the `MAHJONG_*` and `OTHELLO_*` environment applies |
 
 The section is read only with `rooms` (the supervisor). Without rooms, the
 host itself does the same with `credentials` and `tables`.
@@ -313,7 +309,9 @@ each table (`AsterismGames::Remote`: the methods players call). Everything
 else is the framework's: the connection, the members and their tokens, who
 may join in a room, the host's loop, the puts, saving and resuming, the
 rooms, the permanent tables, the status and the settings. A complete small
-game is `test/framework/tally.rb`; the shape of one:
+game is `test/framework/tally.rb`, and a real one the othello table
+(`lib/asterism_games/othello/`, about 600 lines with its rules and CPU);
+the shape of one:
 
 ```ruby
 require "asterism_games"
@@ -364,13 +362,14 @@ end
 ```
 
 `bin/asterism-games` requires the framework and the games it serves
-(`require "asterism_games/mahjong"`); the settings name a game per table.
+(`require "asterism_games/mahjong"`, `require "asterism_games/othello"`);
+the settings name a game per table.
 
 What the framework gives a game:
 
 | | |
 |---|---|
-| `Remote.exposes` | the exposed methods and their numbers of arguments (-1: any), checked by Asterism before a call; the host exposes them with `caller: :from`, so every method takes `from:` (Asterism fills it in from the call's key and refuses a call that brings it). `join(name[, secret])`, `mine([secret])`, `leave(token)` are the base's |
+| `Remote.exposes` | the exposed methods and their numbers of arguments (-1: any), checked by Asterism before a call; the host exposes them with `caller: :from`, so every method takes `from:` (Asterism fills it in from the call's key and refuses a call that brings it). `join(name)`, `mine`, `leave(token)` are the base's |
 | `Game#join` / `mine` / `leave` | a member per node with a token (`SecureRandom`, 32 hex digits); the same node gets its token back. In a room the caller is checked ("Who joins"). A game adds its own through `member_reply`, `join_refusal`, `renamed`, `forget` (free what the member held) and `keep_member?` |
 | `node_of(token)`, `touch`, `member_away?` (`away_ms`), `expire_members` | the token's member, the sign that a member is there, members gone for long |
 | `tick(now)` | the host calls it on its loop (every 10 ms) and the game moves on by the time given: deadlines, CPU turns. Never waits |
@@ -405,7 +404,7 @@ connects again after 3 s; while a client of a router only reconnects
 | `cpu` | token, seat, on | the owner: a CPU into an empty seat (on) or out of it; seat -1 with on fills every empty seat |
 | `start` | token | the owner, once the four seats are taken and one is a member: the seats are drawn (who deals first) and the game starts |
 | `rule` | token, item, value | the owner, in the lobby: a local rule ("Local rules"); `"ok"` or why not (`"not owner"`, `"not waiting"`, `"no rule"`, `"value"`, `"no change"`) |
-| `view` | token[, assist] | the member's view (below), or `{"error" => "token"}`; assist: the help its screen shows (Assist, 0-3; without it 1) |
+| `view` | token, assist | the member's view (below), or `{"error" => "token"}`; assist: the help its screen shows (Assist, 0-3) |
 | `act` | token, sv, type, tiles | `"ok"`, or why not: `"token"`, `"not seated"`, `"stale"` (sv is not the current one), `"not offered"`, `"not playing"` |
 | `table` | none | the public view (no hand), as a spectator sees it |
 | `leave` | token | `true` / `false`; in the lobby the seat empties, during a game it goes to a CPU |
@@ -475,15 +474,13 @@ setting) are where they start, and choosing a host's value again drops the
 choice. A new room (a slot used again) starts from the host's rules.
 
 `ru` has one number per item for items 0-10, `rx` for items 11-14 and `ry`
-for items 15-16, in this order (a table screen that knows only the first
-eleven reads `ru` as before, one that knows fifteen reads `rx` as before;
+for items 15-16, in this order (the table screen puts the three together;
 the numbers of the items never change, and a screen shows them in an order
 of its own); `rule(token, item, value)` takes one of the values listed (or
 the host's own value for the item). Item 10 is the time ("Time"): its value is
 a code, the seconds for a move plus 1000 times the seconds of the bank
 (5+20 is 20005, a fixed 20 s is 20). `ru` gives its seconds for a move
-only (what a table app before MJ-E3 shows as "the time to discard"), `tb`
-its bank, and in the lobby `tc` the codes to choose from, in order (the
+only, `tb` its bank (the screen adds them up again), and in the lobby `tc` the codes to choose from, in order (the
 host's own value among them):
 
 | Item | | riichi_engine key | Values |
@@ -498,7 +495,7 @@ host's own value among them):
 | 7 | kiriage mangan | `kiriage_mangan` | 0 / 1 |
 | 8 | tobi | `tobi` | 0 / 1 |
 | 9 | the extra round ("延長"): west for a hanchan, south for a tonpuu game | `nishi_iri`, `nan_iri` together | 0 / 1 (the value is the key of the game chosen; a table app that calls the item the west round sets both) |
-| 10 | the time for a move and the bank ("持ち時間") | (the host's `turn_seconds`, `bank_seconds`) | `tc`: 5+20 (20005), 5+0 (5), a fixed 30 s (30), 60 s (60) and 600 s (600), and the host's own; also 10, 20, 30, 60 (fixed, the choices of a table app before MJ-E3) |
+| 10 | the time for a move and the bank ("持ち時間") | (the host's `turn_seconds`, `bank_seconds`) | `tc`: 5+20 (20005), 5+0 (5), a fixed 30 s (30), 60 s (60) and 600 s (600), and the host's own |
 | 11 | the abortive draws besides nine kinds (four winds, four kans, four riichi) | `suufon_renda`, `suukaikan`, `suucha_riichi` together | 0 / 1 (1 only when all three are on; a host setting with some of them shows 0, and 0 chosen again goes back to it) |
 | 12 | nagashi mangan | `nagashi_mangan` | 0 / 1 |
 | 13 | double yakuman (suuankou tanki, kokushi 13-wait, junsei chuuren) | `double_yakuman` | 0 / 1 |
@@ -593,8 +590,7 @@ a fixed time the owner had chosen stays fixed).
 
 The player sees the time on its own move: `dl` is `[seats, ms left, the
 bank's ms]` when the move has a bank, the bank being the last part of the
-ms left (the move's own time is what comes before it); a table app before
-MJ-E3 reads the first two and shows the whole time left.
+ms left (the move's own time is what comes before it).
 
 ### Players that drop out
 
@@ -734,6 +730,100 @@ later. "Not sure" marks what could not be confirmed.
 | Riichi on a tile that is ronned | not made: the 1000 points come back, no stick (a pon or kan of the tile lets it stand) | `riichi_void_on_ron` (false: the stick stays, the winner takes it) | key only | true |
 | Same-turn furiten | after passing a winning tile (robbing a kan too), until one's next draw | on a pass of a ron offered, and on a winning tile with no ron offered (no yaku on it, or furiten already; `fix/dojun-furiten-no-yaku`) | no | as the engine |
 | Formal tenpai (karaten) | yes, except a single wait on a tile the hand holds four of | the wait judge leaves out only a tile the hand holds four of (a single wait on the fourth tile of a pon is tenpai; `test/karaten-tenpai`) | no | as the engine |
+
+## The othello table
+
+The smallest game on the framework (`lib/asterism_games/othello/`): the
+rules and the CPU (`board.rb`), the table (`table.rb`) and its object
+(`remote.rb`), about 600 lines. The screens: fmruby-core's
+`flash/app/game/othello/othello.app.rb` ("Othello (table)", a window; the
+boards, the browser build and the sim) and `bin/othello-tty` (CRuby). The
+game between two machines without a host is fmruby-core's
+`flash/app/test/othello.app.rb` ("Othello (direct)").
+
+- Two seats and the spectators. The first member who sits is the owner:
+  the owner may put the CPU in the empty seat and starts once both seats
+  are taken (one of them a member). The colours are drawn at the start:
+  seat 0 is black and moves first.
+- Standard othello on 8x8: a move must turn at least one disc, every line
+  it closes is turned, a side with no legal move passes by itself (`"--"`
+  in the history), and when neither side can move the discs decide (a draw
+  when they are equal). A player may resign.
+- After the game the board and the result stay (`"st" => "over"`) until
+  someone sits or stands (back to the lobby) or the owner starts again.
+- A member who leaves during a game hands its seat to the CPU.
+- Nothing in othello is hidden, so every member sees the same view: the
+  table's view (the one the host puts on the state key) and `me`, the
+  member's seat.
+
+| Method | Arguments | Returns |
+|---|---|---|
+| `join` | name | `{"token", "seat" (-1: none), "owner"}`, or `{"error" => "full"}` / `"spectators"` |
+| `mine` | none | the same for a node that joined, or nil |
+| `sit` | token, seat | `"ok"` or why not; seat -1: the free seat (else the CPU's). Not during a game |
+| `stand` | token | `"ok"` or why not |
+| `cpu` | token, seat, on | the owner: the CPU into an empty seat (on) or out of it; seat -1: every seat |
+| `start` | token | the owner, both seats taken |
+| `move` | token, n, square | `"ok"`, or why not (`"stale"`: n is not the view's `n`, `"illegal"`, `"not your turn"`, `"not seated"`, `"not playing"`); square as `"d3"` |
+| `resign` | token | `"ok"` or why not |
+| `view` | token | the table's view and `me`, or `{"error" => "token"}` |
+| `table` | none | the table's view |
+| `leave` | token | `true` / `false` |
+
+The view: `st` (`wait` / `play` / `over`), `nm` the seats' names, `sk`
+(0 empty, 1 member, 2 CPU), `aw` (bits: a seated member is away), `ow` the
+owner's seat, `mb` the members (`[name, seat, flags]`), `ts` the seconds
+for a move; with a game `bd` (64 characters of `.` `B` `W`, a1 first, row
+by row), `tn` the seat to move (-1 none), `n` the moves so far (passes
+too), `last`, `lg` the legal squares of the side to move (`"d3c4f5e6"`),
+`cnt` the discs `[black, white]`, `dl` the ms left of a member's move (with
+a time per move); after it `res` (`{"w" => the seat that won, -1 a draw,
+"why" => "count" / "resign", "b", "wc"}`). At most about 900 B with 16
+members of 32-byte names (`rake test` prints it); a game between two
+players about 330 B.
+
+| Key | Environment | Default | |
+|---|---|---|---|
+| `turn_seconds` | `OTHELLO_TURN_SECONDS` | 0 | a member's time for a move (0: none); over 0, when it runs out the CPU plays that move |
+| `cpu_ms` | `OTHELLO_CPU_MS` | 700 | the CPU's pause before it plays |
+| `away_seconds` | `OTHELLO_AWAY_SECONDS` | 10 | a member that has not called the table this long is shown as away |
+| `spectators` | `OTHELLO_SPECTATORS` | 14 | members without a seat at most (in the lobby the free seats count besides) |
+
+The CPU is small: the square with the best weight (corners first, the
+squares next to a corner last), then the most discs turned.
+
+### In a terminal: `bin/othello-tty`
+
+CRuby and the asterism gem only (no Family mruby). It joins the table,
+draws the board as text at every change (it takes the state the host puts
+and asks its view; X black, O white, `*` the squares it may play) and reads
+commands: `sit`, `stand`, `cpu`, `start`, a square (`d3`), `resign`,
+`auto` (play the first legal square for you), `quit`.
+
+```
+# a home network (a plain zenohd)
+bundle exec bin/othello-tty --router tcp/127.0.0.1:7447 --name Alice
+# the permanent tables of a console (a row's .tar with the role games; the node is its name)
+bundle exec bin/othello-tty --credentials alice.tar --table games/games/othello1
+# start a game against the CPU at once
+bundle exec bin/othello-tty --name Alice --commands "sit,cpu,start"
+```
+
+```
+games/games/othello1  move 2, last d3
+    a b c d e f g h
+  1 . . . . . . . .
+  2 . . . . . . . .
+  3 . . * X * . . .
+  4 . . . X X . . .
+  5 . . * X O . . .
+  6 . . . . . . . .
+  7 . . . . . . . .
+  8 . . . . . . . .
+  X black CPU (CPU)                 4
+  O white Alice (you, owner)        1 <
+  your move: a square (* marks them), or resign
+```
 
 ## riichi_engine
 
@@ -882,7 +972,7 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   played for when the bank is used up (then 5 s a move), the bank filled
   again at every round, an away
   player's short wait leaving the bank, the calls keeping their time, the
-  owner's choice (a bank, a fixed time, the old app's values) reaching the
+  owner's choice (a bank, a fixed time, only the lobby's choices) reaching the
   table, the banks saved, and a table saved before the bank read back.
 - `test_mahjong_call_privacy.rb`: the calls on a discard keep their secret:
   each seat sees its own choices only, and a second seat that may call (or
@@ -890,19 +980,28 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   public view (two tables compared key by key); the versions after the
   calls, the passes naming nobody, and over whole four-member hanchan no
   `dl` but a candidate's own bit or the "others" bits.
-- `test_mahjong_room_identity.rb`: who joins in a room: the node ID from
-  the room and the secret, another member's ID refused without its secret
-  (join and mine), the seat back after a reload, the secret kept only as
-  its hash, two secrets with one ID told apart, nothing checked outside a
-  room, the calls with and without the secret, the room's ID reaching the
-  tables.
+- `test_mahjong_room_identity.rb`: who joins in a room: the seats and the
+  host's names join, nobody else (join and mine), nothing checked outside a
+  room, join and mine without a secret, a seat silent for long is a new
+  page, the room's ID reaching the tables.
+- `test_othello.rb`: the othello rules (the legal moves, the discs turned in
+  every direction, a side that cannot move passing by itself, the end and
+  the winner by the discs, a history replayed), the CPU playing only legal
+  moves to the end, a game against the CPU, the seats and the owner, the
+  spectators' limit, no time limit by default and the CPU playing a move
+  whose time ran out, a game saved and resumed with the same tokens and the
+  time left, the exposed methods and the largest view.
 - `test_rooms.rb`: the rooms' supervisor with stand-in host processes: which
   rooms get a host (the app, closed, ended), the child's settings (the
   slot's certificate, the namespace), a new room on the slot starting from
   nothing (and a slot that moved while the supervisor was down), the same
   room keeping its tables across a restart, an unreadable file changing
   nothing, `max` and a stopped host started again, the status (counts
-  only) and the settings from the environment.
+  only) and the settings from the environment; which tables a room gets
+  (each game's screen and first table by default, a room opening the
+  mahjong screen gets mahjong tables only and one opening the othello
+  screen othello tables only, the given tables split by game, table names
+  in the environment finding their game).
 - `test_network.rb`: the same refusals through a router, with the host in a
   child process, and the caller from Asterism (a call that brings `from:`
   is refused, the numbers of arguments are counted) (skipped without

@@ -241,13 +241,13 @@ class TestMahjongRules < Minitest::Test
     t, toks = seated_table(1)
     token = toks.values.first
     r = M::Remote.new(t, -> { 0 })
-    assert_equal({ "error" => "token" }, r.view(""))
-    assert_equal({ "error" => "token" }, r.view(nil))
-    assert_equal({ "error" => "token" }, r.view("0" * 32))
-    assert_equal({ "error" => "token" }, r.view(token.upcase))
+    assert_equal({ "error" => "token" }, r.view("", 1))
+    assert_equal({ "error" => "token" }, r.view(nil, 1))
+    assert_equal({ "error" => "token" }, r.view("0" * 32, 1))
+    assert_equal({ "error" => "token" }, r.view(token.upcase, 1))
     assert_equal "token", r.act("bad", t.sv, E::DAHAI, "\x00".b)
     assert_equal "token", r.act(nil, t.sv, E::DAHAI, "\x00".b)
-    assert r.view(token)["h"], "the right token gets the hand"
+    assert r.view(token, 1)["h"], "the right token gets the hand"
     pub = r.table
     assert_nil pub["h"]
     assert_nil pub["a"]

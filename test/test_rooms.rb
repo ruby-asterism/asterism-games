@@ -49,6 +49,48 @@ class TestRooms < Minitest::Test
     assert_equal({}, R.wanted({ "slots" => {} }, [APP], @now))
   end
 
+  # ------------------------------------------------- which tables a room gets
+
+  OTHELLO = "/app/game/othello/othello.app.rb"
+
+  def test_by_default_every_games_screen_and_each_games_first_table
+    r = AsterismGames::Config.new({ "rooms" => { "dir" => "/r" } }, {})["rooms"]
+    assert_equal [APP, OTHELLO], r["apps"]
+    assert_equal [%w[mahjong1 mahjong], %w[othello1 othello]], r["tables"].map { _1.values_at("name", "game") }
+  end
+
+  def test_a_room_gets_the_tables_of_the_game_its_link_opens
+    write_rooms({ "01" => room("aaaa"), "02" => room("bbbb", OTHELLO),
+                  "03" => room("cccc", "/app/test/othello.app.rb") })
+    @rooms.check(@now)
+    assert_equal %w[01 02], @spawned.map(&:first).sort, "none for an app that is not a game's"
+    assert_equal ["mahjong1"], @spawned.assoc("01")[1]["tables"].map { _1["name"] }, "mahjong only"
+    assert_equal ["othello1"], @spawned.assoc("02")[1]["tables"].map { _1["name"] }, "othello only"
+    host = AsterismGames::Host.new(@spawned.assoc("02")[1].merge("state_dir" => File.join(@dir, "h")), log: ->(_m) {})
+    assert_instance_of AsterismGames::Othello::Table, host.games["othello1"]
+    assert_equal ["othello1"], host.games.keys
+    assert_equal [APP, OTHELLO], @rooms.instance_variable_get(:@serving)
+  end
+
+  def test_the_tables_given_are_split_by_game
+    tables = [{ "name" => "mahjong1", "game" => "mahjong" }, { "name" => "mahjong2", "game" => "mahjong" },
+              { "name" => "othello1", "game" => "othello" }, { "name" => "othello2", "game" => "othello" }]
+    cfg = AsterismGames::Config.new({ "state_dir" => File.join(@dir, "s2"),
+                                      "rooms" => { "dir" => @rooms_dir, "apps" => [APP, OTHELLO], "tables" => tables } }, {})
+    assert_equal %w[othello1 othello2], AsterismGames::Config.tables_for_app(cfg["rooms"]["tables"], OTHELLO).map { _1["name"] }
+    only = AsterismGames::Config.new({ "rooms" => { "dir" => "/r", "apps" => [APP, OTHELLO],
+                                                    "tables" => [tables[0]] } }, {})
+    rooms = R.new(only.data.merge("state_dir" => File.join(@dir, "s3")), log: ->(m) { @logs << m }, spawn: ->(*) { 0 })
+    assert_equal [APP], rooms.instance_variable_get(:@serving), "no othello table: rooms opening othello get nothing"
+  end
+
+  def test_table_names_in_the_environment_find_their_game
+    p = AsterismGames::Config.new({ "rooms" => { "dir" => "/r" }, "permanent" => { "credentials" => "/c.tar" } },
+                                  { "ASTERISM_GAMES_PERMANENT_TABLES" => "mahjong1,othello1,o2:othello,x" })["permanent"]
+    assert_equal [%w[mahjong1 mahjong], %w[othello1 othello], %w[o2 othello], %w[x mahjong]],
+                 p["tables"].map { _1.values_at("name", "game") }
+  end
+
   def test_over_when_the_slot_holds_another_room_or_it_is_closed_or_ended
     saved = { "room" => "a", "until" => @now + 100, "slot" => "01" }
     refute R.over?(saved, { "slots" => { "01" => room("a") } }, @now)
@@ -338,7 +380,8 @@ class TestRooms < Minitest::Test
     write_rooms({ "01" => room("aaaa") })
     @rooms.check(@now)
     c = @spawned.first[1]
-    assert_equal [[], nil, true], c.values_at("trusted_nodes", "trusted_prefix", "secret_ids")
+    assert_equal [[], nil], c.values_at("trusted_nodes", "trusted_prefix")
+    refute c.key?("secret_ids")
   end
 
   def test_with_hosts_and_seats_the_host_joins_with_its_own_certificate_and_trusts_the_seats
@@ -379,11 +422,12 @@ class TestRooms < Minitest::Test
   end
 
   def test_room_settings_from_the_environment
-    env = { "ASTERISM_GAMES_ROOMS_DIR" => "/r", "ASTERISM_GAMES_ROOM_SECRET_IDS" => "0",
+    env = { "ASTERISM_GAMES_ROOMS_DIR" => "/r",
             "ASTERISM_GAMES_ROOM_SEAT_REUSE_SECONDS" => "60", "ASTERISM_GAMES_ROOM_CREDENTIALS" => "/c/own.tar" }
     r = AsterismGames::Config.new({}, env)["rooms"]
-    assert_equal [false, 60, "/c/own.tar"], r.values_at("secret_ids", "seat_reuse_seconds", "credentials")
+    assert_equal [60, "/c/own.tar"], r.values_at("seat_reuse_seconds", "credentials")
+    refute r.key?("secret_ids")
     r = AsterismGames::Config.new({ "permanent" => { "credentials" => "/c/games.tar" } }, { "ASTERISM_GAMES_ROOMS_DIR" => "/r" })["rooms"]
-    assert_equal [true, "/c/games.tar"], r.values_at("secret_ids", "credentials"), "the permanent tables' certificate"
+    assert_equal "/c/games.tar", r["credentials"], "the permanent tables' certificate"
   end
 end

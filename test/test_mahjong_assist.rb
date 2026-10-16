@@ -140,11 +140,11 @@ class TestMahjongAssist < Minitest::Test
     assert_nil t.view(seat, now, 0)["wt"]
   end
 
-  def test_the_call_takes_the_level_or_not
+  def test_the_call_takes_the_level
     t, seat, now, tok = at_discard(%w[1m 2m 3m 4p 5p 6p 7s 8s 1z 2z 5m 7m 9p 3z])
     r = M::Remote.new(t, -> { now })
-    assert_equal(-1, M::Remote::METHODS[:view])
-    assert_nil r.view(tok)["uk"]
+    assert_equal 2, M::Remote::METHODS[:view]
+    assert_nil r.view(tok, 1)["uk"]
     refute_nil r.view(tok, 3)["uk"]
     assert_nil r.view(tok, 0)["uk"]
     refute_nil r.view(tok, 9)["uk"], "a level past 3 is 3"

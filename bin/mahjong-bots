@@ -16,20 +16,16 @@
 #                                    # node IDs games-bot<pid>-<i>, names the router keeps for
 #                                    # that certificate, so the table takes them as they are
 #                                    # (README "Who joins")
-#                                [--credentials room-01.tar --namespace room/01 --room <room ID>]
-#                                    # in a room with the slot's certificate (a console before
-#                                    # 0.3.0): each bot makes a secret, and its node ID comes
-#                                    # from it as a browser's did
 #                                [--credentials fmruby-aaaaaa.tar --node fmruby-aaaaaa]
 #                                    # one player as a board with its own certificate
 #                                    # (the permanent tables, README "Permanent tables")
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 require "asterism"
-require "securerandom"
 require "asterism_games/mahjong/engine"
 require "asterism_games/mahjong/table"
 
 E = AsterismGames::Mahjong::Engine
+ASSIST = AsterismGames::Mahjong::Table::ASSIST_DEFAULT # the help a view asks for (README "Assist")
 opts = { router: "tcp/127.0.0.1:7447", table: "games/games/mahjong2", players: 4, think: 500, games: 1,
          prefix: "bot-#{Process.pid}", rules: [], result_ms: 0, start_ms: 0 }
 ARGV.each_slice(2) do |k, v|
@@ -43,7 +39,6 @@ ARGV.each_slice(2) do |k, v|
   when "--credentials" then opts[:credentials] = v
   when "--namespace" then opts[:namespace] = v
   when "--node" then opts[:node] = v
-  when "--room" then opts[:room] = v
   when "--rules" then opts[:rules] = v.split(",").map { |kv| kv.split("=").map(&:to_i) }
   when "--result-ms" then opts[:result_ms] = v.to_i
   when "--start-ms" then opts[:start_ms] = v.to_i
@@ -54,23 +49,18 @@ $stdout.sync = true
 opts[:players] = 1 if opts[:node] # one node ID, one player
 # In a room with the host's own certificate: names under the certificate's
 # (the console keeps <host>$* in the rooms for it).
-if opts[:credentials] && opts[:namespace] && !opts[:room] && !opts[:node] && !ARGV.include?("--prefix")
+if opts[:credentials] && opts[:namespace] && !opts[:node] && !ARGV.include?("--prefix")
   opts[:prefix] = "#{Asterism::Credentials.load(opts[:credentials], warn: false).name}-bot#{Process.pid}"
 end
 
 def play(i, opts)
   node = opts[:node] || "#{opts[:prefix]}-#{i}"
-  secret = nil
-  if opts[:room]
-    secret = SecureRandom.hex(16)
-    node = AsterismGames::Mahjong::Table.room_node_id(opts[:room], secret)
-  end
   extra = {}
   extra[:credentials] = opts[:credentials] if opts[:credentials]
   extra[:config] = { "namespace" => opts[:namespace] } if opts[:namespace]
   Asterism.connect(opts[:credentials] ? nil : opts[:router], node: node, app: "game", **extra)
   t = Asterism[opts[:table], timeout: 3.0]
-  tok = (secret ? t.join("Bot#{i + 1}", secret) : t.join("Bot#{i + 1}"))["token"]
+  tok = t.join("Bot#{i + 1}")["token"]
   sleep 0.5 * i
   r = t.sit(tok, -1)
   puts "#{node}: sit #{r}"
@@ -78,18 +68,18 @@ def play(i, opts)
   calls = 0
   games = 0
   loop do
-    if i.zero? && t.view(tok)["st"] == "wait"
+    if i.zero? && t.view(tok, ASSIST)["st"] == "wait"
       sleep 0.5 * opts[:players] + 0.5
       opts[:rules].each { |item, value| puts "#{node}: rule #{item}=#{value} #{t.rule(tok, item, value)}" }
       t.cpu(tok, -1, true)
       (opts[:start_ms] / 2000).times do # still here (a view every 2 s)
         sleep 2
-        t.view(tok)
+        t.view(tok, ASSIST)
       end
       puts "#{node}: start #{t.start(tok)}"
     end
     sleep opts[:think] / 1000.0
-    v = t.view(tok)
+    v = t.view(tok, ASSIST)
     break puts("#{node}: #{v['error']}") if v["error"]
     a = v["a"] || []
     if v["st"] == "over"
@@ -97,7 +87,7 @@ def play(i, opts)
       games += 1
       break if games >= opts[:games]
       t.act(tok, v["sv"], E::NEXT, "".b) if a.any?
-      sleep 1 until t.view(tok)["st"] != "over"
+      sleep 1 until t.view(tok, ASSIST)["st"] != "over"
       next
     end
     next if a.empty?

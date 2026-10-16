@@ -9,20 +9,20 @@ module AsterismGames
     # rest is the table's own. Every method takes the caller's node ID as
     # from: (Asterism fills it in; README "Who called" of asterism).
     #
-    #   join(name[, secret])        -> {"token", "seat", "owner"} or {"error" => "full"}
-    #   mine([secret])              -> the same for a node that joined, or nil
-    #                                  (secret: the browser's in a room, README
-    #                                  "Who joins"; {"error" => "identity"} when
-    #                                  the node ID does not come from it)
+    #   join(name)                  -> {"token", "seat", "owner"} or {"error" => "full"}
+    #   mine                        -> the same for a node that joined, or nil
+    #                                  (in a room {"error" => "identity"} for a
+    #                                  caller that is neither a seat nor the
+    #                                  host's, README "Who joins")
     #   sit(token, seat)            -> "ok" or why not (seat -1: any free seat)
     #   stand(token)                -> "ok" or why not
     #   cpu(token, seat, on)        -> "ok" or why not (the owner; seat -1: every empty seat)
     #   start(token)                -> "ok" or why not (the owner, four seats taken)
     #   rule(token, item, value)    -> "ok" or why not (the owner, in the lobby:
     #                                  a local rule, README "Local rules")
-    #   view(token[, assist])       -> the member's view (Hash) or {"error" => "token"};
+    #   view(token, assist)         -> the member's view (Hash) or {"error" => "token"};
     #                                  assist: the level of help its screen
-    #                                  shows (README "Assist", 0-3; default 1)
+    #                                  shows (README "Assist", 0-3)
     #   act(token, sv, type, tiles) -> "ok" or why not ("token", "stale",
     #                                  "not offered", "not playing", "not seated")
     #   table                       -> the public view (no hand; as a spectator sees it)
@@ -31,9 +31,7 @@ module AsterismGames
     # The same node gets its membership and token back from join. Every
     # call by a member counts as a sign that it is there (away_ms).
     class Remote < AsterismGames::Remote
-      # view takes one or two arguments (-1: the arguments are not counted).
-      # join and mine take an optional secret (README "Who joins").
-      METHODS = exposes(join: -1, mine: -1, sit: 2, stand: 1, cpu: 3, start: 1, rule: 3, view: -1, act: 4, table: 0,
+      METHODS = exposes(join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, rule: 3, view: 2, act: 4, table: 0,
                         leave: 1)
 
       def sit(token, seat, from: nil)
@@ -61,9 +59,9 @@ module AsterismGames
         @game.set_rule(token, item.to_i, value.to_i)
       end
 
-      def view(token, assist = nil, from: nil)
+      def view(token, assist, from: nil)
         mark(token, from)
-        lv = assist.nil? ? Table::ASSIST_DEFAULT : assist.to_i.clamp(Table::ASSIST_LEVELS.min, Table::ASSIST_LEVELS.max)
+        lv = assist.to_i.clamp(Table::ASSIST_LEVELS.min, Table::ASSIST_LEVELS.max)
         v = @game.member_view(token, now, lv)
         v || { "error" => "token" }
       end

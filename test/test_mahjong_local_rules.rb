@@ -165,11 +165,11 @@ class TestMahjongLocalRules < Minitest::Test
 
   def test_the_time_to_discard_is_the_chosen_one
     t, toks = lobby(1, "turn_ms" => 20_000)
-    assert_equal "ok", t.set_rule(toks[0], TURN, 10)
+    assert_equal "ok", t.set_rule(toks[0], TURN, 30)
     seats = start(t, toks)
     seat = seats.keys.first
     now = run_until(t, 0) { t.state.phase == :dahai && t.state.current_seat == seat }
-    assert_equal [1 << seat, 10_000], t.public_view(now)["dl"]
+    assert_equal [1 << seat, 30_000], t.public_view(now)["dl"]
   end
 
   # Item 15: the owner's CPU level reaches the table's CPUs (in "ry", not

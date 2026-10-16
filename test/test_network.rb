@@ -62,12 +62,12 @@ class TestNetwork < Minitest::Test
     assert_equal "ok", @t.sit(token, -1)
     assert_equal "ok", @t.cpu(token, -1, true)
     assert_equal "ok", @t.start(token)
-    assert_equal({ "error" => "token" }, @t.view("wrong"))
-    assert_equal({ "error" => "token" }, @t.view(""))
+    assert_equal({ "error" => "token" }, @t.view("wrong", 1))
+    assert_equal({ "error" => "token" }, @t.view("", 1))
     assert_equal "token", @t.act("wrong", 0, E::DAHAI, "\x00".b)
     v = nil
     40.times do
-      v = @t.view(token)
+      v = @t.view(token, 1)
       break if v["a"].any? { |a| a[0] == E::DAHAI }
       sleep 0.05
     end
@@ -78,6 +78,6 @@ class TestNetwork < Minitest::Test
     assert_equal "stale", @t.act(token, v["sv"] - 1, E::DAHAI, [v["dt"]].pack("C"))
     tile = v["dt"] >= 0 ? v["dt"] : v["h"].getbyte(0)
     assert_equal "ok", @t.act(token, v["sv"], E::DAHAI, [tile].pack("C"))
-    assert_operator reply_bytes(@t.view(token)), :<, 3800
+    assert_operator reply_bytes(@t.view(token, 1)), :<, 3800
   end
 end

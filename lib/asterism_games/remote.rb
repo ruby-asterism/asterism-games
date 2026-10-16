@@ -8,8 +8,8 @@ module AsterismGames
   # brings from: itself). The methods run on the host's receiving thread,
   # one at a time with the host's loop, and never wait.
   #
-  #   join(name[, secret])   -> the game's member_reply, or {"error" => why}
-  #   mine([secret])         -> the same for a node that joined, or nil
+  #   join(name)             -> the game's member_reply, or {"error" => why}
+  #   mine                   -> the same for a node that joined, or nil
   #   leave(token)           -> true / false
   #
   # A game's Remote adds its own methods (exposes) and calls mark(token,
@@ -29,8 +29,7 @@ module AsterismGames
       end
     end
 
-    # join and mine take an optional secret (README "Who joins").
-    exposes join: -1, mine: -1, leave: 1
+    exposes join: 1, mine: 0, leave: 1
 
     attr_reader :game
 
@@ -39,13 +38,13 @@ module AsterismGames
       @clock = clock
     end
 
-    def join(name, secret = nil, from: nil)
-      @game.join(from.to_s, name.to_s, now, secret)
+    def join(name, from: nil)
+      @game.join(from.to_s, name.to_s, now)
     end
 
-    def mine(secret = nil, from: nil)
+    def mine(from: nil)
       node = from.to_s
-      r = @game.mine(node, secret, now)
+      r = @game.mine(node, now)
       @game.touch(node, now) if r && !r["error"]
       r
     end

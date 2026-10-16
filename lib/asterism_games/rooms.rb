@@ -17,12 +17,14 @@ module AsterismGames
   #   certs/room-01.tar   the slot's certificate (namespace room/01)
   #
   # A room whose link opens one of the configured apps (by default the
-  # games' screens, Game.screens) gets the configured tables: this
-  # supervisor forks one host process (Host) for the room, which joins
-  # the router in the room's key space (namespace room/<slot>) and serves
-  # the tables there, as browsers in the room see them
-  # (asterism/games/games/<table>). One process per room, since the
-  # asterism gem keeps one connection a process. Other rooms get nothing.
+  # games' screens, Game.screens) gets the tables of the game whose screen
+  # it opens (of rooms.tables; by default each game's first table,
+  # Config.tables_for_app): this supervisor forks one host process (Host)
+  # for the room, which joins the router in the room's key space
+  # (namespace room/<slot>) and serves the tables there, as browsers in the
+  # room see them (asterism/games/games/<table>). One process per room,
+  # since the asterism gem keeps one connection a process. Other rooms
+  # (another app, or an app no configured table's game shows) get nothing.
   #
   # Which certificate (console 0.3.0, its docs/rooms.md "Seats"): when
   # rooms.json lists this host's node in "hosts", the router keeps the
@@ -36,10 +38,8 @@ module AsterismGames
   # (rooms.json "seats"), the router binds every page's calls to its seat's
   # node ID (<seat_node_prefix><slot><seat>, wasm-0103), and the host's own
   # names (<node>..., its bots) to its certificate: those callers are taken
-  # as they are. Others (pages from before the seats, wasm-<6 hex>) are
-  # checked with their secret while rooms.secret_ids is on. A host whose
-  # trust changes (the console was updated during the room) is started
-  # again.
+  # as they are; nobody else joins. A host whose trust changes (the
+  # console was updated during the room) is started again.
   #
   # A room's tables are saved under state_dir/rooms/<slot>/ with the room's
   # ID (room.json). When the slot holds another room, or the room was
@@ -98,6 +98,8 @@ module AsterismGames
       @log = log
       @clock = clock
       @spawn = spawn || method(:fork_host)
+      # The apps of rooms.apps that get tables (a game of rooms.tables shows them).
+      @serving = @rooms["apps"].select { |a| !Config.tables_for_app(@rooms["tables"], a).empty? }
       @dir = File.join(config["state_dir"], "rooms")
       FileUtils.mkdir_p(@dir)
       @children = {} # slot => {"pid", "room", "until", "since", "restarts", "next_at"}
@@ -123,8 +125,11 @@ module AsterismGames
     attr_reader :perm
 
     def run
-      @log.call("games: rooms from #{rooms_file}: tables for rooms opening #{@rooms['apps'].join(', ')} " \
-                "(at most #{@rooms['max']} rooms)")
+      @rooms["apps"].each do |a|
+        names = Config.tables_for_app(@rooms["tables"], a).map { |t| t["name"] }
+        @log.call("games: rooms opening #{a}: #{names.empty? ? 'no table (no game of rooms.tables shows it)' : names.join(', ')}")
+      end
+      @log.call("games: rooms from #{rooms_file} (at most #{@rooms['max']} rooms with tables)")
       if @permanent
         @log.call("games: permanent tables #{@permanent['tables'].map { |t| t['name'] }.join(', ')} " \
                   "with #{@permanent['credentials']}")
@@ -145,7 +150,7 @@ module AsterismGames
       reap(now)
       reap_permanent(now)
       start_permanent(now)
-      wanted = self.class.wanted(@data, @rooms["apps"], now.to_i)
+      wanted = self.class.wanted(@data, @serving, now.to_i)
       @children.keys.each do |slot|
         c = @children[slot]
         w = wanted && wanted[slot]
@@ -217,13 +222,13 @@ module AsterismGames
         c["next_at"] = now + BACKOFF_MAX_S
         return
       end
-      cfg = child_config(slot, tar, d, room["room"], trust)
+      cfg = child_config(slot, tar, d, room["room"], trust, room["app"])
       c.merge!("room" => room["room"], "until" => room["until"], "since" => Time.now.utc.iso8601, "next_at" => nil,
                "trust" => trust)
       c["pid"] = @spawn.call(slot, cfg)
       @log.call("games: room #{slot}: room #{room['room']} opens #{room['app']}: host pid #{c['pid']} " \
                 "(#{trust['own'] ? "its own certificate #{File.basename(tar)}" : 'the slot certificate'}, " \
-                "#{trust['seats'].size} seats#{', secrets checked' if @rooms['secret_ids']})")
+                "#{trust['seats'].size} seats; #{cfg['tables'].map { |t| t['name'] }.join(', ')})")
     end
 
     # Whom a room's host trusts and how it joins (from rooms.json):
@@ -244,13 +249,15 @@ module AsterismGames
     end
 
     # room_id: the room's ID, with which its tables check who joins (README
-    # "Rooms", "Who joins"); trust: trust_for's.
-    def child_config(slot, tar, dir, room_id = nil, trust = { "own" => false, "seats" => [], "prefix" => nil })
+    # "Rooms", "Who joins"); trust: trust_for's; app: what the room's link
+    # opens (its game's tables; nil: every table of rooms.tables).
+    def child_config(slot, tar, dir, room_id = nil, trust = { "own" => false, "seats" => [], "prefix" => nil }, app = nil)
+      tables = app ? Config.tables_for_app(@rooms["tables"], app) : @rooms["tables"]
       router = @rooms["router"] || (trust["own"] && @permanent ? @permanent["router"] : nil)
       { "node" => @rooms["node"], "app" => @config["app"], "credentials" => tar,
         "credentials_router" => router, "namespace" => "room/#{slot}", "state_dir" => dir,
-        "status_file" => File.join(dir, "host.json"), "tables" => @rooms["tables"], "room_id" => room_id,
-        "trusted_nodes" => trust["seats"], "trusted_prefix" => trust["prefix"], "secret_ids" => @rooms["secret_ids"],
+        "status_file" => File.join(dir, "host.json"), "tables" => tables, "room_id" => room_id,
+        "trusted_nodes" => trust["seats"], "trusted_prefix" => trust["prefix"],
         "seat_reuse_ms" => @rooms["seat_reuse_seconds"].to_i * 1000 }
     end
 
@@ -370,7 +377,7 @@ module AsterismGames
     def status
       @lock.synchronize do
         now = @clock.call
-        wanted = self.class.wanted(@data, @rooms["apps"], now.to_i) || {}
+        wanted = self.class.wanted(@data, @serving, now.to_i) || {}
         rooms = @children.keys.sort.to_h do |slot|
           c = @children[slot]
           h = read_json(File.join(slot_dir(slot), "host.json")) || {}

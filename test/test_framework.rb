@@ -31,7 +31,7 @@ class TestFramework < Minitest::Test
         assert_includes FRAMEWORK, path, "#{f} requires #{path}, outside the framework"
       end
     end
-    assert_equal FRAMEWORK.sort, (Dir.glob("asterism_games{.rb,/*.rb}", base: LIB) - ["asterism_games/mahjong.rb"]).sort,
+    assert_equal FRAMEWORK.sort, (Dir.glob("asterism_games{.rb,/*.rb}", base: LIB) - ["asterism_games/mahjong.rb", "asterism_games/othello.rb"]).sort,
                  "every framework file is listed"
   end
 
@@ -68,7 +68,7 @@ class TestFramework < Minitest::Test
     assert_equal ["/app/game/mahjong/mahjong.app.rb"], t.screens
     # The exposed methods and their numbers of arguments, in the order of
     # before (the meta a console lists).
-    assert_equal({ join: -1, mine: -1, sit: 2, stand: 1, cpu: 3, start: 1, rule: 3, view: -1, act: 4, table: 0, leave: 1 },
+    assert_equal({ join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, rule: 3, view: 2, act: 4, table: 0, leave: 1 },
                  t.remote.exposes)
     assert_equal t.remote.exposes, MahjongTestHelper::M::Remote::METHODS
   end

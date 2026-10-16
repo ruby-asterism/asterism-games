@@ -90,11 +90,11 @@ docker compose logs --tail 20 games                        # "games: rooms from 
 
 In the console's `deploy/vps`:
 
-1. `.env`: the apps a room may open, mahjong among them (env.example of
-   0.2.2):
+1. `.env`: the apps a room may open, the tables' screens among them (the
+   othello table's since games 0.7.0):
 
    ```
-   ASTERISM_ROOM_APPS=Othello=/app/test/othello.app.rb,Mahjong=/app/game/mahjong/mahjong.app.rb
+   ASTERISM_ROOM_APPS=Othello=/app/test/othello.app.rb,Mahjong=/app/game/mahjong/mahjong.app.rb,Othello (table)=/app/game/othello/othello.app.rb
    ```
 
 2. Add `docker-compose.games.yml` to the compose files. It gives the
@@ -119,8 +119,10 @@ In the console's `deploy/vps`:
 2. Make a room with "Opens: Mahjong". Within a second the host's log says
    `room 01: room <id> opens /app/game/mahjong/mahjong.app.rb: host pid ...`
    and `room 01: games: games/games up (mahjong1) via tls/zenohd:7448 in room/01`
-   (0.5.0 with a console 0.3.0: the line before ends "(its own certificate
-   games.tar, 16 seats, secrets checked)").
+   (with a console 0.3.0 the line before ends "(its own certificate
+   games.tar, 16 seats; mahjong1)"). A room with "Opens: Othello (table)"
+   gets `othello1` instead (0.7.0: a room gets the tables of the game its
+   link opens).
    The rooms' list shows `mahjong1: in its lobby, 0 seated ...`.
 3. Open the room's link: the table screen lists `games/games/mahjong1`.
    Sit, fill the empty seats with CPUs (the owner's C) and start.
@@ -225,11 +227,9 @@ joins"). With a console before 0.3.0 it works as 0.4.0.
 3. Update the console (its docs/install.md, "From 0.2.3 to 0.3.0"). Within
    a second of the console's new `rooms.json` each room's host starts again
    ("the room's seats or hosts changed in rooms.json", then
-   "... (its own certificate games.tar, 16 seats, secrets checked)").
-4. Once the browser build with seats is published and the console's
-   `WS_DOOR_ROOM_LEGACY` is back to 0: `ASTERISM_GAMES_ROOM_SECRET_IDS=0` in
-   `.env` and `docker compose up -d` (old pages' IDs are then refused at
-   the tables; nothing else changes).
+   "... (its own certificate games.tar, 16 seats; mahjong1)"). Since 0.7.0
+   only the seats and the host's names join a room's table (the pages from
+   before the seats are refused; `ASTERISM_GAMES_ROOM_SECRET_IDS` is gone).
 
 ## 9. Backups and restoring
 

@@ -38,8 +38,8 @@ class TestTally < Minitest::Test
   end
 
   def test_the_exposed_methods_and_their_arguments
-    assert_equal({ press: 2, view: 1, table: 0, join: -1, mine: -1, leave: 1 }, Tally::Remote.exposes)
-    assert_equal({ join: -1, mine: -1, leave: 1 }, AsterismGames::Remote.exposes)
+    assert_equal({ press: 2, view: 1, table: 0, join: 1, mine: 0, leave: 1 }, Tally::Remote.exposes)
+    assert_equal({ join: 1, mine: 0, leave: 1 }, AsterismGames::Remote.exposes)
   end
 
   def test_settings_come_from_the_game
@@ -242,9 +242,7 @@ class TestTally < Minitest::Test
     t = AsterismGames::Host.new(room.merge("state_dir" => File.join(@dir, "x")), log: ->(_m) {}).games["tally1"]
     assert t.join("wasm-0102", "Seat", 0)["token"], "a seat"
     assert t.join("games-bot1", "Bot", 0)["token"], "the host's own names"
-    assert_equal({ "error" => "identity" }, t.join("wasm-abcdef", "X", 0))
-    secret = "ab" * 16
-    assert t.join(Tally::Table.room_node_id("aaaa", secret), "Old", 0, secret)["token"], "an old page with its secret"
+    assert_equal({ "error" => "identity" }, t.join("wasm-abcdef", "X", 0), "a page without a seat")
     # GET /status: the room's and the permanent tables' counts.
     @rooms.start_status_server
     port = @rooms.instance_variable_get(:@server).addr[1]

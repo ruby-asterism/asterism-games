@@ -6,8 +6,9 @@ app: games                     # the Asterism application of the tables
 state_dir: /state              # rooms/<slot>/: the room's ID and its tables
 rooms:
   dir: /rooms                  # the console's rooms volume (rooms.json, certs/room-NN.tar), read-only
-  apps:                        # a room whose link opens one of these gets the tables below
+  apps:                        # a room whose link opens one of these gets that game's tables below
     - /app/game/mahjong/mahjong.app.rb
+    - /app/game/othello/othello.app.rb
   max: 3                       # rooms with tables at once (one host process each, about 50 MB)
   node: games                  # the host's node ID in a room (asterism/games/games/mahjong1)
   router: tls/zenohd:7448      # zenohd on the console's network
@@ -16,10 +17,12 @@ rooms:
   # secret_ids: true           # old pages (wasm-<6 hex>) checked with their secret; false once
   #                            every page takes a seat (ASTERISM_GAMES_ROOM_SECRET_IDS=0)
   status_listen: 0.0.0.0:7460  # GET /status for the console's rooms page
-  tables:
+  tables:                      # a room gets the tables of the game its link opens (README "Rooms")
     - name: mahjong1
       game: mahjong
       # turn_seconds, call_seconds, rule: ... as in config/example.yml
+    - name: othello1
+      game: othello
 # The permanent tables (README "Permanent tables"): with the host's own
 # certificate from the console (a registry row, e.g. "games", its .tar in
 # ASTERISM_GAMES_PERMANENT_CREDENTIALS), one more host process serves these
@@ -34,3 +37,5 @@ permanent:
       game: mahjong
     - name: mahjong2
       game: mahjong
+    - name: othello1
+      game: othello
