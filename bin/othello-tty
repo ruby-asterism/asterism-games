@@ -66,7 +66,8 @@ class OthelloTty
 
   def start
     r = @table.join(@name)
-    raise "join: #{r['error']}" unless r.is_a?(Hash) && r["token"]
+    # "identity": in a room, only the seats and the host's names join.
+    abort "othello-tty: #{@path}: join refused: #{r.is_a?(Hash) ? r['error'] : r.inspect}" unless r.is_a?(Hash) && r["token"]
     @token = r["token"]
     host, app, tname = @path.split("/")
     # The state the host puts after every change (and every 5 s): a newer
