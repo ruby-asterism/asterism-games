@@ -334,7 +334,9 @@ module AsterismGames
                    "connected" => fresh ? h["connected"] : false, "tables" => fresh ? h["tables"] : {} }]
         end
         perm = permanent_status(now)
-        seated = ->(r) { r["tables"].to_h.values.any? { |t| t["humans"].to_i.positive? } }
+        # Someone sits at a table and is there: an away seat (a player gone
+        # without leaving) does not keep an update waiting (--when-idle).
+        seated = ->(r) { r["tables"].to_h.values.any? { |t| t["humans"].to_i - t["away"].to_i > 0 } }
         { "host" => "asterism-games", "version" => AsterismGames::VERSION, "since" => @started_at.iso8601,
           "rooms_file" => { "ok" => @read_ok, "read_at" => @read_at&.iso8601 },
           "apps" => @rooms["apps"], "max" => @rooms["max"], "rooms" => rooms,

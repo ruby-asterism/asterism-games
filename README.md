@@ -124,7 +124,7 @@ An Asterism console (0.2.2 and later) makes rooms: a key space of its own
   `GET /status`: the rooms with tables, each table's state and counts
   (seated, CPUs, at the table, away; no names, nodes or tokens), whether the
   host can read `rooms.json`, the rooms without a table, `busy` (someone
-  sits at a table) and the RSS. The console's rooms page shows it
+  sits at a table and is there: away seats do not count) and the RSS. The console's rooms page shows it
   (`ASTERISM_GAMES_STATUS_URL`); `bin/asterism-games status [--idle]` prints
   it (`--idle` exits 0 when nobody sits at a table: update.sh's
   `--when-idle`). In the console's graph each room's frame shows the host's

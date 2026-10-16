@@ -149,6 +149,11 @@ class TestRooms < Minitest::Test
     assert_equal 2, s["rooms"]["01"]["tables"]["mahjong1"]["humans"]
     assert s["busy"]
     refute JSON.generate(s).include?("token"), "counts only"
+    # both seated players away: nobody is there, an update need not wait
+    File.write(File.join(@spawned.last[1]["state_dir"], "host.json"),
+               JSON.generate({ "pid" => c["pid"], "at" => @now, "connected" => true,
+                               "tables" => { "mahjong1" => { "st" => "play", "humans" => 2, "away" => 2, "cpus" => 2, "members" => 3 } } }))
+    refute @rooms.status["busy"], "away seats do not keep it busy"
   end
 
   def test_config_from_the_environment
