@@ -156,6 +156,13 @@ module AsterismGames
       { "st" => "wait", "members" => @members.size, "humans" => 0, "cpus" => 0, "away" => 0 }
     end
 
+    # What the host's @status tells of this table besides the counts
+    # (README "Status"), e.g. the last game's result; never a node or a
+    # token. Not in summary (the rooms' status file has counts only).
+    def status_extra(_now)
+      {}
+    end
+
     # The saved form (a Hash for JSON) and back. restore gets what
     # to_saved gave, read from the store, when its "format" is SAVE_FORMAT.
     def to_saved(now)

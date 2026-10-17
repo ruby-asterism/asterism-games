@@ -6,6 +6,7 @@ require "asterism_games/game"
 require_relative "tiles"
 require_relative "engine"
 require_relative "readable"
+require_relative "records"
 require "asterism_games/ai"
 
 module AsterismGames
@@ -34,6 +35,7 @@ module AsterismGames
     # are not held up a full turn each time. Back, it has the full times again.
     class Table < Game
       include Readable
+      include Records
       register "mahjong"
       tables "mahjong1", "mahjong2"
       screens "/app/game/mahjong/mahjong.app.rb"
@@ -137,7 +139,10 @@ module AsterismGames
       RULE_TIMES = [[5, 20], [5, 0], [30, 0], [60, 0], [600, 0]].freeze
       # The public view's keys that belong to the game (a spectator's delayed
       # view takes them from the past, the rest is now).
-      GAME_KEYS = %w[st sv r sc ri dora kw fu hc ls ev dl res fin fr].freeze
+      GAME_KEYS = %w[st sv r sc ri dora kw fu hc ls ev cl dl res fin fr].freeze
+      # The declarations a screen shows at the seat that made them (the
+      # view's "cl", README "Views"): riichi, the calls, the wins, nine kinds.
+      CALL_TYPES = %i[riichi pon chi daiminkan ankan kakan tsumo_agari ron_agari kyuushu_kyuuhai sanchahou].freeze
 
       attr_reader :sv, :status, :state, :stats, :rule, :ai_kinds
       attr_accessor :ai_calls_per_game
@@ -153,6 +158,7 @@ module AsterismGames
         @stats = Hash.new(0)
         @ai_kinds = []       # the AI players the host can offer now (README "AI players")
         @ai_calls_per_game = nil
+        init_records
         reset_all
         load_saved(0)
       end
@@ -947,19 +953,32 @@ module AsterismGames
       # ------------------------------------------------------------ rounds
 
       def apply(action, now)
+        before = record_before(action)
         r = Engine.apply(@state, action, @rule)
         @sv += 1
         @stats["actions"] += 1
         ev = r.events.last
         @event = ev ? [Engine::TYPE_OF[ev[:type].to_sym] || 0, ev[:seat] || -1] : nil
+        note_call(action)
+        record_move(action, before)
         @deadline = nil unless @state.phase == :naki_wait
         finish_round(r.round_end_info, now) if r.round_end?
         changed
       end
 
+      # The last declaration (the view's "cl"): [type, the state version
+      # it came with, the seat(s) that made it]; a new version is a new
+      # declaration, which the screens show for a moment.
+      def note_call(action)
+        t = action[:type].to_sym
+        return unless CALL_TYPES.include?(t)
+        @call = [Engine::TYPE_OF[t], @sv] + Array(action[:seats] || action[:seat])
+      end
+
       def finish_round(info, now)
         res = Engine.score(@state, info, @rule)
         res["round"] = [Engine::BAKAZE.index(@game["bakaze"]), @game["kyoku"], @game["honba"]]
+        record_round_end(res)
         @game["scores"] = (0..3).map { |s| @state.scores[s] }
         @game["kyoutaku"] = @state.kyoutaku
         flow = Engine.next_round(@game, @state, res, @rule)
@@ -1014,6 +1033,7 @@ module AsterismGames
           @next_at = now + @opts["over_ms"]
           @stats["games"] += 1
           @log&.call("mahjong: #{@name}: game over (#{@final_reason}): #{@final.inspect}")
+          record_game_end
         else
           @game.merge!("bakaze" => f["bakaze"], "kyoku" => f["kyoku"], "honba" => f["honba"], "oya" => f["oya"])
           new_round
@@ -1050,6 +1070,7 @@ module AsterismGames
         @final = nil
         @final_reason = nil
         @event = nil
+        @call = nil
         @deadline = nil
         @deadline_bits = 0
         @next_at = nil
@@ -1066,6 +1087,7 @@ module AsterismGames
                   "scores" => [@rule.initial_score] * 4, "rounds" => 0 }
         @final = nil
         @final_reason = nil
+        record_game_start
         new_round
         changed
       end
@@ -1082,7 +1104,9 @@ module AsterismGames
         @deadline_bits = 0
         @cpu_at = nil
         @event = nil
+        @call = nil
         @sv += 1
+        record_round_start
       end
 
       # ------------------------------------------------------------ views
@@ -1129,6 +1153,7 @@ module AsterismGames
           v["hc"] = (0..3).map { |s| st.hands[s].count }
           v["ls"] = st.last_dahai ? [st.last_dahai[:seat], Tiles.code(st.last_dahai[:tile].to_s)] : nil
           v["ev"] = @event
+          v["cl"] = @call if @call
           v["dl"] = deadline_view(now)
         end
         v["res"] = result_view if @result && (@status == "result" || @status == "over")
@@ -1146,6 +1171,13 @@ module AsterismGames
           "ais" => @seats.count { |s| s && s["ai"] },
           "away" => (0..3).count { |i| human?(i) && away?(i) },
           "round" => @game ? [Engine::BAKAZE.index(@game["bakaze"]), @game["kyoku"]] : nil }
+      end
+
+      # What the host's @status adds for this table (README "Status"): the
+      # most recent game's result.
+      def status_extra(_now)
+        last = last_result
+        last ? { "last" => last } : {}
       end
 
       # "dl": [seats, ms left] and, on a seat's own move with a bank, the
@@ -1386,7 +1418,7 @@ module AsterismGames
           "wait_spent" => @deadline && @wait_from && [now - @wait_from, 0].max,
           "cpu_left" => @cpu_at && [@cpu_at - now, 0].max, "next_left" => @next_at && [@next_at - now, 0].max,
           "result" => @result, "flow" => @flow, "final" => @final, "final_reason" => @final_reason, "event" => @event,
-          "banks" => @banks,
+          "banks" => @banks, "call" => @call, "rec" => @rec, "rec_draw" => @rec_draw,
           "rules" => { "choice" => @choice, "turn_ms" => @time_choice&.at(0), "bank_ms" => @time_choice&.at(1),
                        "cpu" => @cpu_choice, "delay_ms" => @delay_choice } }
       end
@@ -1416,6 +1448,9 @@ module AsterismGames
         @final = d["final"]
         @final_reason = d["final_reason"]
         @event = d["event"]
+        @call = d["call"]
+        @rec = d["rec"].is_a?(Hash) ? d["rec"] : nil
+        @rec_draw = d["rec_draw"]
         rules = d["rules"].is_a?(Hash) ? d["rules"] : {}
         @choice = rules["choice"].is_a?(Hash) ? rules["choice"] : {}
         # A table saved before the bank chose a fixed time ("turn_ms" alone).
@@ -1472,6 +1507,7 @@ module AsterismGames
         @final = nil
         @final_reason = nil
         @event = nil
+        @call = nil
         @answered = []        # seats whose own answer to the calls moved their view on
         @ai_want = {}         # seat => the decision asked of its AI player (README "AI players")
         @ai_got = {}          # seat => [key, move number or nil] come back

@@ -33,13 +33,17 @@ module AsterismGames
     #   look(token)                 -> the seat's view in words, with its moves numbered
     #   choose(token, sv, n)        -> plays move n of look ("ok" or why not)
     #   points(token)               -> what the hand would score
+    #   records(from)               -> the finished games, newest first, a page
+    #                                  from the from-th (README "Game records")
+    #   record(id, round, part)     -> a game: its head (id alone), a round,
+    #                                  a part of a long round
     #   leave(token)                -> true / false
     #
     # The same node gets its membership and token back from join. Every
     # call by a member counts as a sign that it is there (away_ms).
     class Remote < AsterismGames::Remote
       METHODS = exposes(join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, rule: 3, view: 2, act: 4, table: 0,
-                        describe: 0, look: 1, choose: 3, points: 1, leave: 1)
+                        describe: 0, look: 1, choose: 3, points: 1, records: -1, record: -1, leave: 1)
       object_doc "A riichi mahjong table (four seats). From a program: call describe first, then join, sit, " \
                  "and look / choose in a loop."
       docs sit: [%w[token seat], "Takes seat 0-3 (-1: any free one), in the lobby. \"ok\" or why not."],
@@ -61,7 +65,15 @@ module AsterismGames
            choose: [%w[token sv n], "Plays the move numbered n of look's \"moves\", with the \"sv\" of that look. " \
                                     "\"ok\", or why not (\"stale\": look again)."],
            points: [%w[token], "What the seat's hand would score: the win offered now, or each wait of a tenpai hand " \
-                               "by ron and tsumo (no ura dora, furiten not checked)."]
+                               "by ron and tsumo (no ura dora, furiten not checked)."],
+           records: [%w[from], "The games this table played to the end, newest first (the 20 newest): " \
+                               "{\"records\" => [{id, at, game, names, ranks, scores}], \"total\", \"next\"}. " \
+                               "from (optional, 0) skips that many; \"next\" is the from of the next page."],
+           record: [%w[id round part], "A finished game's record, in look's tile names. record(id): who played, " \
+                                       "the rules, the final ranks and a line per round; record(id, round): that " \
+                                       "round (0-based): deal, dora, every draw, discard and call, the result. A " \
+                                       "round too big for one answer comes in parts: \"parts\" says how many, " \
+                                       "record(id, round, part) gives the others."]
 
       def sit(token, seat, from: nil)
         mark(token, from)
@@ -129,6 +141,16 @@ module AsterismGames
       def points(token, from: nil)
         mark(token, from)
         @game.points_of(@game.seat_of(token))
+      end
+
+      # README "Game records": anyone who can reach the table may read them.
+      def records(*args, from: nil)
+        @game.records_page(args[0].to_i)
+      end
+
+      def record(*args, from: nil)
+        return { "error" => "id" } if args.empty?
+        @game.record_answer(args[0], args[1], args[2])
       end
     end
   end

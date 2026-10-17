@@ -3,9 +3,27 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
-## Unreleased (0.12.1)
+## 0.13.0
 
-- Mahjong: `cpu(token, seat, on)` on one seat that holds a CPU or an AI
+- **Mahjong game records** (README "Game records"): every game a table
+  plays to its end is kept, the 20 newest of each table, in the table's
+  place in the store (`<table>.records.json`; a room's go with the room).
+  A record holds the deals, the dora indicators, every draw and discard,
+  the calls, riichi, the wins and draws and the points, in `look`'s tile
+  names. A game in progress is part of the table's saved state, so a host
+  started again goes on with its record.
+- New methods `records(from)` (the games, newest first, in pages) and
+  `record(id, round, part)` (a game's head, a round, a part of a long
+  round), with their names and texts in the meta: the table apps, the
+  command line (`asterism call`) and an AI assistant (`asterism mcp`) read
+  the same. Every answer fits one message of a board.
+- `@status`: each mahjong table's most recent result (`last`: its id,
+  when, the four as `[name, rank, score]` in rank order). The rooms'
+  status file stays counts only.
+- The views have `cl`, the last declaration (`[type, state version,
+  seat, ...]`: riichi, the calls, the wins, nine kinds), which the table
+  apps show at the seat that made it.
+- Mahjong (the unreleased 0.12.1): `cpu(token, seat, on)` on one seat that holds a CPU or an AI
   player of another kind turns it into the one asked for in the same call
   (a CPU into `"claude"`, `"claude"` into `"jev"`, `true` an AI player
   back into a CPU). A refused AI player (`"no ai"`: no key, or the day's

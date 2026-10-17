@@ -443,15 +443,23 @@ and asks again as soon as the host is back.
 The host tells its tables' counts on the network (games 0.9.0), as
 `asterism/<node>/<app>/@status` (asterism's `docs/protocol.md` 8: an
 application's status, a map it puts when it changes and gives to whoever
-asks). One entry per table, with the counts of `GET /status` and nothing
-that names a member (no member names, node IDs or tokens):
+asks). One entry per table, with the counts of `GET /status` (no node IDs
+or tokens), and for a mahjong table the result of its most recent game
+(games 0.13.0, "Game records"):
 
 ```
 asterism/games/games/@status
-{"mahjong1" => {"st" => "play", "members" => 4, "humans" => 1, "cpus" => 3, "ais" => 1, "away" => 0},
+{"mahjong1" => {"st" => "play", "members" => 4, "humans" => 1, "cpus" => 3, "ais" => 1, "away" => 0,
+                "last" => {"id" => 12, "at" => "2026-10-18 21:05", "game" => "tonpuu",
+                           "result" => [["kishima", 1, 38200], ["CPU2", 2, 27100], ["Claude", 3, 21900], ["CPU1", 4, 12800]]}},
  "othello1" => {"st" => "wait", "members" => 0, "humans" => 0, "cpus" => 0, "away" => 0},
  "ai_today" => {"calls" => 84, "usd" => 0.02, "limit_usd" => 3.0}}
 ```
+
+`last` is the four in rank order as `[name, rank, score]`, by the names
+the table shows its members anyway (a table app shows them to whoever
+joins); it is there once a game has ended. The rooms' status file
+(`GET /status` of the rooms' host) stays counts only.
 
 `ais` counts the AI players' seats (they are counted in `cpus` too), and
 `ai_today` is the AI players' totals of the day (README "AI players"),
@@ -592,6 +600,7 @@ connects again after 3 s; while a client of a router only reconnects
 | `table` | none | the public view (no hand), as a spectator sees it |
 | `leave` | token | `true` / `false`; in the lobby the seat empties, during a game it goes to a CPU |
 | `describe`, `look`, `choose`, `points` | | for programs ("Playing from a program") |
+| `records`, `record` | from / id, round, part | the games played to the end and their records ("Game records") |
 
 - People join a table and wait in its lobby (`"st" => "wait"`): a member
   sits in a seat or watches. The first member who sat is the owner (when the
@@ -814,6 +823,7 @@ A Hash (MessagePack); tiles are one byte each in binary strings (bin).
 | `fu` | four meld lists: per meld `[kind, from, n, n tiles]`; kind 1 chi, 2 pon, 3 closed kan, 4 open kan, 5 added kan; from 1 right, 2 across, 3 left, 0 none. The tiles are in the order a table shows them: the called tile is first when it came from the left, second from across, last from the right (an added kan: the last of the first three, the added tile fourth) |
 | `hc` | the four hand sizes |
 | `ls`, `ev` | the last discard `[seat, tile]`; the last action `[type, seat]` |
+| `cl` | the last declaration, `[type, the state version it came with, seat, ...]` (games 0.13.0): riichi (2), tsumo (3), a kan (4, 5, 8), pon (6), chi (7), ron (9; every winner of a double ron), nine kinds (11), three rons (13; the three seats). A screen shows it for a moment at the seat that made it; a new state version is a new declaration (`ev` is gone by the next draw, a riichi's or a kan's at once). In the public view too (everybody hears a declaration), as old as the rest for the spectators |
 | `dl` | `[seats as bits, ms]`: whom the host waits for and how long it still waits: the seat whose turn it is; in the calls on a discard, in a seat's own view only, its own bit while it has to answer, else the three others' ("Calls on a discard"); on a player's own move with a bank, a third number, the bank's ms in it ("Time") |
 | `res` | at a round's end: `k` (`tsumo_agari`, `ron_agari`, `ryuukyoku`, and the abortive draws `kyuushu_kyuuhai`, `sanchahou`, `suufon_renda`, `suukaikan`, `suucha_riichi`), `rd` (the round: `[bakaze, kyoku, honba]`), `d` (the four score changes), `f` (who dealt in), `wn` (one entry per winner, in turn order from the discarder: `w` seat, `y` the yaku as riichi_engine names them, in Japanese, `yh` the han of each (-1: a yakuman, -2: a double yakuman), `pt` fu, han and points, `h` and `ag` the hand and the winning tile, `pa` pao: `[[the seat that pays, the yakuman], ...]`), `tp` (tenpai seats at a draw), `ng` (the seats with nagashi mangan at a draw; paid in place of the no-ten payments), `rs` (the seats of the three rons at a sanchahou) |
 | `ru`, `rx`, `ry` | the local rules ("Local rules"), one number per item: items 0-10, 11-14 and 15-16 (item 10 the seconds for a move) |
@@ -917,6 +927,81 @@ later. "Not sure" marks what could not be confirmed.
 | Riichi on a tile that is ronned | not made: the 1000 points come back, no stick (a pon or kan of the tile lets it stand) | `riichi_void_on_ron` (false: the stick stays, the winner takes it) | key only | true |
 | Same-turn furiten | after passing a winning tile (robbing a kan too), until one's next draw | on a pass of a ron offered, and on a winning tile with no ron offered (no yaku on it, or furiten already; `fix/dojun-furiten-no-yaku`) | no | as the engine |
 | Formal tenpai (karaten) | yes, except a single wait on a tile the hand holds four of | the wait judge leaves out only a tile the hand holds four of (a single wait on the fourth tile of a pon is tenpai; `test/karaten-tenpai`) | no | as the engine |
+
+## Game records
+
+Every game a mahjong table plays to its end is kept as a record (games
+0.13.0): the deals, the dora indicators, every draw and discard, the calls,
+riichi, the wins and draws and the points. The table apps list a table's
+recent games and step through a record with the four hands face up; a
+program reads the same with `records` and `record` (the CLI, an AI
+assistant through `asterism mcp`).
+
+- **What is kept.** The 20 newest games of each table, in the table's place
+  in the store, next to its saved state: `state_dir/<table>.records.json`
+  on a home network, under `state_dir/permanent/` for the permanent tables,
+  under `state_dir/rooms/<slot>/` in a room, which goes with the room when
+  it closes. A game in progress is never given out; its record so far is in
+  the table's saved state, so a host started again goes on with it.
+- **Who reads them.** Anyone who can call the table (no token): the router's
+  rules decide, as for joining.
+
+| Method | Arguments | Returns |
+|---|---|---|
+| `records` | from (optional, 0) | `{"records" => [...], "total", "next"}`: the games, newest first, from the from-th, as many as fit one message; `next` is the from of the next page (none: the end). Each: `id`, `at` (the host's local time, `"2026-10-18 21:05"`), `game` (`hanchan` / `tonpuu`), `names`, `ranks`, `scores` (in seat order) |
+| `record` | id | the game's head: `id`, `at`, `time` (Unix seconds), `table`, `game`, `rules` (as `look`'s), `names`, `kinds` (human / cpu / ai), `final` (`[[seat, rank, score, points x 10], ...]`), `reason` (as the view's `fr`), `rounds` (`[[wind, number, honba, kind, [four changes]], ...]`) |
+| `record` | id, round | round `round` (from 0) as below, with `id`, `round`, `of` (how many rounds), `part`, `parts` |
+| `record` | id, round, part | a round too big for one message comes in parts (`parts` > 1): part 0 has everything with the first moves, part k the moves from `move_from` on |
+
+`{"error" => "no record"}` (an id not kept), `"no round"`, `"no part"`.
+
+A round:
+
+| Key | |
+|---|---|
+| `wind`, `number`, `honba`, `riichi_sticks`, `dealer` | the round (`east` .. `north`, 1-4) as it starts |
+| `scores` | the four scores as it starts |
+| `dora_indicators` | the indicator(s) as it starts (a kan's come as moves) |
+| `hands` | the four deals, sorted |
+| `moves` | in order, each an array starting with the seat (-1: the table's own) |
+| `result` | `kind` (as the view's `res`), `changes` (the four), `from`, `wins` (`seat`, `yaku`, `yaku_han`, `han`, `fu`, `points`, `hand` (without the winning tile), `tile`, `pao`), `ura_indicators`, `tenpai`, `nagashi`, `ron_seats` |
+| `end_scores`, `end_sticks` | the scores and the sticks on the table after it |
+
+The moves:
+
+| Move | |
+|---|---|
+| `[seat, "draw", tile]` | a draw (a kan's replacement tile too) |
+| `[seat, "discard", tile]`, `[seat, "discard", tile, true]` | a discard; `true`: the tile just drawn (tsumogiri) |
+| `[seat, "riichi", tile]` (`, true`) | riichi, declared with that discard |
+| `[seat, "chi" / "pon" / "open_kan", tile, [tiles], from]` | a call of the discard `tile` of seat `from` with `tiles` from the hand |
+| `[seat, "closed_kan", [four tiles]]`, `[seat, "added_kan", tile]` | a closed kan; a tile added to a pon |
+| `[-1, "dora", tile]` | a new dora indicator (after a kan, when the rule shows it) |
+| `[seat, "tsumo", tile]`, `[seat, "ron", tile, from]` | a win (one `ron` per winner of a double ron; three at a sanchahou) |
+| `[seat, "nine_kinds"]` | the abortive draw with nine kinds |
+
+Tiles are `look`'s names: `"1m".."9m"`, `"1p".."9p"`, `"1s".."9s"`,
+`"0m"` / `"0p"` / `"0s"` the red fives, `"1z".."7z"` east, south, west,
+north, white, green, red. A whole hanchan takes about 25 KB of JSON (16 KB
+of MessagePack); a round's answer about 2 KB, the largest seen 2.2 KB
+(the tests hold every answer under 3800 B and split longer rounds).
+
+From the command line and an AI assistant:
+
+```
+asterism call --router tcp/192.0.2.2:7447 games/games/mahjong1 records
+asterism call --router tcp/192.0.2.2:7447 games/games/mahjong1 record 12
+asterism call --router tcp/192.0.2.2:7447 games/games/mahjong1 record 12 0
+
+claude mcp add records -- asterism mcp --router tcp/192.0.2.2:7447 \
+  --allow 'games/mahjong1.records' --allow 'games/mahjong1.record'
+```
+
+Then ask the assistant, for example: "Read the last game of mahjong1
+(records, then record with its id and each round) and go through the
+second player's discards: where did it deal in, and what would have been
+safer?" Every move of a finished game is there, the four hands included,
+so an assistant can review a game as a whole.
 
 ## Playing from a program
 
@@ -1349,6 +1434,17 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   player's short wait leaving the bank, the calls keeping their time, the
   owner's choice (a bank, a fixed time, only the lobby's choices) reaching the
   table, the banks saved, and a table saved before the bank read back.
+- `test_mahjong_records.rb`: the game records ("Game records"): a game's
+  record whole (every round replayed from its deal by its moves: each
+  discard and call from the hand that holds it, the wins' hands, no tile
+  more than four times, each seat's points from round to round by the
+  result and its riichi stick, the final scores), going on across a
+  restart of the host mid-round, the 20 newest kept (the numbers go on),
+  a closed room's records gone with it, every answer of `records` and
+  `record` under 3800 B (twenty games of long names in pages, a long round
+  in parts), the remote's calls, the last result on `@status` (and not in
+  the rooms' counts), and the declarations in the view (`cl`). The CPU
+  hanchan of `test_mahjong_games.rb` check each game's record the same way.
 - `test_mahjong_call_privacy.rb`: the calls on a discard keep their secret:
   each seat sees its own choices only, and a second seat that may call (or
   answers) changes no other seat's view, the spectator's, the put or the

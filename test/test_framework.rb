@@ -75,13 +75,14 @@ class TestFramework < Minitest::Test
     # The exposed methods and their numbers of arguments, in the order of
     # before (the meta a console lists).
     assert_equal({ join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, rule: 3, view: 2, act: 4, table: 0,
-                   describe: 0, look: 1, choose: 3, points: 1, leave: 1 },
+                   describe: 0, look: 1, choose: 3, points: 1, records: -1, record: -1, leave: 1 },
                  t.remote.exposes)
     # Every method is described (names as many as its arguments).
     t.remote.exposes.each do |m, n|
       d = t.remote.docs[m]
       assert d, "#{m} has no doc"
-      assert_equal n, d[0].size, "#{m}: argument names"
+      # Any number (-1): the names are the leading ones (README "Game records").
+      assert_equal n, d[0].size, "#{m}: argument names" unless n.negative?
       assert_operator d[1].bytesize, :<=, 2048
     end
     assert_equal t.remote.exposes, MahjongTestHelper::M::Remote::METHODS

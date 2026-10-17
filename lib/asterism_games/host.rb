@@ -287,9 +287,10 @@ module AsterismGames
       !@config["namespace"]
     end
 
-    # {table => {"st", "members", "humans", "cpus", "away"}}.
+    # {table => {"st", "members", "humans", "cpus", "away"}} and what a
+    # game adds (Game#status_extra: the mahjong tables' last result).
     def tables_status(now = @clock.call)
-      st = @games.transform_values { |g| g.summary(now).slice(*TABLES_STATUS_KEYS) }
+      st = @games.transform_values { |g| g.summary(now).slice(*TABLES_STATUS_KEYS).merge(g.status_extra(now)) }
       # The AI players' totals of today (README "AI players"): money and
       # counts only.
       if @ai&.any?

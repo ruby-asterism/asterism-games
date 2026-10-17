@@ -57,6 +57,110 @@ module MahjongTestHelper
     assert_equal "ok", t.start(tokens[0], now)
     [t, tokens.to_h { |tok| [t.seat_of(tok), tok] }]
   end
+  # What is wrong with a game record (README "Game records"), [] when
+  # nothing: every round replayed from its deal by its moves (each discard
+  # and call from the hand that holds it, the called tile the last
+  # discard, the hand's size after each discard), the wins' hands as the
+  # moves leave them, no tile more than four times, the points from round
+  # to round (each seat's change by the result and its riichi stick) and
+  # the final scores. final: the table's own final ranks, when given.
+  def record_problems(rec, final = nil)
+    out = []
+    prev = nil
+    rounds = rec["rounds"] || []
+    out << "no rounds" if rounds.empty?
+    rounds.each_with_index do |r, ri|
+      tag = "record #{rec['id']} round #{ri}"
+      out << "#{tag}: the scores do not follow the round before" if prev && r["scores"] != prev
+      hands = r["hands"].map(&:dup)
+      out << "#{tag}: the deal" unless hands.all? { |h| h.size == 13 }
+      shown = []
+      melds = [0, 0, 0, 0]
+      riichi = []
+      last = nil
+      res = r["result"]
+      out << "#{tag}: no result" unless res
+      take = lambda do |seat, tile, what|
+        i = hands[seat].index(tile)
+        if i
+          hands[seat].delete_at(i)
+        else
+          out << "#{tag}: #{what} #{tile} not in seat #{seat}'s hand"
+        end
+      end
+      r["moves"].each do |m|
+        seat, kind = m
+        case kind
+        when "draw" then hands[seat] << m[2]
+        when "discard", "riichi"
+          take.call(seat, m[2], kind)
+          out << "#{tag}: seat #{seat} holds #{hands[seat].size} after a discard" unless hands[seat].size + melds[seat] * 3 == 13
+          riichi << seat if kind == "riichi"
+          shown << m[2]
+          last = [seat, m[2]]
+        when "chi", "pon", "open_kan"
+          out << "#{tag}: #{kind} of #{m[2]} from #{m[4]}, not the last discard #{last.inspect}" unless last == [m[4], m[2]]
+          m[3].each { |x| take.call(seat, x, kind) }
+          shown.pop
+          shown.concat(m[3] + [m[2]])
+          melds[seat] += 1
+        when "closed_kan"
+          m[2].each { |x| take.call(seat, x, kind) }
+          shown.concat(m[2])
+          melds[seat] += 1
+        when "added_kan"
+          take.call(seat, m[2], kind)
+          shown << m[2]
+        when "dora" then shown << m[2]
+        when "tsumo"
+          w = res && Array(res["wins"]).find { |x| x["seat"] == seat }
+          h = hands[seat].dup
+          h.delete_at(h.index(m[2]) || h.size)
+          out << "#{tag}: tsumo hand #{h.sort} / #{w && w['hand'].sort}" unless w && plain(w["hand"]) == plain(h)
+        when "ron"
+          w = res && Array(res["wins"]).find { |x| x["seat"] == seat }
+          if res && res["kind"] == "ron_agari"
+            out << "#{tag}: ron hand #{hands[seat].sort} / #{w && w['hand'].sort}" unless w && plain(w["hand"]) == plain(hands[seat])
+            out << "#{tag}: ron on #{m[2]} from #{m[3]}, not the last discard #{last.inspect}" if last != [m[3], m[2]] && !r["moves"].any? { |x| x[1] == "added_kan" }
+          end
+        when "nine_kinds" then nil
+        else out << "#{tag}: unknown move #{m.inspect}"
+        end
+      end
+      counts = Hash.new(0)
+      (hands.flatten + shown + r["dora_indicators"]).each { |x| counts[x.sub("0", "5")] += 1 }
+      counts.each { |k, n| out << "#{tag}: #{n} of #{k}" if n > 4 }
+      next unless res
+      ends = r["end_scores"]
+      out << "#{tag}: points add up to #{ends.sum + r['end_sticks'] * 1000}" if ends.sum + r["end_sticks"].to_i * 1000 != 100_000
+      voided = res["kind"] == "ron_agari" && last && riichi.include?(last[0]) &&
+               r["moves"].reverse.find { |x| %w[discard riichi].include?(x[1]) }&.at(1) == "riichi"
+      4.times do |s|
+        stick = riichi.include?(s) && !(voided && s == last[0]) ? -1000 : 0
+        got = ends[s] - r["scores"][s] - res["changes"][s]
+        out << "#{tag}: seat #{s} #{r['scores'][s]} + #{res['changes'][s]} #{stick} -> #{ends[s]}" unless got == stick
+      end
+      prev = ends
+    end
+    fin = rec["final"]
+    if fin && prev
+      left = rounds.last["end_sticks"].to_i * 1000
+      want = prev.dup
+      top = fin.min_by { |f| f[1] }[0]
+      want[top] += left
+      fin.each { |seat, _rank, score, _| out << "final score of seat #{seat}: #{score}, the record leads to #{want[seat]}" if score != want[seat] }
+    end
+    out << "final #{fin.inspect} / the table's #{final.inspect}" if final && fin != final
+    out
+  end
+
+  # Tile names with the red fives as fives, sorted: riichi_engine's winning
+  # hand may show the red five it won on in place of a plain five of the
+  # hand (it takes the winning tile out by its kind).
+  def plain(names)
+    names.map { |x| x.sub("0", "5") }.sort
+  end
+
   # Advances a table until the block is true (or the steps run out).
   def run_until(table, now, limit: 200_000)
     limit.times do

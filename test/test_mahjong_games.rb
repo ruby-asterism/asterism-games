@@ -57,6 +57,15 @@ class TestMahjongGames < Minitest::Test
         raise "too many steps" if steps > 2_000_000
       end
       out["games"] += 1
+      # The game's record (README "Game records"): nothing missing from the
+      # deal to the end, the points as played.
+      rec = t.records_page["records"].first && t.record_of(t.records_page["records"].first["id"])
+      if rec
+        out["errors"].concat(record_problems(rec, t.instance_variable_get(:@final)))
+        out["record_moves"] = out["record_moves"].to_i + rec["rounds"].sum { |r| r["moves"].size }
+      else
+        out["errors"] << "no record of the game"
+      end
       out["assist_ms"].concat(t.assist_times)
       out["rounds"] += t.stats["rounds"]
       out["actions"] += t.stats["actions"]
@@ -88,6 +97,7 @@ class TestMahjongGames < Minitest::Test
     end
     sum = results.each_with_object(Hash.new(0)) do |x, a|
       %w[games rounds actions checks cpu_refused wt_views uk_views].each { |k| a[k] += x[k] }
+      a["record_moves"] += x["record_moves"].to_i
       a["max_view"] = [a["max_view"], x["max_view"]].max
       a["max_wt"] = [a["max_wt"], x["max_wt"]].max
       a["max_uk"] = [a["max_uk"], x["max_uk"]].max
