@@ -59,6 +59,9 @@ module AsterismGames
     CHECK_S = 1.0
     STOP_WAIT_S = 8
     BACKOFF_MAX_S = 30
+    # The permanent tables' host's profile name: the console's graph shows
+    # "permanent tables (games)", apart from the rooms' hosts of the same ID.
+    PERMANENT_PROFILE_NAME = "permanent tables"
 
     # The rooms that should have a host, from rooms.json's content:
     # {slot => {"room", "until", "app"}} (open, not ended, opening one of
@@ -277,7 +280,8 @@ module AsterismGames
       FileUtils.mkdir_p(permanent_dir)
       cfg = { "node" => @permanent["node"], "app" => @config["app"], "credentials" => tar,
               "credentials_router" => @permanent["router"], "state_dir" => permanent_dir,
-              "status_file" => File.join(permanent_dir, "host.json"), "tables" => @permanent["tables"] }
+              "status_file" => File.join(permanent_dir, "host.json"), "tables" => @permanent["tables"],
+              "profile_name" => PERMANENT_PROFILE_NAME }
       @perm.merge!("since" => Time.now.utc.iso8601, "next_at" => nil)
       @perm["pid"] = @spawn.call("permanent", cfg)
       @log.call("games: permanent: host pid #{@perm['pid']} (#{@permanent['tables'].map { |t| t['name'] }.join(', ')})")

@@ -265,7 +265,12 @@ list (`games/games/mahjong1`, `games/games/mahjong2`), as on a home network.
 - **One more process.** The supervisor forks one more host process
   (Host) for the tables of `permanent.tables` (`mahjong1` and `mahjong2`),
   joins the router with that certificate, outside every room (no
-  namespace), and puts the host's profile (`asterism-games`). It is started
+  namespace), and puts the host's profile with the name `permanent tables`
+  (games 0.7.1; `asterism-games` before). A room's host joins with the same
+  certificate, so both have the node ID `games`: the console's graph shows
+  this one as `permanent tables (games)` (where it can read the profile:
+  the console's CHANGELOG, 0.3.3) and a room's as `games (room 05)`
+  (console 0.3.3). It is started
   again like a room's host (1, 2, 4 ... 30 s). Without the certificate file
   (or not readable) the supervisor waits for it and says so once in the
   log; the rooms go on.
@@ -381,7 +386,8 @@ What the framework gives a game:
 
 The host (`Host`) is written with Asterism's block API:
 `Asterism.connect(...) do |net| ... end` exposes the tables, sets the
-profile (`name: asterism-games`; not in a room) and starts the Net's
+profile (`name: asterism-games` for a host of its own, `permanent tables`
+for the permanent tables' host, no name in a room) and starts the Net's
 receiving thread, which answers the calls. The games move on in the
 host's own loop (`step`: `tick`, saving, the puts, every 10 ms), which
 holds `Asterism::LOCK` while it runs: the receiving thread holds the same

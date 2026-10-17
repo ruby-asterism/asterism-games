@@ -27,6 +27,9 @@ module AsterismGames
     RECONNECT_S = 3
     PUT_EVERY_MS = 5000
     LOOP_S = 0.01
+    # The profile's name (outside the rooms): a host of its own on a LAN.
+    # The permanent tables' host is named by Rooms (config "profile_name").
+    PROFILE_NAME = "asterism-games"
 
     attr_reader :games, :stats
 
@@ -98,9 +101,17 @@ module AsterismGames
       opts
     end
 
+    # The name its profile gives, or nil in a room (no name there: the
+    # console does not read the profiles in a room, and labels a room's
+    # host by its node ID and the room).
+    def profile_name
+      return nil if @config["namespace"]
+      @config["profile_name"] || PROFILE_NAME
+    end
+
     # Connected: the profile, the tables, the receiving thread.
     def up(net)
-      net.profile(name: "asterism-games") unless @config["namespace"]
+      net.profile(name: profile_name) if profile_name
       net.on_error { |e, where| @log.call("games: #{where}: #{e.class}: #{e.message}") }
       @games.each_key do |name|
         net.expose(name, @remotes[name], methods: @methods[name], caller: :from)

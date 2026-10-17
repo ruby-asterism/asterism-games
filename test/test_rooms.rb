@@ -281,8 +281,38 @@ class TestRooms < Minitest::Test
     assert_nil c["node"], "the certificate's name"
     assert_equal File.join(@dir, "state", "permanent"), c["state_dir"]
     assert_equal %w[mahjong1 mahjong2], c["tables"].map { _1["name"] }
+    assert_equal "permanent tables", c["profile_name"], "apart from the rooms' hosts of the same node ID"
     @rooms.check(@now + 3)
     assert_equal 1, @spawned.size, "one host for the permanent tables"
+  end
+
+  # Records what Host#up asks of the Net.
+  class ProfileNet
+    attr_reader :profiles
+
+    def initialize = @profiles = []
+    def profile(**fields) = @profiles << fields
+    def on_error(&) = nil
+    def expose(*, **) = nil
+    def start = nil
+  end
+
+  def test_the_profile_name_of_each_kind_of_host
+    base = AsterismGames::Config.new({ "state_dir" => File.join(@dir, "p"),
+                                       "tables" => [{ "name" => "mahjong1", "game" => "mahjong" }] }, {}).data
+    permanent_rooms
+    put_tar
+    @rooms.check(@now)
+    perm = @spawned.assoc("permanent")[1]
+    { perm.merge("state_dir" => File.join(@dir, "p1"), "node" => "games") => "permanent tables",
+      base => "asterism-games",
+      base.merge("namespace" => "room/01") => nil }.each do |cfg, name|
+      host = AsterismGames::Host.new(cfg, log: ->(_m) {})
+      name ? assert_equal(name, host.profile_name) : assert_nil(host.profile_name)
+      net = ProfileNet.new
+      host.up(net)
+      assert_equal(name ? [{ name: name }] : [], net.profiles, "the profile #{cfg['namespace'] ? 'in a room' : name}")
+    end
   end
 
   def test_permanent_tables_next_to_the_rooms_and_never_cleaned_with_them
