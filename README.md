@@ -268,8 +268,7 @@ list (`games/games/mahjong1`, `games/games/mahjong2`), as on a home network.
   namespace), and puts the host's profile with the name `permanent tables`
   (games 0.7.1; `asterism-games` before). A room's host joins with the same
   certificate, so both have the node ID `games`: the console's graph shows
-  this one as `permanent tables (games)` (where it can read the profile:
-  the console's CHANGELOG, 0.3.3) and a room's as `games (room 05)`
+  this one as `permanent tables (games)` and a room's as `games (room 05)`
   (console 0.3.3). It is started
   again like a room's host (1, 2, 4 ... 30 s). Without the certificate file
   (or not readable) the supervisor waits for it and says so once in the
