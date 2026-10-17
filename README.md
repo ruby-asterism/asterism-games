@@ -115,7 +115,7 @@ mahjong table):
 | `call_seconds` | `MAHJONG_CALL_SECONDS` | 8 | the time to call a discard, the same for every player who may; after it the call is passed |
 | `result_seconds` | `MAHJONG_RESULT_SECONDS` | 8 | a round's result stays this long (or until a player presses next) |
 | `over_seconds` | `MAHJONG_OVER_SECONDS` | 60 | the end of a game stays this long (or until the owner presses next), then the table is back in its lobby |
-| `away_seconds` | `MAHJONG_AWAY_SECONDS` | 10 | a member that has not called the table this long is shown as away |
+| `away_seconds` | `MAHJONG_AWAY_SECONDS` | 10 | a member whose node leaves the network is away at once; one that has not called the table this long is away too (where the host does not see the nodes come and go: "Who is there") |
 | `away_wait_seconds` | `MAHJONG_AWAY_WAIT_SECONDS` | 2 | an away member's time to discard or to call, instead of `turn_seconds` and the bank / `call_seconds` |
 | `cpu_ms` | `MAHJONG_CPU_MS` | 700 | a CPU's pause before it acts |
 | `cpu_level` | `MAHJONG_CPU_LEVEL` | `normal` | `easy` / `normal` / `hard` (riichi_engine's CPU levels) |
@@ -305,6 +305,57 @@ shared with the supervisor), the container 66 MiB in all with the
 supervisor and one room. With `rooms.max` (3) rooms as well, about 250 MB
 RSS (about 120 MB PSS).
 
+## Who is there
+
+A member is away when it is gone: its seat shows it (`"aw"`, the member
+list's flag), a mahjong seat is played for after a short wait, the status
+counts it. The host learns it from Asterism, not from the calls (games
+0.8.0): the Net's `on_leave` tells it that a node left the network (its
+last application or object is gone: a closed browser tab, a board's app
+that closed its connection, a process killed, a line that dropped), and
+`on_join` that a node is on the network again. The host passes both to
+every table (`Game#node_left` / `node_joined`):
+
+- a member whose node leaves is away at once, and back at once when its
+  node joins again (before it calls anything);
+- a member whose node the host has seen join is there for as long as the
+  node is, calling or not (a screen on the list of tables, a terminal
+  watching);
+- a member whose node the host has never seen (see below) is away when it
+  has not called the table for `away_seconds`, as before 0.8.0: the screens
+  still ask their view every few seconds for that.
+
+Members gone for long are forgotten six times `away_seconds` after their
+last call or after their node left, whichever is later (seated members are
+kept); in a room a seat's node ID gone for `seat_reuse_seconds` is a new
+page when it comes back ("Who joins"). Presence is not saved: a host that
+starts again counts its members as just seen, and the nodes there join on
+its first polls. When the host's own connection drops, every node leaves
+and joins again once it is back (a second or so, "When the connection is
+lost" of asterism).
+
+Whether the host sees the others come and go is the router's business:
+
+| Where | The host sees the players' nodes | So |
+|---|---|---|
+| a home network (a plain zenohd, no access control) | yes | away at once (measured 10-20 ms after the node left) |
+| a room (console 0.3.0, seats) | yes: a room's host reads the whole room, the seats' liveliness tokens included | away at once (measured 6-7 ms) |
+| the permanent tables (console roles `games-host` and `games`) | no: the role `games-host` may declare a liveliness watch (`Watch asterism/**`), but the router sends it only the tokens on its own keys | the fallback: away after `away_seconds` without a call (measured 13.6 s with the default 10 s) |
+
+For the permanent tables to see the players too, the host's role needs the
+players' application tokens to read: `Read asterism/*/game` on `games-host`
+(the app `game` the table's screens run as; tried on the console's
+rehearsal, away 13 ms). That is a change of the console's roles, not of the
+host: nothing here changes with it.
+
+The screens follow the host the same way: the tables' apps (fmruby-core
+`flash/app/game/`) and `bin/othello-tty` take a host's tables off their
+list when its node leaves and look for them again when a node joins
+(Asterism's `each` reads the liveliness they already follow: no message is
+sent); at a table, a host that leaves shows the connection lost, the
+screen stops asking its view (one every 30 s, should the word not come)
+and asks again as soon as the host is back.
+
 ## Writing a game
 
 A game is two classes on the framework: the table (`AsterismGames::Game`:
@@ -375,7 +426,7 @@ What the framework gives a game:
 |---|---|
 | `Remote.exposes` | the exposed methods and their numbers of arguments (-1: any), checked by Asterism before a call; the host exposes them with `caller: :from`, so every method takes `from:` (Asterism fills it in from the call's key and refuses a call that brings it). `join(name)`, `mine`, `leave(token)` are the base's |
 | `Game#join` / `mine` / `leave` | a member per node with a token (`SecureRandom`, 32 hex digits); the same node gets its token back. In a room the caller is checked ("Who joins"). A game adds its own through `member_reply`, `join_refusal`, `renamed`, `forget` (free what the member held) and `keep_member?` |
-| `node_of(token)`, `touch`, `member_away?` (`away_ms`), `expire_members` | the token's member, the sign that a member is there, members gone for long |
+| `node_of(token)`, `touch`, `member_away?`, `node_left` / `node_joined`, `expire_members` | the token's member; who is there ("Who is there": the host calls `node_left` / `node_joined` from Asterism's `on_leave` / `on_join`, a member's call is `touch`, and `away_ms` without one is away too); members gone for long (six times `away_ms` from their last call or from when their node left) |
 | `tick(now)` | the host calls it on its loop (every 10 ms) and the game moves on by the time given: deadlines, CPU turns. Never waits |
 | `public_view` / `spectator_view` / `state_view` / a member's view | what everybody, a spectator, the state key and one member see. What only one member may see (a hand) goes in the answer of that member's call, never on the state key (anyone in the key space may subscribe to it) |
 | `changed`, `dirty?`, `unsaved?` | a change to save and put; a change only one member's view shows (`@unsaved = true`) is saved, not put |
@@ -599,17 +650,19 @@ ms left (the move's own time is what comes before it).
 
 ### Players that drop out
 
-A member that has not called the table for `away_seconds` (its screen asks
-its view every 3 s) is away: the public view marks its seat (`"aw"`) and the
-member list. While it is away its seat is played for after a short wait:
+A member whose node leaves the network is away at once ("Who is there"),
+and so is one that has not called the table for `away_seconds` (its screen
+asks its view every 3 s), the way to tell where the host does not see the
+nodes come and go: the public view marks its seat (`"aw"`) and the member
+list. While it is away its seat is played for after a short wait:
 `away_wait_seconds` from the start of its turn or of the calls (the drawn
 tile is discarded, a call is passed), instead of `turn_seconds` and
 `call_seconds`, so the others are not held up a whole turn every time. The
 other players keep their own times (in the calls, the away seat passes
 early and the rest go on waiting). A wait that started before the member
 went away ends as soon as it is seen away, if its short wait is over by
-then. Once it calls again it has the full times again; its screen asks its
-view and goes on. A seat is never handed to a CPU because its player is
+then. Once its node is back or it calls again it has the full times again;
+its screen asks its view and goes on. A seat is never handed to a CPU because its player is
 away; a member that leaves (`leave`) during a game is.
 
 ### Views
@@ -791,7 +844,7 @@ players about 330 B.
 |---|---|---|---|
 | `turn_seconds` | `OTHELLO_TURN_SECONDS` | 0 | a member's time for a move (0: none); over 0, when it runs out the CPU plays that move |
 | `cpu_ms` | `OTHELLO_CPU_MS` | 700 | the CPU's pause before it plays |
-| `away_seconds` | `OTHELLO_AWAY_SECONDS` | 10 | a member that has not called the table this long is shown as away |
+| `away_seconds` | `OTHELLO_AWAY_SECONDS` | 10 | as for mahjong: away at once when its node leaves, or after this long without a call ("Who is there") |
 | `spectators` | `OTHELLO_SPECTATORS` | 14 | members without a seat at most (in the lobby the free seats count besides) |
 
 The CPU is small: the square with the best weight (corners first, the
@@ -803,7 +856,11 @@ CRuby and the asterism gem only (no Family mruby). It joins the table,
 draws the board as text at every change (it takes the state the host puts
 and asks its view; X black, O white, `*` the squares it may play) and reads
 commands: `sit`, `stand`, `cpu`, `start`, a square (`d3`), `resign`,
-`auto` (play the first legal square for you), `quit`.
+`auto` (play the first legal square for you), `quit`. When the table's
+host leaves the network (Asterism's `on_leave`) it says the connection is
+lost and stops asking until the host is back (`on_join`; every 30 s
+meanwhile, should the word not come). Without `--table` it looks for a
+table when a node joins.
 
 ```
 # a home network (a plain zenohd)
@@ -1007,6 +1064,13 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   mahjong screen gets mahjong tables only and one opening the othello
   screen othello tables only, the given tables split by game, table names
   in the environment finding their game).
+- `test_presence.rb`: who is there ("Who is there"): a member's node that
+  leaves is away at once and back at once, a call or a join brings it back,
+  without the network's word a member is away after `away_ms` as before,
+  the time to forget counts from when the node left (a seated member
+  stays), the saved form keeps no presence, a room's seat gone for
+  `seat_reuse_ms` is a new page when its node comes back, an away mahjong
+  seat, and the host telling every table.
 - `test_network.rb`: the same refusals through a router, with the host in a
   child process, and the caller from Asterism (a call that brings `from:`
   is refused, the numbers of arguments are counted) (skipped without
@@ -1020,7 +1084,8 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   state, the status file, a room and the permanent tables of that game
   (who joins, `GET /status`, the room's tables removed when it closes) and,
   with `ASTERISM_TEST_ROUTER`, the host over a router (calls, the state
-  put, the profile). Also the mahjong game's registration and its exposed
+  put, the profile, and another node killed: away at once, back when its
+  node is there again). Also the mahjong game's registration and its exposed
   methods as before.
 
 `bin/mahjong-bots` fills a table with players over the network (to try a

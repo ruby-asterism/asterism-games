@@ -39,7 +39,13 @@ module AsterismGames
   # methods its Remote calls.
   #
   # Members: join gives a node a token; the token is what every later call
-  # of that member brings. In a room (room_id set) a joining node is checked
+  # of that member brings. Who is there (README "Who is there"): the host
+  # tells the table every node that joins the network (node_joined, from
+  # Asterism's on_join) and leaves it (node_left, on_leave). A member whose
+  # node the host has seen join is there until its node leaves: away at
+  # once, back at once. A member whose node the host has not seen (a
+  # router that does not show the host the others' presence) is away when
+  # it has not called for away_ms (its calls, seen), as before. In a room (room_id set) a joining node is checked
   # (README "Who joins"): the seats' node IDs and the host's own names are
   # bound to their callers by the router and taken as they are; nobody
   # else joins.
@@ -49,7 +55,7 @@ module AsterismGames
     NAME_MAX = 32
 
     DEFAULTS = {
-      "away_ms" => 10_000,      # a member not heard from this long is away
+      "away_ms" => 10_000,      # a member not heard from this long is away (also away at once when its node leaves)
       "room_id" => nil,         # in a room: its ID, against which joins are checked (README "Who joins")
       "trusted_nodes" => [],    # in a room: node IDs the router binds to their callers (the seats)
       "trusted_prefix" => nil,  # in a room: the host's own names (it and its bots), bound likewise
@@ -106,6 +112,7 @@ module AsterismGames
       @now = 0
       @dirty = true
       @unsaved = false
+      @live = {}  # node => true: seen on the network (node_joined), not since left
       reset_members
     end
 
@@ -154,10 +161,14 @@ module AsterismGames
     end
 
     # Times read back are relative to when they were saved: a host started
-    # again calls this with its own clock. Members count as just seen.
+    # again calls this with its own clock. Members count as just seen (the
+    # nodes that are not there leave again once the host is connected).
     def resume_clock(now, data = saved)
       return unless data
-      @members.each_value { |m| m["seen"] = now }
+      @members.each_value do |m|
+        m["seen"] = now
+        m.delete("left")
+      end
       @now = now
     end
 
@@ -217,6 +228,7 @@ module AsterismGames
       end
       m["name"] = clean_name(name, node)
       m["seen"] = now
+      m.delete("left")
       renamed(node, m["name"])
       changed
       member_reply(node)
@@ -269,7 +281,46 @@ module AsterismGames
     # A call from a node: it is there.
     def touch(node, now)
       m = @members[node.to_s]
-      m["seen"] = now if m
+      return unless m
+      m["seen"] = now
+      changed if m.delete("left")
+    end
+
+    # The member's node left the network (the host's on_leave): away now,
+    # and the time it has been gone counts from now. true when it changed.
+    def node_left(node, now)
+      node = node.to_s
+      @live.delete(node)
+      m = @members[node]
+      return false unless m && !m["left"]
+      m["left"] = now
+      @log&.call("#{self.class.game_name}: #{@name}: #{node} left the network: away")
+      changed
+      true
+    end
+
+    # A node is on the network (on_join): its member, if any, is there
+    # until the node leaves. A seat's node gone for seat_reuse_ms is
+    # another page now and the old member leaves (reused_seat). true when
+    # a member changed.
+    def node_joined(node, now)
+      node = node.to_s
+      was_away = @members[node] && member_away?(node)
+      @live[node] = true
+      return false unless @members[node]
+      m = reused_seat(node, now)
+      return true unless m
+      m.delete("left")
+      m["seen"] = now
+      return false unless was_away
+      @log&.call("#{self.class.game_name}: #{@name}: #{node} is back")
+      changed
+      true
+    end
+
+    # When the member was last there: its last call, or when its node left.
+    def last_there(m)
+      [m["seen"].to_i, m["left"].to_i].max
     end
 
     def node_of(token)
@@ -278,18 +329,23 @@ module AsterismGames
       nil
     end
 
+    # Away: its node left the network; or, for a node the host has not
+    # seen join (the fallback), no call for away_ms.
     def member_away?(node)
       m = @members[node]
-      m.nil? || m["seen"].nil? || @now - m["seen"] > @opts["away_ms"]
+      return true if m.nil? || m["left"]
+      return false if @live[node]
+      m["seen"].nil? || @now - m["seen"] > @opts["away_ms"]
     end
 
-    # Members gone for long (six times away_ms) are forgotten, unless the
-    # game keeps them (keep_member?). At most once a second.
+    # Members gone for long (six times away_ms, from their last call or
+    # from when their node left) are forgotten, unless the game keeps them
+    # (keep_member?). At most once a second.
     def expire_members(now)
       return if @members.empty? || now - @expire_at.to_i < 1000
       @expire_at = now
       gone = @members.keys.select do |node|
-        !keep_member?(node) && member_away?(node) && now - @members[node]["seen"].to_i > @opts["away_ms"] * 6
+        !keep_member?(node) && member_away?(node) && now - last_there(@members[node]) > @opts["away_ms"] * 6
       end
       gone.each { |node| forget(node) }
       changed unless gone.empty?
@@ -301,7 +357,7 @@ module AsterismGames
     end
 
     def saved_members
-      @members.to_h { |n, m| [n, m.reject { |k, _| k == "seen" }] }
+      @members.to_h { |n, m| [n, m.reject { |k, _| k == "seen" || k == "left" }] }
     end
 
     def clean_name(name, node)
@@ -332,15 +388,15 @@ module AsterismGames
       !prefix.empty? && node.start_with?(prefix)
     end
 
-    # The member of a node, or nil; a seat's node ID that has not called
-    # for seat_reuse_ms is another page now (the door gave the seat away
-    # after as long without a connection): the old member leaves and nil
-    # is returned.
+    # The member of a node, or nil; a seat's node ID that has not been
+    # there for seat_reuse_ms (no call, its node gone) is another page now
+    # (the door gave the seat away after as long without a connection):
+    # the old member leaves and nil is returned.
     def reused_seat(node, now)
       m = @members[node]
       return m unless m && trusted?(node) && Array(@opts["trusted_nodes"]).include?(node)
-      return m unless m["seen"] && now - m["seen"] > @opts["seat_reuse_ms"].to_i
-      @log&.call("#{self.class.game_name}: #{@name}: #{node} was silent for #{(now - m['seen']) / 60_000} min: " \
+      return m unless m["seen"] && now - last_there(m) > @opts["seat_reuse_ms"].to_i
+      @log&.call("#{self.class.game_name}: #{@name}: #{node} was silent for #{(now - last_there(m)) / 60_000} min: " \
                  "a new page on that seat")
       leave(m["token"])
       nil

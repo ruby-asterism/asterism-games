@@ -130,7 +130,9 @@ class TestTally < Minitest::Test
     router = ENV["ASTERISM_TEST_ROUTER"]
     skip "set ASTERISM_TEST_ROUTER to run against a router" unless router
     node = "tally-test-#{Process.pid}"
+    status = File.join(@dir, "host.json")
     c = config({ "router" => router, "node" => node, "tables" => [{ "name" => "tally1", "step_seconds" => 0.2 }] })
+          .merge("status_file" => status)
     pid = fork do
       h = AsterismGames::Host.new(c, log: ->(_m) {})
       trap("TERM") { h.stop! }
@@ -163,12 +165,56 @@ class TestTally < Minitest::Test
       assert_equal 3, s && s["n"], "the state put on the table's key"
       assert_equal "asterism-games", net.profile_of(node, icon: false)&.fetch("name")
       assert t.leave(tok)
+      # Who is there (README "Who is there"): another node joins and is
+      # killed; the host hears its node leave and shows it away at once
+      # (away_ms is 10 s). The node comes back without calling: back.
+      other = "tally-other-#{Process.pid}"
+      away = -> { JSON.parse(File.read(status)).dig("tables", "tally1", "away") rescue nil }
+      kid = other_node(router, other, node, join: true)
+      wait_for(10) { away.call == 0 && JSON.parse(File.read(status)).dig("tables", "tally1", "members") == 1 }
+      t0 = ms
+      Process.kill("KILL", kid)
+      Process.wait(kid)
+      kid = nil
+      assert wait_for(8) { away.call == 1 }, "away"
+      assert_operator ms - t0, :<, 4000, "away well before away_ms (the status file is written every 2 s)"
+      kid = other_node(router, other, node, join: false)
+      assert wait_for(8) { away.call == 0 }, "back when its node is there again, before any call"
+    ensure
+      if kid
+        Process.kill("KILL", kid)
+        Process.wait(kid)
+      end
     end
   ensure
     if pid
       Process.kill("TERM", pid)
       Process.wait(pid)
     end
+  end
+
+  # Another node in a process of its own (spawned, not forked: this
+  # process has used zenoh-c): joins the tally table (join: true) or only
+  # connects, then waits to be killed.
+  def other_node(router, other, host, join:)
+    code = <<~RUBY
+      require "asterism"
+      Asterism.connect(#{router.inspect}, node: #{other.inspect}, app: "game") do |net|
+        net.start
+        net[#{"#{host}/games/tally1".inspect}, timeout: 3.0].join("Other") if #{join}
+        sleep
+      end
+    RUBY
+    Process.spawn(RbConfig.ruby, "-e", code, out: File::NULL, err: File::NULL)
+  end
+
+  def wait_for(seconds)
+    deadline = ms + seconds * 1000
+    until ms > deadline
+      return true if yield
+      sleep 0.05
+    end
+    false
   end
 
   # ------------------------------------------------------------ rooms

@@ -17,7 +17,11 @@
 # Commands (one per line): d3 (play there), sit [0|1], stand, cpu (fill the
 # empty seat; the owner), start (the owner), resign, auto (let the client
 # play your moves: the first legal square; again to stop), view, help, quit.
-# Without --table it takes the first othello table it finds.
+# Without --table it takes the first othello table it finds (looking again
+# whenever a node joins the network, for 10 s). When the table's host
+# leaves the network (Asterism's on_leave) it says the connection is lost
+# and stops asking; when the host is back (on_join) it asks again at once
+# (and every 30 s meanwhile, should the word not come).
 require "asterism"
 require "socket"
 
@@ -45,6 +49,8 @@ end
 class OthelloTty
   HOST_APP = "games"
   VIEW_EVERY_S = 2.0
+  # While the host is gone: a view now and then, should on_join not come.
+  HOST_GONE_EVERY_S = 30.0
 
   def initialize(net, path, name, out: $stdout)
     @net = net
@@ -59,6 +65,24 @@ class OthelloTty
     @auto = false
     @wake = Queue.new
     @played = false
+    @host = path.split("/").first
+    @host_gone = false
+  end
+
+  # Asterism's on_leave / on_join (on the receiving thread: nothing here
+  # waits; the ticker asks the view).
+  def node_left(node)
+    return unless node == @host
+    @host_gone = true
+    @wake << :gone # the ticker waits again, now the long way
+    say("the connection is lost: the host left the network (waiting for it)")
+  end
+
+  def node_joined(node)
+    return unless node == @host && @host_gone
+    @host_gone = false
+    say("the host is back")
+    @wake << true
   end
 
   # A game was played and is over now (--until-over).
@@ -79,11 +103,12 @@ class OthelloTty
     end
     refresh
     # And a view every VIEW_EVERY_S anyway: the host sees that this member
-    # is still here.
+    # is still here (where it cannot see the nodes come and go).
     @ticker = Thread.new do
       loop do
-        @wake.pop(timeout: VIEW_EVERY_S)
+        woke = @wake.pop(timeout: @host_gone ? HOST_GONE_EVERY_S : VIEW_EVERY_S)
         @wake.clear
+        next if woke == :gone
         refresh
       rescue Asterism::Error => e
         say("no answer from the table (#{e.class})")
@@ -101,6 +126,12 @@ class OthelloTty
   # Asks the member's view and draws it.
   def refresh
     v = @table.view(@token)
+    if v.is_a?(Hash) && v["error"] == "token"
+      # The host forgot this member (a new state): join again.
+      r = @table.join(@name)
+      @token = r["token"] if r.is_a?(Hash) && r["token"]
+      v = @table.view(@token)
+    end
     @lock.synchronize do
       @view = v
       @played = true if v.is_a?(Hash) && v["st"] == "play"
@@ -234,12 +265,21 @@ locator = opts[:credentials] && !ARGV.include?("--router") ? nil : opts[:router]
 
 Asterism.connect(locator, **connect) do |net|
   net.on_error { |e, where| warn "othello-tty: #{where}: #{e.class}: #{e.message}" }
+  tty = nil
+  joined = Queue.new
+  net.on_join do |n|
+    joined << n
+    tty&.node_joined(n)
+  end
+  net.on_leave { |n| tty&.node_left(n) }
   net.start
   path = opts[:table]
-  10.times do
-    break if path
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
+  until path || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
     path = net.each("*/#{OthelloTty::HOST_APP}/*").map(&:asterism_path).sort.find { |p| p.split("/")[2].start_with?("othello") }
-    sleep 1 unless path
+    # A node that joins may be a host: look again then (its objects follow
+    # its application within moments, so also a little later).
+    joined.pop(timeout: 0.5) unless path
   end
   abort "othello-tty: no othello table found (--table <host>/games/<table>)" unless path
   tty = OthelloTty.new(net, path, opts[:name] || net.node_id)

@@ -23,6 +23,13 @@ module AsterismGames
   # loop (step: timeouts, CPU turns, the puts), which takes Asterism::LOCK,
   # the lock every tick of the receiving thread holds, so a call and a step
   # never meet inside a game.
+  #
+  # Who is there (README "Who is there"): Asterism tells the host when a
+  # node leaves the network and comes back (net.on_leave / on_join, on the
+  # receiving thread, inside that lock); the host passes it to every table,
+  # where a member on that node is away at once and back at once. A router
+  # whose rules do not show the host the players' presence tells it
+  # nothing, and the tables fall back on the members' calls (away_ms).
   class Host
     RECONNECT_S = 3
     PUT_EVERY_MS = 5000
@@ -113,6 +120,8 @@ module AsterismGames
     def up(net)
       net.profile(name: profile_name) if profile_name
       net.on_error { |e, where| @log.call("games: #{where}: #{e.class}: #{e.message}") }
+      net.on_leave { |n| node_left(n) }
+      net.on_join { |n| node_joined(n) }
       @games.each_key do |name|
         net.expose(name, @remotes[name], methods: @methods[name], caller: :from)
       end
@@ -136,6 +145,17 @@ module AsterismGames
         ::Asterism::LOCK.synchronize { step }
         sleep LOOP_S
       end
+    end
+
+    # A node left the network: its members are away at every table.
+    # (Called on the receiving thread, which holds Asterism::LOCK.)
+    def node_left(n, now = @clock.call)
+      @stats["left"] += 1 if @games.values.map { |g| g.node_left(n, now) }.any?
+    end
+
+    # A node is on the network again: its members are back.
+    def node_joined(n, now = @clock.call)
+      @stats["back"] += 1 if @games.values.map { |g| g.node_joined(n, now) }.any?
     end
 
     def down
