@@ -14,7 +14,7 @@ class TestFramework < Minitest::Test
   # The framework's files: what a gem of it would hold (GS7).
   FRAMEWORK = %w[asterism_games.rb asterism_games/version.rb asterism_games/game.rb asterism_games/remote.rb
                  asterism_games/store.rb asterism_games/config.rb asterism_games/host.rb
-                 asterism_games/rooms.rb].freeze
+                 asterism_games/rooms.rb asterism_games/ai.rb asterism_games/ai_hub.rb].freeze
 
   def ruby(*args)
     Open3.capture2e({ "RUBYOPT" => "-rbundler/setup" }, RbConfig.ruby, "-I#{LIB}", *args,
@@ -68,8 +68,16 @@ class TestFramework < Minitest::Test
     assert_equal ["/app/game/mahjong/mahjong.app.rb"], t.screens
     # The exposed methods and their numbers of arguments, in the order of
     # before (the meta a console lists).
-    assert_equal({ join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, rule: 3, view: 2, act: 4, table: 0, leave: 1 },
+    assert_equal({ join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, rule: 3, view: 2, act: 4, table: 0,
+                   describe: 0, look: 1, choose: 3, points: 1, leave: 1 },
                  t.remote.exposes)
+    # Every method is described (names as many as its arguments).
+    t.remote.exposes.each do |m, n|
+      d = t.remote.docs[m]
+      assert d, "#{m} has no doc"
+      assert_equal n, d[0].size, "#{m}: argument names"
+      assert_operator d[1].bytesize, :<=, 2048
+    end
     assert_equal t.remote.exposes, MahjongTestHelper::M::Remote::METHODS
   end
 end

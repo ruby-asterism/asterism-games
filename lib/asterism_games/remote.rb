@@ -27,9 +27,41 @@ module AsterismGames
         end
         @exposes || (superclass.respond_to?(:exposes) ? superclass.exposes : {})
       end
+
+      # What the methods take and do, for the meta (docs/protocol.md 5 of
+      # asterism: asterism mcp and the command line show them): {name =>
+      # [argument names, text]}. Inherited like exposes.
+      def docs(table = nil)
+        if table
+          inherited = superclass.respond_to?(:docs) ? superclass.docs : {}
+          @docs = inherited.merge(table.transform_keys(&:to_sym)).freeze
+        end
+        @docs || (superclass.respond_to?(:docs) ? superclass.docs : {})
+      end
+
+      # The object's own text in the meta.
+      def object_doc(text = nil)
+        @object_doc = text if text
+        @object_doc || (superclass.respond_to?(:object_doc) ? superclass.object_doc : nil)
+      end
+
+      # The methods: as Asterism.expose takes them: with the names and
+      # texts when the asterism gem knows them (with_docs), else the
+      # numbers (asterism 0.7.1).
+      def expose_methods(with_docs)
+        exposes.to_h do |m, n|
+          d = docs[m]
+          next [m, n] unless with_docs && d
+          [m, { args: d[0], doc: d[1], arity: n }]
+        end
+      end
     end
 
     exposes join: 1, mine: 0, leave: 1
+    docs join: [%w[name], "Joins the table as name (or gets this node's membership back). Returns {\"token\", ...}: " \
+                          "every later call brings the token. {\"error\" => why} when the table is full."],
+         mine: [[], "This node's membership ({\"token\", ...}), or nil when it has not joined."],
+         leave: [%w[token], "Leaves the table (a seat during a game goes to a CPU). true / false."]
 
     attr_reader :game
 

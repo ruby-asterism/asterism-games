@@ -119,6 +119,8 @@ mahjong table):
 | `away_wait_seconds` | `MAHJONG_AWAY_WAIT_SECONDS` | 2 | an away member's time to discard or to call, instead of `turn_seconds` and the bank / `call_seconds` |
 | `cpu_ms` | `MAHJONG_CPU_MS` | 700 | a CPU's pause before it acts |
 | `cpu_level` | `MAHJONG_CPU_LEVEL` | `normal` | `easy` / `normal` / `hard` (riichi_engine's CPU levels) |
+| `ai_turn_seconds` | `MAHJONG_AI_TURN_SECONDS` | 30 | an AI player's time for a move; then the CPU plays it ("AI players") |
+| `ai_call_seconds` | `MAHJONG_AI_CALL_SECONDS` | 15 | an AI player's time to answer a discard it may call |
 | `humans` | | 4 | seats members may take (0: four CPUs that play at once, for tests) |
 | `spectators` | `MAHJONG_SPECTATORS` | 12 | members without a seat at most ("Spectators") |
 | `spectator_delay_minutes` | `MAHJONG_SPECTATOR_DELAY_MINUTES` | 0 | spectators see the game (and the four hands) this much later ("Spectators"); `spectator_delay_seconds` / `MAHJONG_SPECTATOR_DELAY_SECONDS` as before, in seconds |
@@ -310,10 +312,16 @@ RSS (about 120 MB PSS).
 A member is away when it is gone: its seat shows it (`"aw"`, the member
 list's flag), a mahjong seat is played for after a short wait, the status
 counts it. The host learns it from Asterism, not from the calls (games
-0.8.0): the Net's `on_leave` tells it that a node left the network (its
-last application or object is gone: a closed browser tab, a board's app
-that closed its connection, a process killed, a line that dropped), and
-`on_join` that a node is on the network again. The host passes both to
+0.8.0), and by the player's table app (games 0.10.0): a table app runs as
+the application **`game`** of its node (the boards' and the browsers'
+table apps, `bin/othello-tty`, `bin/mahjong-bots` do), and the host
+follows the liveliness token `asterism/<node>/game`. The Net's
+`on_app_leave` tells it that the table app left the network (a closed
+browser tab, a board's app that closed, a process killed, a line that
+dropped) even when the node stays with other applications (a board that
+runs another Asterism app next to the table), and `on_app_join` that it
+is there again. With asterism 0.7.1 (no `on_app_*`) the host watches the
+tokens `asterism/*/game` itself on the session. The host passes both to
 every table (`Game#node_left` / `node_joined`):
 
 - a member whose node leaves is away at once, and back at once when its
@@ -321,9 +329,11 @@ every table (`Game#node_left` / `node_joined`):
 - a member whose node the host has seen join is there for as long as the
   node is, calling or not (a screen on the list of tables, a terminal
   watching);
-- a member whose node the host has never seen (see below) is away when it
-  has not called the table for `away_seconds`, as before 0.8.0: the screens
-  still ask their view every few seconds for that.
+- a member whose node the host has never seen (see below), or that does
+  not run as the application `game` (an `asterism mcp` client started
+  without `--app game`, a script with an app name of its own), is away when
+  it has not called the table for `away_seconds`, as before 0.8.0: the
+  screens still ask their view every few seconds for that.
 
 Members gone for long are forgotten six times `away_seconds` after their
 last call or after their node left, whichever is later (seated members are
@@ -338,7 +348,7 @@ Whether the host sees the others come and go is the router's business:
 
 | Where | The host sees the players' nodes | So |
 |---|---|---|
-| a home network (a plain zenohd, no access control) | yes | away at once (measured 10-20 ms after the node left) |
+| a home network (a plain zenohd, no access control) | yes | away at once (measured 10-20 ms after the node left; 6-14 ms after the table app closed while its node kept another application, games 0.10.0) |
 | a room (console 0.3.0, seats) | yes: a room's host reads the whole room, the seats' liveliness tokens included | away at once (measured 6-7 ms) |
 | the permanent tables (console roles `games-host` and `games`) | yes, when the role `games-host` has `Read asterism/*/game` (the console's docs/rooms.md): the router sends the host the players' table apps' liveliness tokens | away at once (measured 13 ms on the console's rehearsal) |
 
@@ -366,9 +376,14 @@ that names a member (no member names, node IDs or tokens):
 
 ```
 asterism/games/games/@status
-{"mahjong1" => {"st" => "play", "members" => 4, "humans" => 1, "cpus" => 3, "away" => 0},
- "othello1" => {"st" => "wait", "members" => 0, "humans" => 0, "cpus" => 0, "away" => 0}}
+{"mahjong1" => {"st" => "play", "members" => 4, "humans" => 1, "cpus" => 3, "ais" => 1, "away" => 0},
+ "othello1" => {"st" => "wait", "members" => 0, "humans" => 0, "cpus" => 0, "away" => 0},
+ "ai_today" => {"calls" => 84, "usd" => 0.02, "limit_usd" => 3.0}}
 ```
+
+`ais` counts the AI players' seats (they are counted in `cpus` too), and
+`ai_today` is the AI players' totals of the day (README "AI players"),
+only on a host that can seat them.
 
 - **When.** After a table changes (a join, a seat taken or left, a move)
   and once a second (an away seat changes the counts with time alone); a
@@ -493,13 +508,14 @@ connects again after 3 s; while a client of a router only reconnects
 | `mine` | none | the same for a node that joined, or nil (nothing is created) |
 | `sit` | token, seat | `"ok"` or why not (`"taken"`, `"not waiting"`, ...); seat -1: the first free one. In the lobby only; a seated member moves |
 | `stand` | token | `"ok"` or why not (lobby only) |
-| `cpu` | token, seat, on | the owner: a CPU into an empty seat (on) or out of it; seat -1 with on fills every empty seat |
+| `cpu` | token, seat, on | the owner: a CPU into an empty seat (on) or out of it (a CPU or an AI player); seat -1 with on fills every empty seat; on as a name the lobby offers (`"claude"`, `"jev"`) puts that AI player in ("AI players"), `"no ai"` when it is not offered |
 | `start` | token | the owner, once the four seats are taken and one is a member: the seats are drawn (who deals first) and the game starts |
 | `rule` | token, item, value | the owner, in the lobby: a local rule ("Local rules"); `"ok"` or why not (`"not owner"`, `"not waiting"`, `"no rule"`, `"value"`, `"no change"`) |
 | `view` | token, assist | the member's view (below), or `{"error" => "token"}`; assist: the help its screen shows (Assist, 0-3) |
 | `act` | token, sv, type, tiles | `"ok"`, or why not: `"token"`, `"not seated"`, `"stale"` (sv is not the current one), `"not offered"`, `"not playing"` |
 | `table` | none | the public view (no hand), as a spectator sees it |
 | `leave` | token | `true` / `false`; in the lobby the seat empties, during a game it goes to a CPU |
+| `describe`, `look`, `choose`, `points` | | for programs ("Playing from a program") |
 
 - People join a table and wait in its lobby (`"st" => "wait"`): a member
   sits in a seat or watches. The first member who sat is the owner (when the
@@ -710,7 +726,8 @@ A Hash (MessagePack); tiles are one byte each in binary strings (bin).
 | `v` / `sv` | the view's version (any change; in a seat's own view one more after its answer to open calls, "Calls on a discard") / the state version (actions) |
 | `t`, `st` | the table's name; `wait` (the lobby), `play`, `result` (a round's result), `over` |
 | `nm`, `hu` | the four names (`""` for an empty seat); the human seats as bits |
-| `sk` | the four seats: 0 empty, 1 a member, 2 a CPU |
+| `sk` | the four seats: 0 empty, 1 a member, 2 a CPU (an AI player too) |
+| `ai`, `ak` | when an AI player sits: each seat's kind (`"claude"`, `"jev"`, `""` for the others); in the lobby, the AI players the owner may seat ("AI players") |
 | `aw` | the seats whose member is away, as bits |
 | `ow` | the owner's seat (-1: nobody seated) |
 | `mb` | the members in the order they joined: `[name, seat (-1 none), flags (1 away, 2 owner)]` |
@@ -824,6 +841,105 @@ later. "Not sure" marks what could not be confirmed.
 | Riichi on a tile that is ronned | not made: the 1000 points come back, no stick (a pon or kan of the tile lets it stand) | `riichi_void_on_ron` (false: the stick stays, the winner takes it) | key only | true |
 | Same-turn furiten | after passing a winning tile (robbing a kan too), until one's next draw | on a pass of a ron offered, and on a winning tile with no ron offered (no yaku on it, or furiten already; `fix/dojun-furiten-no-yaku`) | no | as the engine |
 | Formal tenpai (karaten) | yes, except a single wait on a tile the hand holds four of | the wait judge leaves out only a tile the hand holds four of (a single wait on the fourth tile of a pon is tenpai; `test/karaten-tenpai`) | no | as the engine |
+
+## Playing from a program
+
+The mahjong table also speaks to programs (games 0.10.0): an AI assistant
+through `asterism mcp`, a script, the host's own AI players. The screens'
+view (short keys, tiles as bytes) stays as it is; next to it:
+
+| Method | Arguments | Returns |
+|---|---|---|
+| `describe` | none | a text: how to play from a program, what `look` returns, the tiles' names (read it first) |
+| `look` | token | the table as the member's seat sees it, in words: `status`, `you`, `seats` (name, kind human / cpu / ai / empty, wind, score, riichi, `river`, `riichi_index`, `called_indexes`, `melds`, `hand_count`), `round` (wind, number, honba, riichi sticks, dealer, wall left, turn, phase), `dora_indicators`, `last_discard`, `hand`, `drawn`, `moves`, `help`, `deadline_ms`, `result`, `final`, `rules`; in the lobby `ai_players` |
+| `choose` | token, sv, n | plays the move numbered `n` of the `moves` of the look whose `sv` it gives: `"ok"`, `"stale"` (look again), `"no such move"`, or why not as `act` |
+| `points` | token | what the hand would score: `now` (the win offered now) and `waits` (for each wait of a tenpai hand, after each discard that leaves it tenpai on the seat's turn: `ron` and `tsumo` with han, fu, points, yaku, or `no_yaku`) |
+
+- `moves` lists what the seat may do now, numbered from 0: `{"n", "type",
+  "tile"/"tiles", "text"}` with the types `discard`, `riichi` (a discard
+  that declares it), `tsumo`, `ron`, `pon`, `chi`, `open_kan`,
+  `closed_kan`, `added_kan`, `pass`, `nine_kinds`, `next`. Empty when the
+  seat has nothing to decide: look again a moment later.
+- `help` is the help of assist level 3 in words: after each discard that
+  leaves the hand tenpai, its waits as `{tile => unseen}`; otherwise the
+  shanten after each discard and the tiles that bring it down.
+- A seat sees what its screen shows and no more: its own hand, the rivers,
+  the melds, the dora indicators, the scores. `points` leaves the ura dora
+  out (nobody sees them before a win) and does not check furiten.
+- Every method of both tables has its arguments' names and a text in the
+  meta (asterism's `docs/protocol.md` 5, with an asterism after 0.7.1):
+  `asterism objects` prints them and `asterism mcp` makes them the tools'
+  inputs and descriptions. With asterism 0.7.1 the meta has the numbers
+  only, as before.
+
+An AI assistant sits at a table like this:
+
+```
+claude mcp add asterism -- asterism mcp --router tcp/192.0.2.2:7447 --allow 'games/mahjong1.*' --app game
+```
+
+(`--app game`: the host then follows the assistant as it follows a table
+app, "Who is there"; without it the assistant is away after
+`away_seconds` without a call, and an away seat gets two seconds for a
+move.) The table's time for a move (`turn_seconds`, 5 + 20 s of bank) is
+short for an assistant that thinks: a table for them can take a longer
+one (`MAHJONG_TURN_SECONDS`, or the owner's local rule item 10).
+
+## AI players
+
+A table's owner puts an AI player into an empty seat as it puts a CPU
+there (games 0.10.0): `cpu(token, seat, "claude")` or `"jev"`, the names
+the lobby view offers (`"ak"`; `look`'s `ai_players`). The table apps
+show them as buttons (`+Claude`, `+Jev`) next to "CPU で埋める", and the
+seat by its name (`Claude`, `Jev`, numbered when there are several) with
+`[AI]`; the view's `"ai"` gives each seat's kind (`""` for the others),
+`"sk"` keeps 2 for them (an old screen shows a CPU named Claude).
+
+| Kind | What answers | Model (setting) |
+|---|---|---|
+| `claude` | Claude through the Messages API (the `anthropic` gem): the instructions (`describe`) as the cached system prompt, the seat's `look` as JSON, a structured answer `{"n": <move>}` | `claude-sonnet-5-5` (`ASTERISM_GAMES_CLAUDE_MODEL`), effort `low` (`ASTERISM_GAMES_CLAUDE_EFFORT`) |
+| `jev` | Jev (TypeSafe AI) on Cloudflare Workers AI: a decision model asked one choice question, the moves as its answers (keys `"0"`, `"1"`, ... with their texts), the `look` as its state | `typesafe/jev` (`ASTERISM_GAMES_JEV_MODEL`) |
+
+- **How a decision goes.** For each decision of an AI seat the table asks
+  the host (the seat's `look`, exactly what a human in that seat sees); the
+  host asks the API on a thread of its own, never holding the game's lock,
+  and hands the number back. A decision with one move is not asked.
+- **Time.** An AI seat has its own time: `ai_turn_seconds` (30 s) for a
+  move, `ai_call_seconds` (15 s) for its answer to a discard it may call
+  (`MAHJONG_AI_TURN_SECONDS`, `MAHJONG_AI_CALL_SECONDS`). The humans keep
+  theirs. When the answer does not come in time, or fails (an error, a
+  refusal, a move it was not offered), the CPU plays that move and the AI
+  goes on with the next.
+- **Money.** What each decision costs is counted from the tokens the API
+  reports, per day (the host's local date), in `state_dir/ai_usage.json`
+  (shared by the rooms' hosts and the permanent tables; counts and money
+  only). When today's total reaches `ASTERISM_GAMES_AI_DAILY_USD` (3.0) no
+  table offers an AI player any more and the seated ones become CPUs; a
+  game asks at most `ASTERISM_GAMES_AI_CALLS_PER_GAME` (400) decisions,
+  then its AI seats become CPUs. `bin/asterism-games status` prints the
+  day's decisions, tokens and money per kind; the host's `@status` has the
+  totals (`ai_today`).
+- **Prices.** USD per million tokens, settings with the published prices
+  as defaults (checked 2026-10-17): Claude Sonnet 5.5 `ASTERISM_GAMES_CLAUDE_USD_IN`
+  2.0, `_OUT` 10.0, `_CACHE_WRITE` 2.5 (5-minute cache), `_CACHE_READ` 0.10;
+  Jev `ASTERISM_GAMES_JEV_USD_IN` 0.042, `_OUT` 0. Change them when the
+  prices change.
+- **Keys.** `ANTHROPIC_API_KEY` for Claude, `CLOUDFLARE_ACCOUNT_ID` and
+  `CLOUDFLARE_API_TOKEN` for Jev, from the environment (on the VPS:
+  `deploy/vps/.env`, mode 600, docs/install.md). Without a kind's key the
+  kind is not offered at all (no button). The keys go into no log, no
+  state file, no status and no error text (an API's error is logged as its
+  HTTP status or class only).
+- `ASTERISM_GAMES_AI_THREADS` (4): decisions asked at once.
+  `ASTERISM_GAMES_AI_FAKE=1` seats fakes under both names, for a LAN
+  without keys and for tests (no API is called; `_FAKE_DELAY_MS`,
+  `_FAKE_SLOW_EVERY`, `_FAKE_FAIL_EVERY` make every n-th decision late or
+  failed).
+- **Writing another decider.** `decide(request, timeout:)` returning
+  `AI::Decision.new(n:, tokens:, ms:)` (lib/asterism_games/ai.rb); the
+  request is `{"game", "table", "seat", "instructions", "view"}`.
+- The othello table has no AI players yet (its `move` has names and texts
+  in the meta, so an assistant can play it through `asterism mcp`).
 
 ## The othello table
 

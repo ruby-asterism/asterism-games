@@ -24,6 +24,21 @@ module AsterismGames
     class Remote < AsterismGames::Remote
       METHODS = exposes(join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, move: 3, resign: 1, view: 1, table: 0,
                         leave: 1)
+      object_doc "An othello table (two seats). join, sit, then view / move in a loop."
+      docs sit: [%w[token seat], "Takes seat 0 or 1 (-1: the free one), in the lobby. \"ok\" or why not."],
+           stand: [%w[token], "Gives the seat up, in the lobby."],
+           cpu: [%w[token seat on], "The owner (the first to sit): on true puts a CPU in the empty seat (-1: every " \
+                                    "empty seat), false takes it out."],
+           start: [%w[token], "The owner starts the game once both seats are taken (the colours are drawn)."],
+           move: [%w[token n square], "Plays square (\"d3\": column a-h, row 1-8) as the seat to move. n is the " \
+                                      "view's \"n\" (moves so far), so a move meant for an older board is refused " \
+                                      "(\"stale\"). \"ok\" or why not."],
+           resign: [%w[token], "Resigns the game."],
+           view: [%w[token], "The table: st (wait, play, over), nm names, sk seats (0 empty, 1 member, 2 CPU), " \
+                             "bd the board (64 of . B W, a1 b1 .. h8), tn the seat to move (-1), n moves so far, " \
+                             "lg the legal squares of the side to move (\"d3c4\"), cnt [black, white], " \
+                             "res the result, me your seat. Seat 0 is black (B), seat 1 white (W): the seats are drawn at the start."],
+           table: [[], "The table's view without me (what the state key has)."]
 
       def sit(token, seat, from: nil)
         mark(token, from)

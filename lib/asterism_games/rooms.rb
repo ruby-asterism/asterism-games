@@ -261,8 +261,12 @@ module AsterismGames
         "credentials_router" => router, "namespace" => "room/#{slot}", "state_dir" => dir,
         "status_file" => File.join(dir, "host.json"), "tables" => tables, "room_id" => room_id,
         "trusted_nodes" => trust["seats"], "trusted_prefix" => trust["prefix"],
-        "seat_reuse_ms" => @rooms["seat_reuse_seconds"].to_i * 1000 }
+        "seat_reuse_ms" => @rooms["seat_reuse_seconds"].to_i * 1000, "ai_usage_file" => ai_usage_file }
     end
+
+    # What the AI players cost, shared by every host process (README "AI
+    # players").
+    def ai_usage_file = File.join(@config["state_dir"], "ai_usage.json")
 
     # The permanent tables' host (when configured and not running): its
     # certificate must be there (else it is looked for again on every pass,
@@ -281,7 +285,7 @@ module AsterismGames
       cfg = { "node" => @permanent["node"], "app" => @config["app"], "credentials" => tar,
               "credentials_router" => @permanent["router"], "state_dir" => permanent_dir,
               "status_file" => File.join(permanent_dir, "host.json"), "tables" => @permanent["tables"],
-              "profile_name" => PERMANENT_PROFILE_NAME }
+              "profile_name" => PERMANENT_PROFILE_NAME, "ai_usage_file" => ai_usage_file }
       @perm.merge!("since" => Time.now.utc.iso8601, "next_at" => nil)
       @perm["pid"] = @spawn.call("permanent", cfg)
       @log.call("games: permanent: host pid #{@perm['pid']} (#{@permanent['tables'].map { |t| t['name'] }.join(', ')})")
@@ -401,8 +405,18 @@ module AsterismGames
           "without_table" => (wanted.keys - rooms.keys).sort,
           "permanent" => perm,
           "busy" => rooms.values.any?(&seated) || (perm ? seated.call(perm) : false),
+          "ai" => ai_status,
           "rss_kb" => rss_kb([Process.pid, @perm["pid"]].compact + @children.values.map { |c| c["pid"] }.compact) }
       end
+    end
+
+    # Today's AI players' totals (README "AI players"), or nil when none
+    # has played today.
+    def ai_status
+      s = AI::Settings.new
+      b = AI::Budget.new(ai_usage_file, daily_usd: s.daily_usd, prices: ->(k) { s.prices(k) })
+      sum = b.summary(kinds: true)
+      sum["calls"].zero? && sum["kinds"].empty? ? nil : sum
     end
 
     # The permanent tables' host for the status (nil: not configured).

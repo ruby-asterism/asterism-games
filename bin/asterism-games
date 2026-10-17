@@ -35,6 +35,11 @@ if ARGV.first == "status"
   if (perm = s["permanent"])
     puts "  permanent tables#{" (#{perm['node']})" if perm['node']}: #{text.call(perm)}"
   end
+  if (ai = s["ai"])
+    kinds = (ai["kinds"] || {}).map { |k, e| "#{k} #{e['calls']} (#{e['in'].to_i + e['cache_read'].to_i + e['cache_write'].to_i} in, #{e['out']} out tokens, $#{format('%.4f', e['usd'].to_f)}#{", #{e['failed']} failed" if e['failed']})" }
+    puts "  AI players #{ai['date']}: #{ai['calls']} decisions, $#{format('%.4f', ai['usd'].to_f)} of $#{ai['limit_usd']}" \
+         "#{" (#{kinds.join('; ')})" unless kinds.empty?}"
+  end
   puts "  rooms waiting for a table: #{s['without_table'].join(', ')}" unless s["without_table"].to_a.empty?
   puts s["busy"] ? "busy: someone sits at a table" : "idle: nobody sits at a table"
   exit(s["busy"] ? 1 : 0) if idle

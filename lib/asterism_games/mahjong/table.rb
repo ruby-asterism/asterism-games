@@ -5,6 +5,8 @@ require "securerandom"
 require_relative "../game"
 require_relative "tiles"
 require_relative "engine"
+require_relative "readable"
+require_relative "../ai"
 
 module AsterismGames
   module Mahjong
@@ -31,6 +33,7 @@ module AsterismGames
     # turn_ms and call_ms, counted from the start of the wait), so the others
     # are not held up a full turn each time. Back, it has the full times again.
     class Table < Game
+      include Readable
       register "mahjong"
       tables "mahjong1", "mahjong2"
       screens "/app/game/mahjong/mahjong.app.rb"
@@ -46,6 +49,7 @@ module AsterismGames
                  "cpu_level" => ["cpu_level", nil], "humans" => ["humans", 1],
                  "spectators" => ["spectators", 1], "spectator_delay_seconds" => ["spectator_delay_ms", 1000],
                  "spectator_delay_minutes" => ["spectator_delay_ms", 60_000],
+                 "ai_turn_seconds" => ["ai_turn_ms", 1000], "ai_call_seconds" => ["ai_call_ms", 1000],
                  "rule" => ["rule", :hash]
                },
                env: {
@@ -60,7 +64,9 @@ module AsterismGames
                  "MAHJONG_CPU_LEVEL" => ["cpu_level", nil],
                  "MAHJONG_SPECTATORS" => ["spectators", 1],
                  "MAHJONG_SPECTATOR_DELAY_SECONDS" => ["spectator_delay_ms", 1000],
-                 "MAHJONG_SPECTATOR_DELAY_MINUTES" => ["spectator_delay_ms", 60_000]
+                 "MAHJONG_SPECTATOR_DELAY_MINUTES" => ["spectator_delay_ms", 60_000],
+                 "MAHJONG_AI_TURN_SECONDS" => ["ai_turn_ms", 1000],
+                 "MAHJONG_AI_CALL_SECONDS" => ["ai_call_ms", 1000]
                }
 
       SAVE_FORMAT = 2
@@ -80,6 +86,8 @@ module AsterismGames
         "humans" => 4,            # seats members may take (0: CPUs only, at once)
         "spectators" => 12,       # members without a seat at most (a room lets 16 pages in: 4 seats + 12)
         "spectator_delay_ms" => 0, # what spectators see is this old (README "Spectators")
+        "ai_turn_ms" => 30_000,   # an AI player's time for a move (README "AI players"); then the CPU plays it
+        "ai_call_ms" => 15_000,   # and for its answer to a discard it may call
         "rule" => {}              # riichi_engine rule keys over Engine::RULE_DEFAULTS
         # and Game::DEFAULTS: away_ms (10 s), the rooms' room_id, trusted_nodes,
         # trusted_prefix and seat_reuse_ms (README "Who joins")
@@ -131,7 +139,8 @@ module AsterismGames
       # view takes them from the past, the rest is now).
       GAME_KEYS = %w[st sv r sc ri dora kw fu hc ls ev dl res fin fr].freeze
 
-      attr_reader :sv, :status, :state, :stats, :rule
+      attr_reader :sv, :status, :state, :stats, :rule, :ai_kinds
+      attr_accessor :ai_calls_per_game
 
       def initialize(name, opts = {}, store: nil, log: nil)
         super
@@ -142,6 +151,8 @@ module AsterismGames
         @rule = effective_rule
         @ai = ai_for(cpu_level)
         @stats = Hash.new(0)
+        @ai_kinds = []       # the AI players the host can offer now (README "AI players")
+        @ai_calls_per_game = nil
         reset_all
         load_saved(0)
       end
@@ -250,12 +261,17 @@ module AsterismGames
       end
 
       # The owner puts a CPU in an empty seat (on) or takes one out (off);
-      # seat -1 with on fills every empty seat.
+      # seat -1 with on fills every empty seat. on may name an AI player
+      # the host offers ("claude", "jev": the lobby view's "ak", README "AI
+      # players"): that one goes in instead of a CPU.
       def cpu(token, seat, on)
         node = node_of(token)
         return "token" unless node
         return "not waiting" unless @status == "wait"
         return "not owner" unless @owner == node
+        ai = on.is_a?(String) && !%w[true 1].include?(on) ? on : nil
+        return "no ai" if ai && !@ai_kinds.include?(ai)
+        on = false if on.is_a?(String) && on == "false"
         seat = seat.to_i
         targets = seat.negative? ? (0..3).to_a : [seat]
         return "no seat" unless targets.all? { |i| (0..3).cover?(i) }
@@ -264,6 +280,7 @@ module AsterismGames
           s = @seats[i]
           if on && s.nil?
             @seats[i] = cpu_seat
+            @seats[i]["ai"] = ai if ai
             n += 1
           elsif !on && s && s["kind"] == "cpu"
             @seats[i] = nil
@@ -517,6 +534,151 @@ module AsterismGames
         Engine.offers(@state, seat, @rule)
       end
 
+      # ------------------------------------------------------------ AI players
+      #
+      # An AI seat (README "AI players") is a CPU seat with "ai" => its kind.
+      # For each of its decisions the table asks the host (ai_requests: the
+      # seat's look, the same as its screen would show) and waits for the
+      # answer (ai_answer) until ai_turn_ms (a move) or ai_call_ms (a call
+      # on a discard); a decision that does not come in time, or fails, is
+      # the CPU's. A decision with one move only is not asked. The host
+      # turns the AI seats into CPUs when the day's money is spent, and the
+      # table does when the game has asked ai_calls_per_game decisions.
+
+      def ai_seat?(seat)
+        s = @seats[seat]
+        s && s["kind"] == "cpu" && s["ai"] ? true : false
+      end
+
+      alias ai_playing? ai_seat?
+
+      # The AI players the host can offer now (the lobby view's "ak").
+      def ai_kinds=(kinds)
+        kinds = Array(kinds).map(&:to_s)
+        return if kinds == @ai_kinds
+        @ai_kinds = kinds
+        changed if @status == "wait"
+      end
+
+      # The decisions to ask, once each: [{seat:, key:, kind:, until:, request:}].
+      def ai_requests(now)
+        out = []
+        @ai_want.each do |seat, w|
+          next if w[:sent]
+          if @ai_calls_per_game && @ai_calls >= @ai_calls_per_game
+            ai_off!("#{@ai_calls_per_game} decisions in this game")
+            return []
+          end
+          w[:sent] = true
+          @ai_calls += 1
+          @stats["ai_asked"] += 1
+          out << { seat: seat, key: w[:key], kind: w[:kind], until: w[:at],
+                   request: { "game" => "mahjong", "table" => @name, "seat" => seat,
+                              "instructions" => DESCRIPTION, "view" => look_public(seat, now) } }
+        end
+        out
+      end
+
+      # An answer came: the number of one of the moves the request listed,
+      # or nil (the decider failed). Played on the next tick.
+      def ai_answer(seat, key, n, now = @now)
+        w = @ai_want[seat]
+        return false unless w && w[:key] == key
+        @ai_got[seat] = [key, n]
+        tick(now)
+        true
+      end
+
+      # The AI seats become CPUs (the day's money, or the game's decisions,
+      # are used up).
+      def ai_off!(why)
+        seats = (0..3).select { |i| ai_seat?(i) }
+        return false if seats.empty?
+        seats.each { |i| @seats[i].delete("ai") }
+        @ai_want.clear
+        @ai_got.clear
+        @stats["ai_off"] += 1
+        @log&.call("mahjong: #{@name}: AI seats #{seats.inspect} are CPUs now (#{why})")
+        name_cpus
+        changed
+        true
+      end
+
+      # An AI seat's move (its turn to discard).
+      def ai_turn(seat, now)
+        key = "t#{@sv}"
+        w = @ai_want[seat]
+        if w.nil? || w[:key] != key
+          moves = moves_of(seat)
+          if moves.size <= 1
+            return wait_cpu(now) unless cpu_ready?(now)
+            @cpu_at = nil
+            moves.empty? ? cpu_act(seat, now) : ai_apply(seat, moves.first, now)
+            return true
+          end
+          @ai_got.delete(seat)
+          @ai_want[seat] = { key: key, kind: @seats[seat]["ai"], at: now + @opts["ai_turn_ms"].to_i, sent: false }
+          return set_deadline(1 << seat, now + @opts["ai_turn_ms"].to_i, now)
+        end
+        got = @ai_got[seat]
+        if got && got[0] == key
+          @ai_got.delete(seat)
+          @ai_want.delete(seat)
+          m = got[1].is_a?(Integer) ? moves_of(seat)[got[1]] : nil
+          if m
+            @stats["ai_moves"] += 1
+            return ai_apply(seat, m, now)
+          end
+          @stats["ai_failed"] += 1
+          cpu_act(seat, now)
+          return true
+        end
+        return false if now < w[:at]
+        @stats["ai_timeouts"] += 1
+        @ai_want.delete(seat)
+        @log&.call("mahjong: #{@name}: AI seat #{seat} (#{w[:kind]}) out of time: the CPU plays this move")
+        cpu_act(seat, now)
+        true
+      end
+
+      # An AI seat's answer to the calls on a discard: true once decided.
+      def ai_call(seat, now)
+        key = "c#{@sv}"
+        w = @ai_want[seat]
+        if w.nil? || w[:key] != key
+          @ai_got.delete(seat)
+          @ai_want[seat] = { key: key, kind: @seats[seat]["ai"], at: now + @opts["ai_call_ms"].to_i, sent: false }
+          return false
+        end
+        got = @ai_got[seat]
+        a = nil
+        if got && got[0] == key
+          m = got[1].is_a?(Integer) ? moves_of(seat)[got[1]] : nil
+          a = m && Engine.match(offers(seat), m["act"][0], m["act"][1])
+          @stats[a ? "ai_moves" : "ai_failed"] += 1
+        elsif now < w[:at]
+          return false
+        else
+          @stats["ai_timeouts"] += 1
+          @log&.call("mahjong: #{@name}: AI seat #{seat} (#{w[:kind]}) out of time on a call: the CPU answers")
+        end
+        @ai_got.delete(seat)
+        @ai_want.delete(seat)
+        a = a ? a.merge(seat: seat) : (Engine.cpu_choice(@state, seat, @rule, @ai) || { type: :skip, seat: seat })
+        @decl[seat] = a
+        true
+      end
+
+      # Plays one of moves_of(seat) for an AI seat.
+      def ai_apply(seat, m, now)
+        a = Engine.match(offers(seat), m["act"][0], m["act"][1])
+        return (cpu_act(seat, now) || true) unless a
+        a[:seat] = seat
+        @deadline = nil
+        apply(a, now)
+        true
+      end
+
       # ------------------------------------------------------------ time
 
       # Moves the game on: draws, CPU turns, timeouts, the next round.
@@ -611,6 +773,8 @@ module AsterismGames
             spend_bank(seat, now)
             auto_discard(seat, now)
             true
+          elsif ai_playing?(seat)
+            ai_turn(seat, now)
           else
             return wait_cpu(now) unless cpu_ready?(now)
             cpu_act(seat, now)
@@ -642,8 +806,13 @@ module AsterismGames
           # with CPUs only.
           set_deadline(bits { |i| humans.include?(i) && !@decl.key?(i) }, now + @opts["call_ms"], now, bump: false)
         end
+        ai_waiting = []
         seats.each do |seat|
           next if @decl.key?(seat) || human?(seat)
+          if ai_playing?(seat)
+            ai_waiting << seat unless ai_call(seat, now)
+            next
+          end
           @decl[seat] = Engine.cpu_choice(st, seat, @rule, @ai) || { type: :skip, seat: seat }
         end
         waiting = humans.reject { |s| @decl.key?(s) }
@@ -664,7 +833,10 @@ module AsterismGames
             @decl[s] = { type: :skip, seat: s }
           end
         end
-        human_called = @decl.any? { |s, a| human?(s) && a[:type].to_sym != :skip }
+        # An AI player still thinking holds the calls up, as a human does
+        # (until its own time, ai_call_ms).
+        return false unless ai_waiting.empty?
+        human_called = @decl.any? { |s, a| (human?(s) || ai_seat?(s)) && a[:type].to_sym != :skip }
         return wait_cpu(now) if !human_called && !cpu_ready?(now)
         resolve_calls(now)
         true
@@ -879,6 +1051,9 @@ module AsterismGames
       end
 
       def start_game(now)
+        @ai_calls = 0
+        @ai_want = {}
+        @ai_got = {}
         @game = { "bakaze" => "ton", "kyoku" => 1, "honba" => 0, "kyoutaku" => 0, "oya" => 0,
                   "scores" => [@rule.initial_score] * 4, "rounds" => 0 }
         @final = nil
@@ -926,7 +1101,10 @@ module AsterismGames
         if @status == "wait"
           v["tc"] = rule_choices(10)
           v["dc"] = rule_choices(16) # the spectator delays to choose from (seconds)
+          v["ak"] = @ai_kinds unless @ai_kinds.empty? # the AI players the owner may seat (README "AI players")
         end
+        # The AI players' seats: their kinds ("" for the others), when there is one.
+        v["ai"] = @seats.map { |s| s && s["ai"] ? s["ai"] : "" } if @seats.any? { |s| s && s["ai"] }
         if @game
           v["sc"] = @game["scores"].dup
           v["r"] = [Engine::BAKAZE.index(@game["bakaze"]), @game["kyoku"], @game["honba"], @game["kyoutaku"], @game["oya"]]
@@ -957,6 +1135,7 @@ module AsterismGames
         humans = (0..3).count { |i| human?(i) }
         { "st" => @status, "members" => @members.size, "humans" => humans,
           "cpus" => @seats.count { |s| s && s["kind"] == "cpu" },
+          "ais" => @seats.count { |s| s && s["ai"] },
           "away" => (0..3).count { |i| human?(i) && away?(i) },
           "round" => @game ? [Engine::BAKAZE.index(@game["bakaze"]), @game["kyoku"]] : nil }
       end
@@ -1286,6 +1465,9 @@ module AsterismGames
         @final_reason = nil
         @event = nil
         @answered = []        # seats whose own answer to the calls moved their view on
+        @ai_want = {}         # seat => the decision asked of its AI player (README "AI players")
+        @ai_got = {}          # seat => [key, move number or nil] come back
+        @ai_calls = 0         # decisions asked this game
         @dirty = true
         @unsaved = false
         return unless @opts["humans"].to_i.zero?
@@ -1309,7 +1491,12 @@ module AsterismGames
       # CPU3 whichever seats the players took).
       def name_cpus
         n = 0
-        @seats.each { |s| s["name"] = "CPU#{n += 1}" if s && s["kind"] == "cpu" }
+        @seats.each { |s| s["name"] = "CPU#{n += 1}" if s && s["kind"] == "cpu" && !s["ai"] }
+        # AI players by their name, numbered when there are several of one.
+        @seats.compact.select { |s| s["ai"] }.group_by { |s| s["ai"] }.each do |kind, list|
+          label = AI::LABELS[kind] || kind.capitalize
+          list.each_with_index { |s, i| s["name"] = list.size > 1 ? "#{label}#{i + 1}" : label }
+        end
       end
 
       def ai_for(level)

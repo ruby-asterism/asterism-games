@@ -189,6 +189,34 @@ new `.tar` in place and `docker compose restart games`. To stop the
 permanent tables, take the line out of `.env` and `docker compose up -d`;
 their saved tables stay in `/state/permanent/`.
 
+### AI players (optional)
+
+A table's owner can seat Claude and Jev next to the CPUs (README "AI
+players") when the host has their keys. They are read from `.env` (the
+host gets every line as its environment) and go nowhere else:
+
+1. In `deploy/vps`, check that `.env` is `-rw-------` (`chmod 600 .env`).
+2. Add the keys you have (an editor on the server, not a command line that
+   your shell's history keeps):
+
+   ```
+   ANTHROPIC_API_KEY=...              # Claude (console.anthropic.com, an API key)
+   CLOUDFLARE_ACCOUNT_ID=...          # Jev: the account that runs Workers AI
+   CLOUDFLARE_API_TOKEN=...           # a token with the Workers AI permission
+   ASTERISM_GAMES_AI_DAILY_USD=3.0    # the most they may cost a day
+   ```
+
+3. `docker compose up -d games`. The log says
+   `games: AI players: claude, jev (at most $3.0 a day, 400 decisions a game)`;
+   the table apps' lobby shows `+Claude` / `+Jev` to the owner.
+
+`./update.sh` keeps `.env`. What they cost is in the volume
+(`/state/ai_usage.json`, per day) and in `bin/asterism-games status`
+(`docker compose exec games bin/asterism-games status`). To stop them,
+take the keys out of `.env` and `docker compose up -d games`: the seated AI
+players' moves go to the CPU from the next decision. A key that leaked:
+revoke it at its service first, then replace the line.
+
 ## 8. Updating
 
 From `deploy/vps`:

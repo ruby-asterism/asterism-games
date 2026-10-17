@@ -6,6 +6,7 @@ require_relative "version"
 require_relative "game"
 require_relative "config"
 require_relative "store"
+require_relative "ai_hub"
 
 module AsterismGames
   # The game host: one Asterism node that exposes a game object for every
@@ -25,7 +26,8 @@ module AsterismGames
   # never meet inside a game.
   #
   # Who is there (README "Who is there"): Asterism tells the host when a
-  # node leaves the network and comes back (net.on_leave / on_join, on the
+  # player's table app (the application "game" of its node) leaves the
+  # network and comes back (net.on_app_leave / on_app_join, on the
   # receiving thread, inside that lock); the host passes it to every table,
   # where a member on that node is away at once and back at once. A router
   # whose rules do not show the host the players' presence tells it
@@ -48,6 +50,7 @@ module AsterismGames
       @games = {}
       @remotes = {}
       @methods = {}
+      @docs = {}
       @put_at = {}
       @stats = Hash.new(0)
       config["tables"].each do |t|
@@ -62,10 +65,34 @@ module AsterismGames
         g.resume_clock(@clock.call)
         @games[name] = g
         @remotes[name] = SizeWatch.new(klass.remote.new(g, @clock), self, name)
-        @methods[name] = klass.remote.exposes
+        @methods[name] = klass.remote.expose_methods(META_DOCS)
+        @docs[name] = klass.remote.object_doc
       end
+      @ai = ai_hub
       @stop = false
     end
+
+    # Whether the asterism gem tells the methods' names and texts in the
+    # meta (after 0.7.1; docs/protocol.md 5 of asterism).
+    META_DOCS = defined?(::Asterism::DOC_MAX) ? true : false
+
+    # The AI players (README "AI players"): the deciders there are keys for
+    # (the environment), what they cost counted in ai_usage_file (shared
+    # by the rooms' hosts), or the hub given (tests).
+    def ai_hub
+      return @config["ai_hub"] if @config["ai_hub"]
+      settings = AI::Settings.new
+      deciders = settings.deciders(log: @log)
+      path = @config["ai_usage_file"] || File.join(@config["state_dir"], "ai_usage.json")
+      budget = AI::Budget.new(path, daily_usd: settings.daily_usd, prices: ->(k) { settings.prices(k) })
+      unless deciders.empty?
+        @log.call("games: AI players: #{deciders.keys.join(', ')} (at most $#{settings.daily_usd} a day, " \
+                  "#{settings.calls_per_game} decisions a game)")
+      end
+      AI::Hub.new(deciders, budget, calls_per_game: settings.calls_per_game, threads: settings.threads, log: @log)
+    end
+
+    attr_reader :ai
 
     def stop!
       @stop = true
@@ -85,7 +112,13 @@ module AsterismGames
         sleep RECONNECT_S unless @stop
       end
       save_all
+      @ai&.stop
       @log.call("games: largest message #{@stats['max_bytes']} B (#{@stats['max_what']})")
+      if @ai&.any?
+        n, avg, max = @ai.times
+        @log.call("games: AI players: #{@ai.stats.to_h.inspect}; #{n} decisions, #{avg} ms on average, #{max} ms at most; " \
+                  "today #{@ai.budget.summary.inspect}")
+      end
     end
 
     # This host's node ID: the setting, else the certificate's name (the
@@ -120,10 +153,10 @@ module AsterismGames
     def up(net)
       net.profile(name: profile_name) if profile_name
       net.on_error { |e, where| @log.call("games: #{where}: #{e.class}: #{e.message}") }
-      net.on_leave { |n| node_left(n) }
-      net.on_join { |n| node_joined(n) }
+      follow_players(net)
       @games.each_key do |name|
-        net.expose(name, @remotes[name], methods: @methods[name], caller: :from)
+        extra = META_DOCS && @docs[name] ? { doc: @docs[name] } : {}
+        net.expose(name, @remotes[name], methods: @methods[name], caller: :from, **extra)
       end
       @net = net
       @connected = true
@@ -148,8 +181,30 @@ module AsterismGames
       end
     end
 
-    # A node left the network: its members are away at every table.
-    # (Called on the receiving thread, which holds Asterism::LOCK.)
+    # The application a player's table app runs as (README "Who is there"):
+    # the host follows asterism/<node>/game, not the node, so a node that
+    # runs other applications too is away as soon as its table app closes.
+    PLAYER_APP = "game"
+
+    # Who is there: Asterism's on_app_join / on_app_leave (asterism after
+    # 0.7.1), else a liveliness watch of asterism/*/game on the session.
+    def follow_players(net)
+      app = @config["player_app"] || PLAYER_APP
+      if net.respond_to?(:on_app_join)
+        net.on_app_join { |n, a| node_joined(n) if a == app }
+        net.on_app_leave { |n, a| node_left(n) if a == app }
+      else
+        own = "asterism/#{node}/"
+        net.session.liveliness_watch("asterism/*/#{app}") do |key, alive|
+          next if key.start_with?(own)
+          n = key.split("/")[1]
+          alive ? node_joined(n) : node_left(n)
+        end
+      end
+    end
+
+    # A node's table app left the network: its members are away at every
+    # table. (Called on the receiving thread, which holds Asterism::LOCK.)
     def node_left(n, now = @clock.call)
       @stats["left"] += 1 if @games.values.map { |g| g.node_left(n, now) }.any?
     end
@@ -174,7 +229,9 @@ module AsterismGames
     def status_now(now = @clock.call)
       { "pid" => Process.pid, "at" => Time.now.to_i, "node" => @node, "connected" => @connected ? true : false,
         "reconnecting" => (@connected && ::Asterism.reconnecting?) ? true : false,
-        "tables" => @games.transform_values { |g| g.summary(now) } }
+        "tables" => @games.transform_values { |g| g.summary(now) } }.tap do |h|
+        h["ai"] = @ai.budget.summary if @ai&.any?
+      end
     rescue StandardError
       { "pid" => Process.pid, "at" => Time.now.to_i, "connected" => false, "tables" => {} }
     end
@@ -193,6 +250,7 @@ module AsterismGames
     def step
       now = @clock.call
       changed = false
+      @ai&.step(@games, now)
       @games.each do |name, g|
         g.tick(now)
         if g.dirty?
@@ -217,7 +275,7 @@ module AsterismGames
     TABLES_STATUS_EVERY_MS = 1000
     # The counts the status gives of each table: those of Rooms#status,
     # nothing that names a member (README "Status").
-    TABLES_STATUS_KEYS = %w[st members humans cpus away].freeze
+    TABLES_STATUS_KEYS = %w[st members humans cpus ais away].freeze
 
     # Whether this host tells its tables' counts on
     # asterism/<node>/<app>/@status (docs/protocol.md 8 of asterism): on a
@@ -230,8 +288,17 @@ module AsterismGames
 
     # {table => {"st", "members", "humans", "cpus", "away"}}.
     def tables_status(now = @clock.call)
-      @games.transform_values { |g| g.summary(now).slice(*TABLES_STATUS_KEYS) }
+      st = @games.transform_values { |g| g.summary(now).slice(*TABLES_STATUS_KEYS) }
+      # The AI players' totals of today (README "AI players"): money and
+      # counts only.
+      if @ai&.any?
+        u = @ai.budget.summary
+        st[AI_STATUS_KEY] = { "calls" => u["calls"], "usd" => u["usd"].round(2), "limit_usd" => u["limit_usd"] }
+      end
+      st
     end
+
+    AI_STATUS_KEY = "ai_today"
 
     # Hands the counts to the status after a change, and once a second;
     # Asterism puts them only when they differ from the last put.

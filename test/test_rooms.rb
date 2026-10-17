@@ -300,6 +300,8 @@ class TestRooms < Minitest::Test
     def on_error(&) = nil
     def on_join(&blk) = @joined = blk
     def on_leave(&blk) = @left = blk
+    def on_app_join(&blk) = @joined = blk
+    def on_app_leave(&blk) = @left = blk
     def expose(*, **) = nil
     def start = nil
   end
@@ -321,14 +323,18 @@ class TestRooms < Minitest::Test
       assert_equal(name ? [{ name: name }] : [], net.profiles, "the profile #{cfg['namespace'] ? 'in a room' : name}")
       # The tables' counts (README "Status"): outside the rooms only.
       host.tell_tables(0, changed: true)
-      st = host.games.keys.to_h { [_1, { "st" => "wait", "members" => 0, "humans" => 0, "cpus" => 0, "away" => 0 }] }
+      st = host.games.keys.to_h { [_1, { "st" => "wait", "members" => 0, "humans" => 0, "cpus" => 0, "ais" => 0, "away" => 0 }] }
       assert_equal(cfg["namespace"] ? [] : [st], net.statuses, "the status #{cfg['namespace'] ? 'in a room' : name}")
-      # Who is there: every kind of host hears the nodes leave and come back.
+      # Who is there: every kind of host hears the players' table apps
+      # (the application "game") leave and come back; another application
+      # of the node is nobody's table.
       t = host.games["mahjong1"]
       t.join("node-a", "A", 0)
-      net.left.call("node-a")
+      net.left.call("node-a", "other")
+      refute t.member_away?("node-a")
+      net.left.call("node-a", "game")
       assert t.member_away?("node-a")
-      net.joined.call("node-a")
+      net.joined.call("node-a", "game")
       refute t.member_away?("node-a")
     end
   end
