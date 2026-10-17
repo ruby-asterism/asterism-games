@@ -7,6 +7,7 @@ require "asterism"
 require "asterism_games"
 require "asterism_games/mahjong"
 require "asterism_games/othello"
+require "asterism_games/board"
 
 module MahjongTestHelper
   M = AsterismGames::Mahjong

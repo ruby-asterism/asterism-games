@@ -9,6 +9,7 @@ rooms:
   apps:                        # a room whose link opens one of these gets that game's tables below
     - /app/game/mahjong/mahjong.app.rb
     - /app/game/othello/othello.app.rb
+    - /app/game/board/board.app.rb
   max: 3                       # rooms with tables at once (one host process each, about 50 MB)
   node: games                  # the host's node ID in a room (asterism/games/games/mahjong1)
   router: tls/zenohd:7448      # zenohd on the console's network
@@ -23,6 +24,8 @@ rooms:
       # turn_seconds, call_seconds, rule: ... as in config/example.yml
     - name: othello1
       game: othello
+    - name: board1
+      game: board
 # The permanent tables (README "Permanent tables"): with the host's own
 # certificate from the console (a registry row, e.g. "games", its .tar in
 # ASTERISM_GAMES_PERMANENT_CREDENTIALS), one more host process serves these
@@ -39,3 +42,5 @@ permanent:
       game: mahjong
     - name: othello1
       game: othello
+    - name: board1
+      game: board

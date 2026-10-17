@@ -23,16 +23,20 @@ It is two parts, in this repository for now:
   players, seats nobody takes are played by CPUs), built on the
   [riichi_engine](https://github.com/HenrikStephensen/riichi_engine) gem (a
   fork with fixes, see "riichi_engine" below), which only that game needs;
-  and othello (`lib/asterism_games/othello/`: two seats and the spectators,
-  the smallest game on the framework, "The othello table"). The table
-  screens are Family mruby apps (fmruby-core's `flash/app/game/mahjong/`
-  and `flash/app/game/othello/`), on the boards and in the browser build;
+  othello (`lib/asterism_games/othello/`: two seats and the spectators,
+  the smallest game on the framework, "The othello table"); and a shared
+  drawing board (`lib/asterism_games/board/`: no winner, one picture every
+  member draws on, handed out as strokes that a console can record and
+  play back, "The drawing board"). The table screens are Family mruby apps
+  (fmruby-core's `flash/app/game/mahjong/`, `flash/app/game/othello/` and
+  `flash/app/game/board/`), on the boards and in the browser build;
   `bin/othello-tty` is an othello table in a terminal, with CRuby and the
   asterism gem only.
 
 ```
  bin/asterism-games  ──requires──>  asterism_games/mahjong  ──>  riichi_engine
         │            ──requires──>  asterism_games/othello
+        │            ──requires──>  asterism_games/board
         │                                   │ (Table < Game, Remote < Remote)
         └──requires──>  asterism_games  <───┘
                         (Host, Rooms, Config, Store, Game, Remote)  ──>  asterism
@@ -62,6 +66,8 @@ published yet.
 | `lib/asterism_games/mahjong/` | `table.rb` (seats, rounds, views, time, the table's settings), `engine.rb` (the calls into riichi_engine), `remote.rb` (the exposed object), `tiles.rb` (tile numbers) |
 | `lib/asterism_games/othello.rb` | the othello game: requiring it registers `othello` |
 | `lib/asterism_games/othello/` | `board.rb` (the rules, a game as a history, the CPU), `table.rb` (seats, the owner, time, views, saving), `remote.rb` (the exposed object) |
+| `lib/asterism_games/board.rb` | the drawing board: requiring it registers `board` |
+| `lib/asterism_games/board/` | `table.rb` (the strokes, the owner, the limits, the picture in pages, saving), `remote.rb` (the exposed object) |
 | `config/example.yml` | settings to copy |
 | `config/rooms.yml` | the settings of the server's image (rooms) |
 | `deploy/vps/` | the server's image, compose file, `update.sh` (docs/install.md) |
@@ -140,9 +146,10 @@ An Asterism console (0.2.2 and later) makes rooms: a key space of its own
   `rooms.json` in its "rooms" volume, with the app each room's link opens.
   A room that opens one of `rooms.apps` (by default every game's table
   screen, `Game.screens`: `/app/game/mahjong/mahjong.app.rb`,
-  `/app/game/othello/othello.app.rb`) gets the tables of `rooms.tables`
-  whose game has that screen: a room opening the mahjong screen gets the
-  mahjong tables, one opening the othello screen the othello tables. Without
+  `/app/game/othello/othello.app.rb`, `/app/game/board/board.app.rb`) gets
+  the tables of `rooms.tables` whose game has that screen: a room opening
+  the mahjong screen gets the mahjong tables, one opening the othello
+  screen the othello tables, one opening the board's screen the board. Without
   `rooms.tables` each game's first table is there (`mahjong1`, `othello1`),
   so each room gets one table of its game. Other rooms (another app, or a
   game with no table in `rooms.tables`) get nothing. The admin chooses the
@@ -235,7 +242,7 @@ tables, where a board's certificate is its node ID).
 | Key (`rooms:`) | Environment | Default | |
 |---|---|---|---|
 | `dir` | `ASTERISM_GAMES_ROOMS_DIR` | none (no rooms) | the console's rooms volume: `rooms.json`, `certs/` |
-| `apps` | `ASTERISM_GAMES_ROOM_APPS` (comma separated) | the games' screens (`/app/game/mahjong/mahjong.app.rb`, `/app/game/othello/othello.app.rb`) | a room whose link opens one of these gets the tables of the game with that screen |
+| `apps` | `ASTERISM_GAMES_ROOM_APPS` (comma separated) | the games' screens (`/app/game/mahjong/mahjong.app.rb`, `/app/game/othello/othello.app.rb`, `/app/game/board/board.app.rb`) | a room whose link opens one of these gets the tables of the game with that screen |
 | `max` | `ASTERISM_GAMES_ROOM_MAX` | 3 | rooms with tables at once |
 | `node` | `ASTERISM_GAMES_ROOM_NODE` | `games` | the host's node ID in a room |
 | `router` | `ASTERISM_GAMES_ROOM_ROUTER` | the certificate's (`tls/zenohd:7448`) | the router |
@@ -482,6 +489,7 @@ What the framework gives a game:
 | `public_view` / `spectator_view` / `state_view` / a member's view | what everybody, a spectator, the state key and one member see. What only one member may see (a hand) goes in the answer of that member's call, never on the state key (anyone in the key space may subscribe to it) |
 | `changed`, `dirty?`, `unsaved?` | a change to save and put; a change only one member's view shows (`@unsaved = true`) is saved, not put |
 | `to_saved` / `restore` / `resume_clock`, `SAVE_FORMAT` | the saved form (one JSON file per table, `state_dir/<table>.json`, written to a temporary file and renamed); a state of another format is not read. Times are saved as the time left and resumed with the host's clock |
+| `tell(sub, value)`, `SAVE_HOLD_MS` | more than the state: the host puts `value` on `asterism/<node>/<app>/<table>/<sub>` on its next step, in the order told, before the state (the board's strokes). A game that changes many times a second writes its saved state at most once per `SAVE_HOLD_MS` (the host writes what is held when it stops) |
 | `summary(now)` | the counts the status shows (`st`, `members`, `humans`, `cpus`, `away`, and the game's own): no names, no nodes, no tokens. `busy` (`bin/asterism-games status --idle`) is `humans - away` |
 | `settings`, `tables`, `screens`, `DEFAULTS` | the table keys of the settings file and the environment, the tables a host serves by default, the table apps that get the tables in a room, the table's options |
 
@@ -1039,6 +1047,85 @@ games/games/othello1  move 2, last d3
   your move: a square (* marks them), or resign
 ```
 
+## The drawing board
+
+A game without a winner (`lib/asterism_games/board/`, about 360 lines):
+one picture that every member of the board draws on. It shows the other
+half of the framework: a state that is handed out as it changes, rather
+than a view that is read. The screen is fmruby-core's
+`flash/app/game/board/board.app.rb` ("Board" / "お絵かき", a window; the
+boards, the browser build and the sim).
+
+- The picture is strokes in board coordinates (640x360): a colour (one of
+  16; the screen's palette), a width step (one of 4: 1, 2, 4 and 8 board
+  pixels on the screen) and points. A screen sends a stroke while it is
+  drawn (`line`, then `more`), so the others see it grow.
+- The first member to join is the owner (the next one in the order of
+  joining when it goes), who alone may clear the board. Each member may
+  take back its own last stroke still on the board (`undo`).
+- The host saves the picture (`state_dir/board1.json`, at most once a
+  second while somebody draws, and when it stops) and has it again when it
+  starts. A room's board goes when the room closes, like a room's tables.
+
+| Method | Arguments | Returns |
+|---|---|---|
+| `join` | name | `{"token", "owner"}`, or `{"error" => "full"}` |
+| `line` | token, c, w, pts | a new stroke: `{"id" => id}`, or why not (`"colour"`, `"width"`, `"points"`); pts `[x, y, ...]`, 1-256 points |
+| `more` | token, id, pts | more points of the caller's newest stroke: `"ok"`, or `"not yours"`, `"long"` (past 1024 points: the screen starts a new stroke), `"points"` |
+| `undo` | token | `"ok"` or `"nothing"` |
+| `clear` | token | `"ok"` or `"not owner"` |
+| `picture` | id, at | a page of the picture from stroke `id` (0: the first) and its point `at`: `{"v", "n", "p" => [[id, c, w, pts, k], ...], "nx" => [id, at] of the next page, or nil}`; k 1: the page goes on with a stroke the page before began, and its points start with that stroke's point before `at`. At most 400 points a page (2.2 KB) |
+| `view` | token | the board's view, `own` (the caller is the owner) and `mine` (its strokes) |
+| `table` | none | the board's view (what the state key has) |
+| `leave` | token | `true` / `false` |
+
+The view (the state key): `st` (`draw`), `n` the strokes, `np` the
+points, `last` the newest stroke's id, `mb` the members (`[name, flags]`,
+1 away, 2 owner), `lim` `[640, 360, 16, 4, 256, 1024, 1000, 40000]` (the
+size, colours, widths, points a message, points a stroke, strokes, points).
+
+**The strokes key.** Every change goes out on
+`asterism/<node>/<app>/<board>/strokes` (`Game#tell`) as one message, in
+the order the host took them:
+
+| Message | |
+|---|---|
+| `{"o" => "a", "id", "c", "w", "p" => [x, y, ...], "k", "v"}` | points of stroke `id`: `k` 0 starts it, `k` 1 goes on with it (`p` then starts with the stroke's last point so far, so each message draws as a line of its own) |
+| `{"o" => "u", "id", "v"}` | stroke `id` taken back |
+| `{"o" => "c", "v"}` | the board cleared |
+
+`v` is the board's version when it was told. A screen draws the messages
+as they come and keeps the strokes, to draw the place of a stroke taken
+back again; it reads the whole picture (`picture`, in pages) when it joins
+and after the connection or the host comes back.
+
+**Recording and playing back** (the console's recordings, its docs
+`v4.md` and `rooms.md`): record the Asterism key
+`asterism/<host>/games/board1/strokes`, and a playback to the network puts
+the same messages on the same key: the screens draw the board being drawn
+again. A screen cannot tell a played message from a real one, so the
+picture it shows may then differ from the board's own (the host does not
+see the playback); the messages played carry the older versions, so a
+screen says a recording is playing (`v` older than the last state it saw)
+and `R` reads the board's own picture again. A console records keys on the
+registered side only (the boards' own certificates and the browsers with
+a pass, the permanent tables): it cannot subscribe to or put into a room.
+
+**Limits.** A message is at most 256 points: with 3-byte coordinates and
+the largest id and version, 1.6 KB with its key (`rake test` prints it),
+well under the 4096 bytes a board takes. A stroke is at most 1024 points.
+The board keeps at most 1000 strokes and 40000 points and drops the oldest
+strokes past either (nothing is told: a screen keeps the same limits and
+drops them too; they leave its screen when that place is drawn again).
+Dropping rather than refusing keeps the board drawable for as long as
+people draw; the point limit is what a screen can keep (4 bytes a point,
+about 60 % of a window app's 1.5 MB VM at the limit). 500 strokes of 60
+points are 240 KB saved and add about 3 MB to the host's RSS.
+
+| Key | Environment | Default | |
+|---|---|---|---|
+| `away_seconds` | `BOARD_AWAY_SECONDS` | 10 | as for mahjong ("Who is there") |
+
 ## riichi_engine
 
 The engine runs the rounds (wall, deal, draws, discards, calls, riichi, wins,
@@ -1205,6 +1292,15 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   spectators' limit, no time limit by default and the CPU playing a move
   whose time ran out, a game saved and resumed with the same tokens and the
   time left, the exposed methods and the largest view.
+- `test_board.rb`: the drawing board: a stroke and more points on the
+  strokes key (a part going on from the last point), what is refused, a
+  stroke's point limit, taking back one's own last stroke, only the owner
+  clearing and the owner passing on, the oldest strokes dropped past the
+  stroke and point limits (the newest staying), the largest message and
+  the largest page of the picture, the picture in pages giving every point
+  once, saved and resumed (owner, ids, tokens), writes held to one a
+  second, the host putting the strokes before the state and counting them
+  in the status, and a host started again having the picture.
 - `test_rooms.rb`: the rooms' supervisor with stand-in host processes: which
   rooms get a host (the app, closed, ended), the child's settings (the
   slot's certificate, the namespace), a new room on the slot starting from

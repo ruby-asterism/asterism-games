@@ -49,6 +49,7 @@ end
 require "asterism_games"
 require "asterism_games/mahjong"
 require "asterism_games/othello"
+require "asterism_games/board"
 
 path = ENV["ASTERISM_GAMES_CONFIG"]
 if (i = ARGV.index("--config"))

@@ -91,10 +91,10 @@ docker compose logs --tail 20 games                        # "games: rooms from 
 In the console's `deploy/vps`:
 
 1. `.env`: the apps a room may open, the tables' screens among them (the
-   othello table's since games 0.7.0):
+   othello table's since games 0.7.0, the drawing board's since 0.11.0):
 
    ```
-   ASTERISM_ROOM_APPS=Othello=/app/test/othello.app.rb,Mahjong=/app/game/mahjong/mahjong.app.rb,Othello (table)=/app/game/othello/othello.app.rb
+   ASTERISM_ROOM_APPS=Othello=/app/test/othello.app.rb,Mahjong=/app/game/mahjong/mahjong.app.rb,Othello (table)=/app/game/othello/othello.app.rb,Board=/app/game/board/board.app.rb
    ```
 
 2. Add `docker-compose.games.yml` to the compose files. It gives the
@@ -122,7 +122,7 @@ In the console's `deploy/vps`:
    (with a console 0.3.0 the line before ends "(its own certificate
    games.tar, 16 seats; mahjong1)"). A room with "Opens: Othello (table)"
    gets `othello1` instead (0.7.0: a room gets the tables of the game its
-   link opens).
+   link opens), and one with "Opens: Board" the drawing board `board1`.
    The rooms' list shows `mahjong1: in its lobby, 0 seated ...`.
 3. Open the room's link: the table screen lists `games/games/mahjong1`.
    Sit, fill the empty seats with CPUs (the owner's C) and start.

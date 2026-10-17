@@ -34,3 +34,6 @@ tables:
     turn_seconds: 0          # a player's time for a move (0: none; over 0 the CPU plays a move whose time ran out)
     # cpu_ms: 700            # the CPU's pause before it plays
     # spectators: 14         # members without a seat at most
+  - name: board1
+    game: board              # the shared drawing board (README "The drawing board")
+    # away_seconds: 10       # a member not heard from this long is shown as away

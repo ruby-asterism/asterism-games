@@ -31,7 +31,7 @@ class TestFramework < Minitest::Test
         assert_includes FRAMEWORK, path, "#{f} requires #{path}, outside the framework"
       end
     end
-    assert_equal FRAMEWORK.sort, (Dir.glob("asterism_games{.rb,/*.rb}", base: LIB) - ["asterism_games/mahjong.rb", "asterism_games/othello.rb"]).sort,
+    assert_equal FRAMEWORK.sort, (Dir.glob("asterism_games{.rb,/*.rb}", base: LIB) - ["asterism_games/mahjong.rb", "asterism_games/othello.rb", "asterism_games/board.rb"]).sort,
                  "every framework file is listed"
   end
 

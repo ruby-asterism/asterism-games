@@ -253,6 +253,7 @@ module AsterismGames
       @ai&.step(@games, now)
       @games.each do |name, g|
         g.tick(now)
+        g.take_told.each { |sub, value| put_told(name, sub, value) }
         if g.dirty?
           changed = true
           g.save(now)
@@ -275,7 +276,7 @@ module AsterismGames
     TABLES_STATUS_EVERY_MS = 1000
     # The counts the status gives of each table: those of Rooms#status,
     # nothing that names a member (README "Status").
-    TABLES_STATUS_KEYS = %w[st members humans cpus ais away].freeze
+    TABLES_STATUS_KEYS = %w[st members humans cpus ais away strokes].freeze
 
     # Whether this host tells its tables' counts on
     # asterism/<node>/<app>/@status (docs/protocol.md 8 of asterism): on a
@@ -325,6 +326,18 @@ module AsterismGames
       @log.call("games: put #{name}: #{e.message}")
     end
 
+    # What a game told (Game#tell): put on asterism/<node>/<app>/<table>/<sub>.
+    def put_told(name, sub, value)
+      return unless @net && !::Asterism.reconnecting?
+      key = "asterism/#{node}/#{@config['app']}/#{name}/#{sub}"
+      payload = ::Asterism::Codec.pack(value)
+      note_size("put #{name}/#{sub}", key.bytesize + payload.bytesize)
+      @stats["told"] += 1
+      @net.session.put(key, payload)
+    rescue ::Asterism::Error => e
+      @log.call("games: put #{name}/#{sub}: #{e.message}")
+    end
+
     # The largest message seen so far, key and payload together.
     def note_size(what, bytes)
       return unless bytes > @stats["max_bytes"]
@@ -335,7 +348,7 @@ module AsterismGames
 
     def save_all
       now = @clock.call
-      @games.each_value { |g| g.save(now) }
+      @games.each_value { |g| g.save(now, force: true) }
     end
 
     # The host's status: Asterism's (net.status, asterism after 0.7.1),

@@ -33,10 +33,16 @@ module AsterismGames
   #                          may give: {key => [option, multiplier]} (README "Settings")
   #   DEFAULTS               the table's options (over Game::DEFAULTS)
   #   SAVE_FORMAT            the number in the saved state; another number is not read
+  #   SAVE_HOLD_MS           at most one write of the saved state this often (0: after
+  #                          every change); a game that changes many times a second
+  #                          (the board's strokes) holds its writes
   #
   # and writes the rules: tick(now), public_view(now) (and spectator_view,
   # summary when they differ), to_saved(now) / restore(data, now) and the
-  # methods its Remote calls.
+  # methods its Remote calls. A game that hands out more than its state
+  # (the board's strokes) tells it with tell(sub, value): the host puts
+  # value on asterism/<node>/<app>/<table>/<sub>, in the order told, on its
+  # next step.
   #
   # Members: join gives a node a token; the token is what every later call
   # of that member brings. Who is there (README "Who is there"): the host
@@ -51,6 +57,7 @@ module AsterismGames
   # else joins.
   class Game
     SAVE_FORMAT = 1
+    SAVE_HOLD_MS = 0
     MAX_MEMBERS = 16
     NAME_MAX = 32
 
@@ -113,6 +120,8 @@ module AsterismGames
       @dirty = true
       @unsaved = false
       @live = {}  # node => true: seen on the network (node_joined), not since left
+      @told = []  # [sub, value]: what the host puts next to the state (tell)
+      @saved_at = nil
       reset_members
     end
 
@@ -189,11 +198,36 @@ module AsterismGames
       @unsaved
     end
 
-    def save(now)
+    # Writes the saved state. Within SAVE_HOLD_MS of the last write the
+    # write waits (unsaved? stays true, so the host's next steps come
+    # back); force: writes now (the host stopping).
+    def save(now, force: false)
       @dirty = false
+      hold = self.class::SAVE_HOLD_MS
+      if !force && hold.positive? && @saved_at && now - @saved_at < hold
+        @unsaved = true
+        return
+      end
       @unsaved = false
+      @saved_at = now
       return unless @store
       @store.write(@name, to_saved(now))
+    end
+
+    # ------------------------------------------------------------ telling
+
+    # Hands value out on asterism/<node>/<app>/<table>/<sub> (the host puts
+    # it on its next step, after the game's other changes of that step).
+    def tell(sub, value)
+      @told << [sub.to_s, value]
+    end
+
+    # What was told since the last time ([[sub, value], ...]), and forgets it.
+    def take_told
+      return [] if @told.empty?
+      t = @told
+      @told = []
+      t
     end
 
     # The saved state of this table when it is of this game's format, or nil.

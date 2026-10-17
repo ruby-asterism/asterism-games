@@ -52,11 +52,13 @@ class TestRooms < Minitest::Test
   # ------------------------------------------------- which tables a room gets
 
   OTHELLO = "/app/game/othello/othello.app.rb"
+  BOARD = "/app/game/board/board.app.rb"
 
   def test_by_default_every_games_screen_and_each_games_first_table
     r = AsterismGames::Config.new({ "rooms" => { "dir" => "/r" } }, {})["rooms"]
-    assert_equal [APP, OTHELLO], r["apps"]
-    assert_equal [%w[mahjong1 mahjong], %w[othello1 othello]], r["tables"].map { _1.values_at("name", "game") }
+    assert_equal [APP, OTHELLO, BOARD], r["apps"]
+    assert_equal [%w[mahjong1 mahjong], %w[othello1 othello], %w[board1 board]],
+                 r["tables"].map { _1.values_at("name", "game") }
   end
 
   def test_a_room_gets_the_tables_of_the_game_its_link_opens
@@ -69,7 +71,10 @@ class TestRooms < Minitest::Test
     host = AsterismGames::Host.new(@spawned.assoc("02")[1].merge("state_dir" => File.join(@dir, "h")), log: ->(_m) {})
     assert_instance_of AsterismGames::Othello::Table, host.games["othello1"]
     assert_equal ["othello1"], host.games.keys
-    assert_equal [APP, OTHELLO], @rooms.instance_variable_get(:@serving)
+    assert_equal [APP, OTHELLO, BOARD], @rooms.instance_variable_get(:@serving)
+    write_rooms({ "01" => room("aaaa"), "02" => room("eeee", BOARD) })
+    @rooms.check(@now + 1)
+    assert_equal ["board1"], @spawned.select { _1[0] == "02" }.last[1]["tables"].map { _1["name"] }, "the board only"
   end
 
   def test_the_tables_given_are_split_by_game
