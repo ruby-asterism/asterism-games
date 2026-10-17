@@ -37,13 +37,16 @@ module AsterismGames
     #                                  from the from-th (README "Game records")
     #   record(id, round, part)     -> a game: its head (id alone), a round,
     #                                  a part of a long round
+    #   stats(days, game, scope, from) -> the players' stats: games, ranks, wins,
+    #                                  deal-ins, riichi (README "Stats"); every
+    #                                  argument optional
     #   leave(token)                -> true / false
     #
     # The same node gets its membership and token back from join. Every
     # call by a member counts as a sign that it is there (away_ms).
     class Remote < AsterismGames::Remote
       METHODS = exposes(join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, rule: 3, view: 2, act: 4, table: 0,
-                        describe: 0, look: 1, choose: 3, points: 1, records: -1, record: -1, leave: 1)
+                        describe: 0, look: 1, choose: 3, points: 1, records: -1, record: -1, stats: -1, leave: 1)
       object_doc "A riichi mahjong table (four seats). From a program: call describe first, then join, sit, " \
                  "and look / choose in a loop."
       docs sit: [%w[token seat], "Takes seat 0-3 (-1: any free one), in the lobby. \"ok\" or why not."],
@@ -66,14 +69,19 @@ module AsterismGames
                                     "\"ok\", or why not (\"stale\": look again)."],
            points: [%w[token], "What the seat's hand would score: the win offered now, or each wait of a tenpai hand " \
                                "by ron and tsumo (no ura dora, furiten not checked)."],
-           records: [%w[from], "The games this table played to the end, newest first (the 20 newest): " \
+           records: [%w[from], "The games this table played to the end, newest first (the kept ones; in a room the room's): " \
                                "{\"records\" => [{id, at, game, names, ranks, scores}], \"total\", \"next\"}. " \
                                "from (optional, 0) skips that many; \"next\" is the from of the next page."],
            record: [%w[id round part], "A finished game's record, in look's tile names. record(id): who played, " \
                                        "the rules, the final ranks and a line per round; record(id, round): that " \
                                        "round (0-based): deal, dora, every draw, discard and call, the result. A " \
                                        "round too big for one answer comes in parts: \"parts\" says how many, " \
-                                       "record(id, round, part) gives the others."]
+                                       "record(id, round, part) gives the others."],
+           stats: [%w[days game scope from], "The players' stats: per person (by the name at the table) and per kind " \
+                                             "(CPU, Claude, Jev): games, ranks, avg_rank, win/deal-in/riichi rates of the " \
+                                             "rounds, avg_score, rank points. All optional: days (0: every game kept), game " \
+                                             "(\"\", \"hanchan\", \"tonpuu\"), scope (\"all\": every table and room, \"table\": " \
+                                             "this table's; in a room the room's), from (the page: \"next\")."]
 
       def sit(token, seat, from: nil)
         mark(token, from)
@@ -151,6 +159,11 @@ module AsterismGames
       def record(*args, from: nil)
         return { "error" => "id" } if args.empty?
         @game.record_answer(args[0], args[1], args[2])
+      end
+
+      # README "Stats": names and numbers, never a record.
+      def stats(*args, from: nil)
+        @game.stats_answer(args[0].to_i, args[1].to_s, args[2].nil? ? "all" : args[2].to_s, args[3].to_i)
       end
     end
   end

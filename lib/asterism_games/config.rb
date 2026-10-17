@@ -20,6 +20,7 @@ module AsterismGames
       "app" => "games",
       "credentials" => nil,
       "state_dir" => "var/state",
+      "records_db" => nil,                                    # the games' records (README "Game records"): nil state_dir/records.sqlite3, "json" the JSON files
       "tables" => nil,                                        # nil: the first game's tables
       "rooms" => nil,
       "permanent" => nil
@@ -83,7 +84,8 @@ module AsterismGames
       "ASTERISM_GAMES_NODE" => ["node", :s],
       "ASTERISM_GAMES_APP" => ["app", :s],
       "ASTERISM_GAMES_CREDENTIALS" => ["credentials", :s],
-      "ASTERISM_GAMES_STATE_DIR" => ["state_dir", :s]
+      "ASTERISM_GAMES_STATE_DIR" => ["state_dir", :s],
+      "ASTERISM_GAMES_RECORDS_DB" => ["records_db", :s]
     }.freeze
 
     # The game a table without "game" plays: the first one registered.

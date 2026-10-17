@@ -23,7 +23,8 @@ Names and addresses below are placeholders: `router.example.org`,
                                                       (a console before 0.3.0: as room-<slot>)
    + one host process for the permanent tables -------TLS as games (its own .tar), no namespace
    GET /status on 7460 <-- the console (the rooms' page)
-   /state (its volume): rooms/<slot>/, permanent/ the saved tables <-- the console's daily backup (read-only)
+   /state (its volume): rooms/<slot>/, permanent/ the saved tables,      <-- the console's daily backup (read-only)
+                        records.sqlite3 the games' records (+ records-backup.sqlite3, its copy)
    /credentials (deploy/vps/credentials/, read-only): games.tar
 
  boards (P4-Nano, Tab5) --tls/router.example.org:7448, their own certificates--> zenohd
@@ -260,6 +261,29 @@ on from the same turn after a few seconds, and the players' screens come
 back to it by themselves. To go back, run it with the old version (it
 prints it); the old image stays (`docker image ls ghcr.io/ruby-asterism/asterism-games`).
 
+### From 0.13 to 0.14.0 (the records in SQLite)
+
+0.14.0 keeps the games' records in one SQLite database,
+`/state/records.sqlite3` (README "Game records"), with the 1000 newest
+games of each table instead of 20, and a room's games kept after the room
+closes (for the stats, README "Stats").
+
+- **The records are taken in on the first start.** Each table that has a
+  `<table>.records.json` of 0.13.0 (the permanent tables', and the rooms'
+  still open) puts its games into the database and renames the file to
+  `<table>.records.json.imported`. The log says it once per table
+  (`mahjong1: 3 records taken into records.sqlite3 ...`). It takes well
+  under a second; nothing is to be done.
+- **Going back to 0.13.0** after it: the old host does not read the
+  database and finds no `<table>.records.json`, so its tables start with
+  no records (the games stay in the database for 0.14.0). To give 0.13.0
+  its 20 back, rename the `.imported` files before you start it.
+- **The volume grows**: about 17 KB a tonpuu game and 23 KB a hanchan, so
+  up to 17-23 MB a table at 1000 games, and the same again for
+  `records-backup.sqlite3`, the copy the backups take (section 9). Fewer
+  games: `MAHJONG_RECORDS_KEPT` in `.env`.
+- The image has the sqlite3 gem; nothing else is needed on the server.
+
 ### From 0.11 to 0.12.0 (the published image)
 
 Until 0.11.1 `update.sh` took a ref (a branch, a tag or a commit) and built
@@ -322,7 +346,28 @@ docker compose start games
 ```
 
 Only rooms still open (the same room on the same slot) take their tables
-back; the host removes the others. The permanent tables always do. The
+back; the host removes the others. The permanent tables always do.
+
+**The games' records** (0.14.0): the backup has the database as the host
+was writing it (`extra/games/records.sqlite3`, with its `-wal` and `-shm`)
+and the consistent copy the host makes after every game,
+`extra/games/records-backup.sqlite3`. Restore the copy: put it in the
+volume without a database, and the host makes the database from it when it
+starts (the log says `records: /state/records.sqlite3 made from
+records-backup.sqlite3`):
+
+```
+docker compose stop games
+docker run --rm -v asterism_backups:/backups:ro -v asterism-games_state:/state debian:stable-slim \
+  sh -c 'cd /tmp && tar xzf /backups/<backup>.tar.gz extra/games/records-backup.sqlite3 && \
+         rm -f /state/records.sqlite3 /state/records.sqlite3-wal /state/records.sqlite3-shm && \
+         cp extra/games/records-backup.sqlite3 /state/ && chown 1000:1000 /state/records-backup.sqlite3'
+docker compose start games
+```
+
+The games played after the backup are lost with this (the copy is the
+day's). Never copy `records.sqlite3` itself out of a backup: it may be
+caught in the middle of a write. The
 certificate (`credentials/games.tar`) is not in the backup: it is a
 private key; issue a new one for the row if it is lost.
 

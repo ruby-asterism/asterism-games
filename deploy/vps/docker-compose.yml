@@ -15,8 +15,11 @@
 #   <project>_router   the network zenohd and the console are on
 # and it keeps its own:
 #   state              the saved tables (rooms/<slot>/, permanent/), written after
-#                      every change; the console's daily backup takes it in (the
-#                      console's deploy/vps/docker-compose.games.yml)
+#                      every change, and the games' records (records.sqlite3, with
+#                      the copy records-backup.sqlite3 made after every game); the
+#                      console's daily backup takes it in (the console's
+#                      deploy/vps/docker-compose.games.yml; restore the copy:
+#                      docs/install.md, "Backups and restoring")
 # and reads, from this directory:
 #   credentials/       read-only: the host's own .tar from the console (a registry
 #                      row, e.g. "games"), for the permanent tables and the rooms; named in .env

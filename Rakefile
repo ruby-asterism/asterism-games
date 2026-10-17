@@ -6,17 +6,19 @@ require "rake/testtask"
 #                     (mahjong: 20 CPU hanchan in 8 processes, a few minutes)
 # MJ_GAMES=4 rake test   fewer hanchan
 # rake test:gem       what the gem holds only (lib/: the framework, othello,
-#                     the drawing board), with mahjong never loaded
+#                     the drawing board), with mahjong never loaded and
+#                     without sqlite3 (the records' JSON form)
 Rake::TestTask.new(:test) do |t|
   t.libs << "test" << "lib" << "app"
   t.test_files = FileList["test/test_*.rb"]
   t.warning = false
 end
 
-GEM_TESTS = %w[test/test_framework.rb test/test_othello.rb test/test_board.rb test/test_gem.rb].freeze
+GEM_TESTS = %w[test/test_framework.rb test/test_othello.rb test/test_board.rb test/test_gem.rb
+               test/test_record_book.rb].freeze
 
 Rake::TestTask.new("test:gem_files") do |t|
-  t.libs << "test" << "lib"
+  t.libs << "test/no_sqlite3" << "test" << "lib"
   t.test_files = FileList[*GEM_TESTS]
   t.warning = false
 end

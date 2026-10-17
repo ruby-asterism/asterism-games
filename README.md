@@ -173,6 +173,7 @@ A YAML file (`--config PATH` or `ASTERISM_GAMES_CONFIG`; see
 | `app` | `ASTERISM_GAMES_APP` | `games` | the application every game lives under |
 | `credentials` | `ASTERISM_GAMES_CREDENTIALS` | none | a console's `.tar`, for a router over mutual TLS (the router comes from it, and the node ID too unless `node` is given) |
 | `state_dir` | `ASTERISM_GAMES_STATE_DIR` | `var/state` | where the tables are saved |
+| `records_db` | `ASTERISM_GAMES_RECORDS_DB` | `state_dir/records.sqlite3` | the games' records ("Game records"): the SQLite database, or `json` for the JSON files of before 0.14.0 (also what a host without the sqlite3 gem uses) |
 | `tables` | | the first game's tables (`mahjong1`, `mahjong2`; with the gem alone `othello1`) | each `{name, game, ...}`; `game` defaults to the first game registered (`mahjong`; with the gem alone `othello`) |
 
 The other keys of a table are its game's (`settings` in the game's class,
@@ -196,6 +197,7 @@ mahjong table):
 | `spectators` | `MAHJONG_SPECTATORS` | 12 | members without a seat at most ("Spectators") |
 | `spectator_delay_minutes` | `MAHJONG_SPECTATOR_DELAY_MINUTES` | 0 | spectators see the game (and the four hands) this much later ("Spectators"); `spectator_delay_seconds` / `MAHJONG_SPECTATOR_DELAY_SECONDS` as before, in seconds |
 | `rule` | | (below) | riichi_engine rule keys over the host's defaults ("Rules"); the owner's local rules go over them ("Local rules") |
+| `records_kept` | `MAHJONG_RECORDS_KEPT` | 1000 (SQLite), 20 (JSON) | the newest games kept of a table ("Game records") |
 
 An othello table's keys: "The othello table".
 
@@ -601,6 +603,7 @@ connects again after 3 s; while a client of a router only reconnects
 | `leave` | token | `true` / `false`; in the lobby the seat empties, during a game it goes to a CPU |
 | `describe`, `look`, `choose`, `points` | | for programs ("Playing from a program") |
 | `records`, `record` | from / id, round, part | the games played to the end and their records ("Game records") |
+| `stats` | days, game, scope, from (all optional) | the players' stats ("Stats") |
 
 - People join a table and wait in its lobby (`"st" => "wait"`): a member
   sits in a seat or watches. The first member who sat is the owner (when the
@@ -937,12 +940,42 @@ recent games and step through a record with the four hands face up; a
 program reads the same with `records` and `record` (the CLI, an AI
 assistant through `asterism mcp`).
 
-- **What is kept.** The 20 newest games of each table, in the table's place
-  in the store, next to its saved state: `state_dir/<table>.records.json`
-  on a home network, under `state_dir/permanent/` for the permanent tables,
-  under `state_dir/rooms/<slot>/` in a room, which goes with the room when
-  it closes. A game in progress is never given out; its record so far is in
-  the table's saved state, so a host started again goes on with it.
+- **Where they are kept** (games 0.14.0). With the sqlite3 gem (the image,
+  and a checkout with the Gemfile) every game goes into one SQLite
+  database in the state volume, `state_dir/records.sqlite3` (`records_db`),
+  written once at the end of each game. The rooms' and the permanent
+  tables' hosts are processes of their own and all write into the
+  supervisor's database (WAL; a process that finds it locked waits up to
+  10 s). The newest 1000 games of each table are kept (`records_kept`);
+  the rooms' tables of one name count together (the 1000 newest of every
+  room's `mahjong1`), so the database stays bounded however many rooms
+  open. Without the sqlite3 gem (the gem alone, `records_db: json`) the
+  records stay as before 0.14.0: the 20 newest of each table in
+  `<table>.records.json` next to the table's saved state.
+- **A room's games** stay in the database when the room closes (its saved
+  tables go). They are given out (`records`, `record`, the recent games of
+  the table apps) only by the room's own host while the room is open: no
+  other room, no permanent table and no LAN table lists them. The stats
+  count them ("Stats": names and numbers, never a record).
+- **Taken in once.** A host of 0.14.0 that finds a table's
+  `<table>.records.json` (0.13.0) next to a database takes its games in
+  (the same games, in their order, with their times) and renames the file
+  to `<table>.records.json.imported`; nothing reads it again (a host of
+  0.13.0 put back would start with no records). A room's file is taken in
+  by the room's host, with the room's ID.
+- **Ids.** A game's `id` is its row in the database: it grows across every
+  table, and a table's ids are not consecutive. An id is never used twice.
+- **Backups.** After each game the host makes a consistent copy next to
+  the database, `records-backup.sqlite3` (`VACUUM INTO` a `*.tmp` name,
+  then renamed over the last copy), so a backup that copies the files of
+  the state volume (the console's daily backup with
+  `docker-compose.games.yml`) has a whole database whatever the host was
+  writing at that moment. A host that finds the copy but no database
+  starts from the copy: that is how a restore puts it back
+  (docs/install.md, "Backups and restoring").
+- A game in progress is never given out; its record so far is in the
+  table's saved state (JSON, as before), so a host started again goes on
+  with it.
 - **Who reads them.** Anyone who can call the table (no token): the router's
   rules decide, as for joining.
 
@@ -984,7 +1017,9 @@ Tiles are `look`'s names: `"1m".."9m"`, `"1p".."9p"`, `"1s".."9s"`,
 `"0m"` / `"0p"` / `"0s"` the red fives, `"1z".."7z"` east, south, west,
 north, white, green, red. A whole hanchan takes about 25 KB of JSON (16 KB
 of MessagePack); a round's answer about 2 KB, the largest seen 2.2 KB
-(the tests hold every answer under 3800 B and split longer rounds).
+(the tests hold every answer under 3800 B and split longer rounds). In
+the database a tonpuu game takes about 17 KB and a hanchan about 23 KB:
+1000 games of a table 17-23 MB, and the copy for the backup as much again.
 
 From the command line and an AI assistant:
 
@@ -1002,6 +1037,49 @@ Then ask the assistant, for example: "Read the last game of mahjong1
 second player's discards: where did it deal in, and what would have been
 safer?" Every move of a finished game is there, the four hands included,
 so an assistant can review a game as a whole.
+
+## Stats
+
+`stats` counts the players' games from the records (games 0.14.0, the
+SQLite form; the JSON form counts the table's own 20). The table apps show
+it from their recent games ("Stats", S).
+
+| Argument | | |
+|---|---|---|
+| days | 0 | 0: every game kept; N: the games of the last N days |
+| game | `""` | `"hanchan"`, `"tonpuu"`, `""` both |
+| scope | `"all"` | `"all"`: every game in the database (every table of every place, the rooms' too, closed ones included); `"table"`: this table's games (in a room, the room's) |
+| from | 0 | the page: the `next` of the answer before |
+
+`{"rows" => [...], "games", "total", "next", "days", "game", "scope",
+"store"}`: `games` the games counted, `total` the rows, `next` when there
+are more than fit one message (about 13 rows a page), `store` `sqlite` or
+`json`. A row per player:
+
+- **Who.** A person is a name (`"kind" => "human"`): the name entered at the
+  table, so the same name is the same person whichever board or page it
+  came from, and a new name a new person (anyone may take a name; nothing
+  checks it). The CPUs are one row (`"cpu"`, `"CPU"`), each AI player one
+  row (`"claude"`, `"jev"`). Persons first, by games, then the kinds.
+- **The numbers.** `games`, `ranks` (`[1st, 2nd, 3rd, 4th]`), `avg_rank`,
+  `top_rate` (1st / games), `rounds` (the rounds of the games played),
+  `wins`, `dealins` (a ron from this seat: once a round, a double ron too),
+  `riichi`, `win_rate` / `dealin_rate` / `riichi_rate` (of the rounds),
+  `avg_score` (the final score), `points` (the sum of the rank points,
+  `final`'s points / 10, with the uma).
+- **What a room sees.** Names and numbers only, never a record: a room's
+  table gives `"all"` like any other (the people of the whole host), and
+  `"table"` for the room's own games. Outside the room, a room's games are
+  in the counts of `"all"` and nowhere else.
+
+```
+asterism call --router tcp/192.0.2.2:7447 games/games/mahjong1 stats
+asterism call --router tcp/192.0.2.2:7447 games/games/mahjong1 stats 30 tonpuu
+asterism mcp --router tcp/192.0.2.2:7447 --allow 'games/mahjong1.stats'
+```
+
+The counts are made once per game at its end (the seats' rows of the
+database), so a stats call reads no record: 1000 games take 20-50 ms.
 
 ## Playing from a program
 
@@ -1368,7 +1446,7 @@ most, the first time a suit pattern with many tiles is counted).
 ```
 bundle exec rake test                                   # MJ_GAMES=20 CPU hanchan, MJ_HUMAN_GAMES=1 four-player hanchan
 MJ_GAMES=4 bundle exec rake test                        # quicker
-bundle exec rake test:gem                               # what the gem holds only: lib/ alone, mahjong never loaded
+bundle exec rake test:gem                               # what the gem holds only: lib/ alone, mahjong never loaded, no sqlite3
 gem build asterism-games.gemspec                        # the gem (its files: test/test_gem.rb checks them)
 ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a router
 ```
@@ -1440,7 +1518,15 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   more than four times, each seat's points from round to round by the
   result and its riichi stick, the final scores), going on across a
   restart of the host mid-round, the 20 newest kept (the numbers go on),
-  a closed room's records gone with it, every answer of `records` and
+  without a database a closed room's records gone with it; with SQLite
+  (0.14.0) the records read by the next host, the 1000 newest kept (and
+  the pages walking them), the JSON records of 0.13.0 taken in once (the
+  same games in the list and the same records), a closed room's games kept
+  in the database while no other room, permanent or LAN table gives them
+  out (the stats count them), the stats equal to what the records count
+  another way (wins from the tsumo and ron moves, deal-ins from the ron
+  moves, riichi, ranks, rank points; a person by name, CPU, Claude, Jev),
+  the stats in pages; every answer of `records` and
   `record` under 3800 B (twenty games of long names in pages, a long round
   in parts), the remote's calls, the last result on `@status` (and not in
   the rooms' counts), and the declarations in the view (`cl`). The CPU
@@ -1509,8 +1595,19 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   the two commands and the texts, never `app/`, `deploy/`, `config/`, the
   tests or anything like a key; its version is `VERSION`'s and it depends on
   asterism only. Under `rake test:gem` (with `test_framework.rb`,
-  `test_othello.rb` and `test_board.rb`, `lib/` alone on the load path) the
-  games are othello and the board and nothing of mahjong is loaded.
+  `test_othello.rb`, `test_board.rb` and `test_record_book.rb`, `lib/`
+  alone on the load path, `test/no_sqlite3/` making `require "sqlite3"`
+  fail) the games are othello and the board and nothing of mahjong is
+  loaded.
+- `test_record_book.rb`: the records' book of the framework (`RecordBook`):
+  the JSON form (the newest kept in the store, read back, the stats' rows),
+  and without the sqlite3 gem a host takes the JSON form; with SQLite the
+  newest kept of a table (another table apart, the seats going with their
+  games, ids never reused), a room's games given out only in that room and
+  kept when it closes (the rooms' table counted together), the stats by
+  time and kind of game, four processes ending 100 games at once into one
+  database (none lost, `integrity_check` ok, the copy whole) and a restore
+  from the copy alone.
 
 `bin/mahjong-bots` fills a table with players over the network (to try a
 second table, or the host under load): `bundle exec bin/mahjong-bots

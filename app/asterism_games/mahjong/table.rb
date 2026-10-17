@@ -52,7 +52,7 @@ module AsterismGames
                  "spectators" => ["spectators", 1], "spectator_delay_seconds" => ["spectator_delay_ms", 1000],
                  "spectator_delay_minutes" => ["spectator_delay_ms", 60_000],
                  "ai_turn_seconds" => ["ai_turn_ms", 1000], "ai_call_seconds" => ["ai_call_ms", 1000],
-                 "rule" => ["rule", :hash]
+                 "rule" => ["rule", :hash], "records_kept" => ["records_kept", 1]
                },
                env: {
                  "MAHJONG_TURN_SECONDS" => ["turn_ms", 1000],
@@ -68,7 +68,8 @@ module AsterismGames
                  "MAHJONG_SPECTATOR_DELAY_SECONDS" => ["spectator_delay_ms", 1000],
                  "MAHJONG_SPECTATOR_DELAY_MINUTES" => ["spectator_delay_ms", 60_000],
                  "MAHJONG_AI_TURN_SECONDS" => ["ai_turn_ms", 1000],
-                 "MAHJONG_AI_CALL_SECONDS" => ["ai_call_ms", 1000]
+                 "MAHJONG_AI_CALL_SECONDS" => ["ai_call_ms", 1000],
+                 "MAHJONG_RECORDS_KEPT" => ["records_kept", 1]
                }
 
       SAVE_FORMAT = 2

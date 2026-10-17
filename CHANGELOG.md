@@ -3,6 +3,42 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
+## 0.14.0
+
+- **The games' records in SQLite** (README "Game records"): every game a
+  mahjong table plays to its end goes into one database in the state
+  volume, `state_dir/records.sqlite3` (setting `records_db`), written once
+  at the game's end by whichever host process played it (the rooms', the
+  permanent tables', a LAN host; WAL, a 10 s wait for the lock). The 1000
+  newest games of each table are kept (`records_kept`,
+  `MAHJONG_RECORDS_KEPT`; the rooms' tables of one name together). A
+  game in progress is still in the table's saved state (JSON).
+- A room's games stay when the room closes. Only the room's own host gives
+  them out (`records`, `record`, the table apps' recent games) while it is
+  open; the other rooms, the permanent and the LAN tables never list them.
+- **Taken in once**: a table's `<table>.records.json` of 0.13.0 goes into
+  the database on the first start of 0.14.0 and is renamed
+  `<table>.records.json.imported` (docs/install.md, "From 0.13 to 0.14.0").
+- A game's `id` is its row in the database (it grows across the tables).
+- **Backups**: after every game the host writes a consistent copy,
+  `records-backup.sqlite3` (`VACUUM INTO`, renamed over the last one), for
+  the console's daily backup to take; a host that finds the copy without
+  the database starts from it, which is how a restore puts it back
+  (docs/install.md, "Backups and restoring"). The console needs no change.
+- **New method `stats(days, game, scope, from)`** (README "Stats"): per
+  person (by the name at the table) and per kind (CPU, Claude, Jev):
+  games, ranks, average rank, 1st rate, wins, deal-ins and riichi with
+  their rates of the rounds, average score, the sum of the rank points; by
+  period and kind of game, over every table and room (`"all"`, the
+  default) or this table's games; names and numbers, never a record; in
+  pages, with its text in the meta (`asterism call`, `asterism mcp`).
+- The records keep each AI seat's kind (`"ais"`: `"claude"`, `"jev"`) for
+  the stats; a record of 0.13.0 is read by its AI player's name.
+- The sqlite3 gem is in the Gemfile (the image) and **not a dependency of
+  the gem**: without it (the gem alone, or `records_db: json`) the records
+  stay in the JSON files of 0.13.0 (the 20 newest, a room's go with it),
+  and `stats` counts those. `rake test:gem` runs that way.
+
 ## 0.13.0
 
 - **Mahjong game records** (README "Game records"): every game a table

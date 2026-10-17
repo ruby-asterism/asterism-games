@@ -16,6 +16,9 @@ require "asterism_games"
 require "asterism_games/mahjong" unless GEM_ONLY
 require "asterism_games/othello"
 require "asterism_games/board"
+# The tests fork (the rooms' hosts) with the records' database open; the
+# host's own supervisor never opens it.
+SQLite3::ForkSafety.suppress_warnings! if AsterismGames::RecordBook.sqlite? && defined?(SQLite3::ForkSafety)
 
 module GamesTestHelper
   # The bytes a view takes as the answer of a call: the reply payload

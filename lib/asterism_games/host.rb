@@ -60,6 +60,9 @@ module AsterismGames
         if config["room_id"]
           t = t.merge(config.slice("room_id", "trusted_nodes", "trusted_prefix", "seat_reuse_ms").compact)
         end
+        # Where the games' records go (README "Game records"): the one
+        # database of the state volume, and which tables these are.
+        t = t.merge("records_db" => records_db, "records_place" => records_place)
         name = t["name"]
         g = klass.new(name, t.reject { |k, _| %w[name game].include?(k) }, store: @store, log: @log)
         g.resume_clock(@clock.call)
@@ -70,6 +73,18 @@ module AsterismGames
       end
       @ai = ai_hub
       @stop = false
+    end
+
+    # The records' database: the setting ("json": the JSON files), else
+    # state_dir/records.sqlite3 (the rooms' and the permanent tables' hosts
+    # are given the supervisor's).
+    def records_db
+      @config["records_db"] || File.join(@config["state_dir"], RecordBook::DB_NAME)
+    end
+
+    # lan (a host of its own), permanent, room.
+    def records_place
+      @config["records_place"] || (@config["room_id"] ? "room" : "lan")
     end
 
     # Whether the asterism gem tells the methods' names and texts in the

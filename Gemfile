@@ -10,6 +10,9 @@ gem "msgpack", "~> 1.7"
 # The Claude AI players (README "AI players"); loaded only when
 # ANTHROPIC_API_KEY is set.
 gem "anthropic", "~> 1.80"
+# The games' records in one SQLite database (README "Game records"). Not a
+# dependency of the gem: without it the records stay in JSON files.
+gem "sqlite3", "~> 2.1"
 
 group :test do
   gem "minitest", "~> 5.0"

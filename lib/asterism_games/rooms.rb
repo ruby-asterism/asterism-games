@@ -261,12 +261,17 @@ module AsterismGames
         "credentials_router" => router, "namespace" => "room/#{slot}", "state_dir" => dir,
         "status_file" => File.join(dir, "host.json"), "tables" => tables, "room_id" => room_id,
         "trusted_nodes" => trust["seats"], "trusted_prefix" => trust["prefix"],
-        "seat_reuse_ms" => @rooms["seat_reuse_seconds"].to_i * 1000, "ai_usage_file" => ai_usage_file }
+        "seat_reuse_ms" => @rooms["seat_reuse_seconds"].to_i * 1000, "ai_usage_file" => ai_usage_file,
+        "records_db" => records_db, "records_place" => "room" }
     end
 
     # What the AI players cost, shared by every host process (README "AI
     # players").
     def ai_usage_file = File.join(@config["state_dir"], "ai_usage.json")
+
+    # The games' records, one database for every host process (README
+    # "Game records"): a room's stay when the room's directory goes.
+    def records_db = @config["records_db"] || File.join(@config["state_dir"], RecordBook::DB_NAME)
 
     # The permanent tables' host (when configured and not running): its
     # certificate must be there (else it is looked for again on every pass,
@@ -285,7 +290,8 @@ module AsterismGames
       cfg = { "node" => @permanent["node"], "app" => @config["app"], "credentials" => tar,
               "credentials_router" => @permanent["router"], "state_dir" => permanent_dir,
               "status_file" => File.join(permanent_dir, "host.json"), "tables" => @permanent["tables"],
-              "profile_name" => PERMANENT_PROFILE_NAME, "ai_usage_file" => ai_usage_file }
+              "profile_name" => PERMANENT_PROFILE_NAME, "ai_usage_file" => ai_usage_file,
+              "records_db" => records_db, "records_place" => "permanent" }
       @perm.merge!("since" => Time.now.utc.iso8601, "next_at" => nil)
       @perm["pid"] = @spawn.call("permanent", cfg)
       @log.call("games: permanent: host pid #{@perm['pid']} (#{@permanent['tables'].map { |t| t['name'] }.join(', ')})")
