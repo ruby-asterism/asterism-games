@@ -1,7 +1,9 @@
-# The game host's image (asterism-games), built on the server from this
-# checkout (deploy/vps/update.sh, or docker compose build): CRuby, the
-# gems of Gemfile.lock and the host. Built by hand from the repository's
-# root:
+# The game host's image (asterism-games): CRuby, the gems of Gemfile.lock
+# and the whole checkout (the framework and the sample games of lib/, the
+# mahjong of app/, the settings of config/). Published for each version by
+# .github/workflows/image.yml as ghcr.io/ruby-asterism/asterism-games
+# (docs/install.md); built here instead with docker-compose.build.yml, or
+# by hand from the repository's root:
 #   docker build -f deploy/vps/Dockerfile -t asterism-games:dev .
 #
 # riichi_engine is the fork's revision pinned in Gemfile.lock (a git
@@ -31,7 +33,8 @@ FROM ruby:${RUBY_VERSION}-slim
 
 ARG GAMES_VERSION=dev
 LABEL org.opencontainers.image.title="asterism-games" \
-      org.opencontainers.image.description="Game hosts for Asterism: mahjong tables in the rooms of an Asterism console" \
+      org.opencontainers.image.source="https://github.com/ruby-asterism/asterism-games" \
+      org.opencontainers.image.description="Game hosts for Asterism: mahjong, othello and drawing board tables in the rooms of an Asterism console" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${GAMES_VERSION}"
 

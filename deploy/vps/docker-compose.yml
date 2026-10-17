@@ -24,17 +24,16 @@
 #                      Readable by uid 1000 (chown 1000:1000, chmod 600). None: no
 #                      permanent tables.
 #
+# The image: ghcr.io/ruby-asterism/asterism-games:<GAMES_VERSION>, published
+# for each version (GAMES_IMAGE and GAMES_VERSION in .env). To build it here
+# instead: docker-compose.build.yml.
+#
 # Settings: .env next to this file (env.example). Updating: ./update.sh.
 name: asterism-games
 
 services:
   games:
-    image: ${GAMES_IMAGE:-asterism-games}:${GAMES_VERSION:-dev}
-    build:
-      context: ../..
-      dockerfile: deploy/vps/Dockerfile
-      args:
-        GAMES_VERSION: ${GAMES_VERSION:-dev}
+    image: ${GAMES_IMAGE:-ghcr.io/ruby-asterism/asterism-games}:${GAMES_VERSION:-0.12.0}
     init: true
     restart: unless-stopped
     # SIGTERM: every room's host saves its tables and leaves (the

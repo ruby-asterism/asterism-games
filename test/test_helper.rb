@@ -1,18 +1,23 @@
 # frozen_string_literal: true
 
+# Two ways to run (Rakefile):
+#   rake test       every test: the gem's files (lib/) and the image's
+#                   games (app/: mahjong, with riichi_engine)
+#   rake test:gem   what the gem holds only (ASTERISM_GAMES_TEST_GEM=1):
+#                   lib/ alone on the load path, mahjong never loaded
+GEM_ONLY = ENV["ASTERISM_GAMES_TEST_GEM"] == "1"
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+$LOAD_PATH.unshift File.expand_path("../app", __dir__) unless GEM_ONLY
 require "minitest/autorun"
 require "tmpdir"
 require "asterism"
 require "asterism_games"
-require "asterism_games/mahjong"
+# mahjong first, as bin/asterism-games does (the default game).
+require "asterism_games/mahjong" unless GEM_ONLY
 require "asterism_games/othello"
 require "asterism_games/board"
 
-module MahjongTestHelper
-  M = AsterismGames::Mahjong
-  E = M::Engine
-
+module GamesTestHelper
   # The bytes a view takes as the answer of a call: the reply payload
   # {"value" => view} and a call key with long names.
   CALL_KEY = "asterism/games-host-aaaaaa/games/mahjong1/call/wasm-aaaaaa"
@@ -20,6 +25,13 @@ module MahjongTestHelper
   def reply_bytes(v)
     Asterism::Codec.pack({ "value" => v }).bytesize + CALL_KEY.bytesize
   end
+end
+
+module MahjongTestHelper
+  include GamesTestHelper
+  M = AsterismGames::Mahjong unless GEM_ONLY
+  E = M::Engine unless GEM_ONLY
+  CALL_KEY = GamesTestHelper::CALL_KEY
 
   def cpu_table(**opts)
     M::Table.new("t", { "humans" => 0, "cpu_ms" => 0, "result_ms" => 0 }.merge(opts.transform_keys(&:to_s)))

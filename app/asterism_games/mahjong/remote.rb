@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "../remote"
+require "asterism_games/remote"
 
 module AsterismGames
   module Mahjong

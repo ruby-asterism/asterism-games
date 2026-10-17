@@ -6,3 +6,5 @@ var
 deploy/vps/.env
 test
 deploy/vps/credentials
+*.gem
+.github

@@ -2,11 +2,11 @@
 
 require "json"
 require "securerandom"
-require_relative "../game"
+require "asterism_games/game"
 require_relative "tiles"
 require_relative "engine"
 require_relative "readable"
-require_relative "../ai"
+require "asterism_games/ai"
 
 module AsterismGames
   module Mahjong

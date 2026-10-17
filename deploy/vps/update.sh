@@ -1,35 +1,39 @@
 #!/bin/sh
 # Updates (or rolls back) the game host on a server in one command, the
-# way the console's deploy/vps/update.sh does. Plain sh, git and docker
-# compose: nothing else on the host.
+# way the console's deploy/vps/update.sh does: by version, the published
+# image ghcr.io/ruby-asterism/asterism-games:<version>. Plain sh, git and
+# docker compose: nothing else on the host.
 #
-#   ./update.sh v0.3.0                 # a tag, a branch (main) or a commit of asterism-games
-#   ./update.sh --when-idle main       # restart only once nobody sits at a table
-#   ./update.sh --dry-run main         # print the steps, change nothing
+#   ./update.sh 0.12.0                 # the version (its tag v0.12.0 and its image)
+#   ./update.sh --when-idle 0.12.0     # restart only once nobody sits at a table
+#   ./update.sh --build 0.12.0         # build the image here from the tag instead of pulling it
+#   ./update.sh --dry-run 0.12.0       # print the steps, change nothing
 #
 # In order:
-#   1. checks: the .env, the checkout has no local changes, the ref (fetched
-#      when missing), docker compose answers, the console's volume and
-#      network are there (ASTERISM_PROJECT)
-#   2. git checkout of the ref (detached), the image asterism-games:<version>
-#      built from it while the old host keeps running (<version>: the tag,
-#      or <ref>-<commit>)
+#   1. checks: the .env, the checkout has no local changes, the tag
+#      v<version> (fetched when missing), docker compose answers, the
+#      console's volume and network are there (ASTERISM_PROJECT)
+#   2. git checkout of the tag (detached: the compose file and the settings
+#      of that version), and the image <GAMES_IMAGE>:<version> pulled (or,
+#      with --build, built from the tag with docker-compose.build.yml)
+#      while the old host keeps running
 #   3. (--when-idle) waits until the running host says nobody sits at any
 #      table (bin/asterism-games status --idle), at most --wait-max minutes;
 #      when the time runs out nothing is restarted and the checkout is put back
 #   4. a copy of the saved tables, in the state volume (before-update/)
-#   5. GAMES_VERSION=<version> and GAMES_REF=<ref> in .env, docker compose up -d
-#      (the tables go on from their saved state: a game in progress is at the
-#      same turn, its players' screens come back to it)
+#   5. GAMES_VERSION=<version> in .env, docker compose up -d (the tables go
+#      on from their saved state: a game in progress is at the same turn,
+#      its players' screens come back to it)
 #   6. checks that the host runs on the new image and answers its status
-#   7. prints how to go back (this script with the old ref)
-# When something fails before the restart, the checkout and .env are put
-# back as they were.
+#   7. prints how to go back (this script with the old version)
+# When something fails before the restart, the checkout is put back as it
+# was and the running host is not touched.
 #
 # Options:
 #   -C DIR          the deploy/vps directory (default: this script's directory)
 #   --env-file F    the .env (default: DIR/.env)
 #   --sudo          run docker (and git / sed when needed) with sudo
+#   --build         build the image here (docker-compose.build.yml) instead of pulling it
 #   --when-idle     restart only when nobody sits at a table (see 3)
 #   --wait-max MIN  minutes --when-idle waits at most (default 360)
 #   --dry-run       print what it would do
@@ -87,29 +91,32 @@ main() {
   SUDO=""
   DRY=0
   IDLE=0
+  BUILD=0
   WAIT_MAX=360
-  REF=""
+  VERSION=""
   while [ $# -gt 0 ]; do
     case "$1" in
       -C) DIR=$2; shift 2 ;;
       --env-file) ENV_FILE=$2; shift 2 ;;
       --sudo) SUDO=sudo; shift ;;
+      --build) BUILD=1; shift ;;
       --when-idle) IDLE=1; shift ;;
       --wait-max) WAIT_MAX=$2; shift 2 ;;
       --dry-run|-n) DRY=1; shift ;;
       -h|--help) usage 0 ;;
       -*) say "update.sh: unknown option $1" >&2; usage 2 ;;
-      *) [ -z "$REF" ] || die "one ref only ($REF, $1)"; REF=$1; shift ;;
+      *) [ -z "$VERSION" ] || die "one version only ($VERSION, $1)"; VERSION=$1; shift ;;
     esac
   done
-  [ -n "$REF" ] || usage 2
-  printf '%s\n' "$REF" | grep -Eq '^[0-9A-Za-z][0-9A-Za-z._/-]*$' || die "not a ref: $REF"
+  [ -n "$VERSION" ] || usage 2
+  VERSION=${VERSION#v}
+  printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$' || die "not a version: $VERSION (e.g. 0.12.0)"
   printf '%s\n' "$WAIT_MAX" | grep -Eq '^[0-9]+$' || die "--wait-max takes minutes"
 
   [ -n "$DIR" ] || DIR=$(cd "$(dirname "$SELF")" && pwd)
   DIR=$(cd "$DIR" && pwd) || die "no directory $DIR"
   [ -f "$DIR/docker-compose.yml" ] || die "$DIR is not deploy/vps of asterism-games; give it with -C"
-  cd "$DIR"
+  cd "$DIR" || die "cannot enter $DIR"
   [ -n "$ENV_FILE" ] || ENV_FILE="$DIR/.env"
   [ -f "$ENV_FILE" ] || die "no $ENV_FILE (cp env.example .env; docs/install.md)"
   ESUDO=""
@@ -121,19 +128,13 @@ main() {
   [ -w "$TOP/.git" ] || GIT="$SUDO git"
   $GIT -C "$TOP" diff --quiet HEAD -- || die "the checkout $TOP has local changes (git status); commit or drop them first"
   OLD_REF=$($GIT -C "$TOP" symbolic-ref -q --short HEAD || $GIT -C "$TOP" rev-parse HEAD)
-  act $GIT -C "$TOP" fetch -q --tags origin
-  if $GIT -C "$TOP" rev-parse -q --verify "refs/remotes/origin/$REF^{commit}" >/dev/null; then
-    TARGET="origin/$REF"
-  elif $GIT -C "$TOP" rev-parse -q --verify "$REF^{commit}" >/dev/null; then
-    TARGET=$REF
-  else
-    die "no $REF in $TOP (a tag, a branch of origin or a commit)"
-  fi
-  SHA=$($GIT -C "$TOP" rev-parse --short=7 "$TARGET^{commit}")
-  if $GIT -C "$TOP" rev-parse -q --verify "refs/tags/$REF" >/dev/null; then
-    VERSION=${REF#v}
-  else
-    VERSION=$(printf '%s' "$REF" | tr '/' '-')-$SHA
+  TAG="v$VERSION"
+  if ! $GIT -C "$TOP" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+    depth=""
+    [ "$($GIT -C "$TOP" rev-parse --is-shallow-repository)" = true ] && depth="--depth 1"
+    # shellcheck disable=SC2086
+    act $GIT -C "$TOP" fetch -q $depth origin "refs/tags/$TAG:refs/tags/$TAG" ||
+      die "no tag $TAG (git fetch failed; is $VERSION released?)"
   fi
   $SUDO docker compose version >/dev/null 2>&1 || die "docker compose does not answer (try --sudo)"
   PROJECT=$(env_value ASTERISM_PROJECT)
@@ -142,23 +143,34 @@ main() {
     die "no volume ${PROJECT}_rooms: is the console's stack (project $PROJECT) set up? (ASTERISM_PROJECT in .env)"
   $SUDO docker network inspect "${PROJECT}_router" >/dev/null 2>&1 ||
     die "no network ${PROJECT}_router: start the console's stack first"
+  IMAGE=$(env_value GAMES_IMAGE)
+  [ -n "$IMAGE" ] || IMAGE=ghcr.io/ruby-asterism/asterism-games
   FROM=$(env_value GAMES_VERSION)
-  FROM_REF=$(env_value GAMES_REF)
   RUNNING=0
   [ -n "$(compose ps -q games 2>/dev/null)" ] && RUNNING=1
+  if [ "$BUILD" = 1 ]; then how="built here from $TAG"; else how="pulled"; fi
   say "  $DIR (checkout $TOP at $OLD_REF), the console's project $PROJECT"
-  say "  game host ${FROM:-(none)} -> $VERSION ($TARGET, $SHA)"
+  say "  game host ${FROM:-(none)} -> $VERSION ($IMAGE:$VERSION, $how)"
   [ "$IDLE" = 0 ] || say "  restart: when nobody sits at a table (at most $WAIT_MAX minutes)"
   [ "$DRY" = 0 ] || say "  dry run: nothing below is run"
 
   ARMED=1
   trap undo EXIT
   step "The files and the image of $VERSION"
-  act $GIT -C "$TOP" -c advice.detachedHead=false checkout -q "$TARGET"
-  say "+ ${SUDO:+$SUDO }env GAMES_VERSION=$VERSION docker compose build games"
-  if [ "$DRY" = 0 ]; then
-    $SUDO env GAMES_VERSION="$VERSION" docker compose --env-file "$ENV_FILE" -f "$DIR/docker-compose.yml" build games ||
-      die "the image did not build (the host was not restarted)"
+  act $GIT -C "$TOP" -c advice.detachedHead=false checkout -q "$TAG"
+  if [ "$BUILD" = 1 ]; then
+    say "+ ${SUDO:+$SUDO }env GAMES_VERSION=$VERSION docker compose -f docker-compose.yml -f docker-compose.build.yml build games"
+    if [ "$DRY" = 0 ]; then
+      $SUDO env GAMES_VERSION="$VERSION" docker compose --env-file "$ENV_FILE" -f "$DIR/docker-compose.yml" \
+        -f "$DIR/docker-compose.build.yml" build games ||
+        die "the image did not build (the host was not restarted)"
+    fi
+  else
+    say "+ ${SUDO:+$SUDO }env GAMES_VERSION=$VERSION docker compose pull games"
+    if [ "$DRY" = 0 ]; then
+      $SUDO env GAMES_VERSION="$VERSION" docker compose --env-file "$ENV_FILE" -f "$DIR/docker-compose.yml" pull games ||
+        die "could not pull $IMAGE:$VERSION (is $VERSION published? --build builds it here; the host was not restarted)"
+    fi
   fi
 
   if [ "$IDLE" = 1 ] && [ "$RUNNING" = 1 ]; then
@@ -178,18 +190,17 @@ main() {
 
   if [ "$RUNNING" = 1 ]; then
     step "A copy of the saved tables (in the state volume, before-update/)"
-    act_compose exec -T games sh -c 'rm -rf /state/before-update && mkdir -p /state/before-update && cp -a /state/rooms /state/before-update/ 2>/dev/null; date -u > /state/before-update/taken_at; true'
+    act_compose exec -T games sh -c 'rm -rf /state/before-update && mkdir -p /state/before-update && cp -a /state/rooms /state/permanent /state/before-update/ 2>/dev/null; date -u > /state/before-update/taken_at; true'
   fi
 
   ARMED=0
   step "Restart"
   set_env GAMES_VERSION "$VERSION"
-  set_env GAMES_REF "$REF"
   act_compose up -d games
 
   step "Check"
   if [ "$DRY" = 1 ]; then
-    say "(would wait until the host runs on asterism-games:$VERSION and answers its status)"
+    say "(would wait until the host runs on $IMAGE:$VERSION and answers its status)"
   else
     tries=0
     until compose exec -T games bundle exec bin/asterism-games status; do
@@ -198,17 +209,23 @@ main() {
       sleep 2
     done
     img=$($SUDO docker inspect -f '{{.Config.Image}}' "$(compose ps -q games)")
-    [ "$img" = "$(env_value GAMES_IMAGE):$VERSION" ] || [ "$img" = "asterism-games:$VERSION" ] ||
-      die "the host runs $img, not $VERSION"
+    [ "$img" = "$IMAGE:$VERSION" ] || die "the host runs $img, not $IMAGE:$VERSION"
   fi
   trap - EXIT
 
   step "Done: game host $VERSION"
-  if [ -n "$FROM_REF" ] && [ "$FROM_REF" != "$REF" ]; then
-    say "To go back: sh $DIR/update.sh -C $DIR $FROM_REF (the image $FROM is kept)"
+  if [ -n "$FROM" ] && [ "$FROM" != "$VERSION" ]; then
+    if printf '%s\n' "$FROM" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
+      say "To go back: sh $DIR/update.sh -C $DIR $FROM (the image $IMAGE:$FROM is kept)"
+    else
+      say "Before: $FROM (an image built from a checkout; to go back, a version: sh $DIR/update.sh -C $DIR <version>)"
+    fi
   fi
   say "The saved tables before this update: /state/before-update/ in the state volume"
+  say "Old images stay for going back; list them: ${SUDO:+$SUDO }docker image ls $IMAGE"
 }
 
 SELF=$0
+# The whole script is read before it runs (main), so the checkout of
+# another version may replace this file while it runs.
 main "$@"; exit $?

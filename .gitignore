@@ -3,3 +3,4 @@ var/
 .bundle/
 *.log
 deploy/vps/.env
+*.gem

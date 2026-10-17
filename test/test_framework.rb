@@ -11,7 +11,7 @@ require "rbconfig"
 # where nothing else is loaded.
 class TestFramework < Minitest::Test
   LIB = File.expand_path("../lib", __dir__)
-  # The framework's files: what a gem of it would hold (GS7).
+  # The framework's files (the gem holds them, and the sample games next to them).
   FRAMEWORK = %w[asterism_games.rb asterism_games/version.rb asterism_games/game.rb asterism_games/remote.rb
                  asterism_games/store.rb asterism_games/config.rb asterism_games/host.rb
                  asterism_games/rooms.rb asterism_games/ai.rb asterism_games/ai_hub.rb].freeze
@@ -31,8 +31,13 @@ class TestFramework < Minitest::Test
         assert_includes FRAMEWORK, path, "#{f} requires #{path}, outside the framework"
       end
     end
-    assert_equal FRAMEWORK.sort, (Dir.glob("asterism_games{.rb,/*.rb}", base: LIB) - ["asterism_games/mahjong.rb", "asterism_games/othello.rb", "asterism_games/board.rb"]).sort,
+    assert_equal FRAMEWORK.sort, (Dir.glob("asterism_games{.rb,/*.rb}", base: LIB) - ["asterism_games/othello.rb", "asterism_games/board.rb"]).sort,
                  "every framework file is listed"
+    # The gem's games need nothing but the framework either.
+    Dir.glob("asterism_games/{othello,board}{.rb,/*.rb}", base: LIB).each do |f|
+      refute_match(/riichi|mahjong|anthropic/i, File.read(File.join(LIB, f)).lines.grep(/^\s*require/).join, "#{f} requires more than the framework")
+    end
+    assert_empty Dir.glob("**/*mahjong*", base: LIB), "mahjong is the image's (app/), not the gem's"
   end
 
   def test_loading_the_framework_loads_no_game
@@ -61,6 +66,7 @@ class TestFramework < Minitest::Test
   end
 
   def test_the_mahjong_game_is_registered_with_its_screen_and_tables
+    skip "mahjong is not in the gem (rake test:gem)" if GEM_ONLY
     t = AsterismGames.game("mahjong")
     assert_equal MahjongTestHelper::M::Table, t
     assert_equal MahjongTestHelper::M::Remote, t.remote

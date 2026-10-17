@@ -68,17 +68,39 @@ cp env.example .env && chmod 600 .env
 tables' times (`MAHJONG_TURN_SECONDS` and the rest, README "Settings").
 The rules are the host's defaults (README "Rules").
 
-## 4. Build and start
+## 4. Pull and start
+
+The image is published for each version on the GitHub Container Registry
+(`ghcr.io/ruby-asterism/asterism-games:<version>`, also `:<major>.<minor>`
+and `:latest`; amd64 and arm64), built by the repository's CI from the tag
+`v<version>`. It holds the whole host: the framework, the games (mahjong
+with the riichi_engine fork at the revision `Gemfile.lock` pins, othello,
+the drawing board) and `config/rooms.yml`.
 
 ```
-./update.sh main          # builds the image asterism-games:main-<commit> and starts it
+./update.sh 0.12.0        # checks out v0.12.0, pulls its image and starts it
 ```
 
 `update.sh` checks the checkout and the console's volume and network,
-builds the image (bundler takes the riichi_engine fork at the revision
-`Gemfile.lock` pins), writes `GAMES_VERSION` and `GAMES_REF` in `.env`,
-starts the container and waits until it answers its status. By hand, the
-same is `docker compose build && docker compose up -d`.
+checks out the version's tag (the compose file and the settings of that
+version), pulls the image, writes `GAMES_VERSION` in `.env`, starts the
+container and waits until it answers its status. By hand, the same is
+`git checkout v0.12.0`, `GAMES_VERSION=0.12.0` in `.env`, then
+`docker compose pull && docker compose up -d`.
+
+### Building the image yourself
+
+Instead of pulling, build it here from the checkout
+(`docker-compose.build.yml`, the same Dockerfile the CI builds):
+
+```
+docker compose -f docker-compose.yml -f docker-compose.build.yml build
+docker compose up -d
+```
+
+Give it a name of your own in `.env` first (`GAMES_IMAGE=asterism-games-local`),
+so a later pull does not replace it. `./update.sh --build 0.12.0` does the
+same from the version's tag.
 
 ```
 docker compose ps                                          # games: running (healthy)
@@ -223,19 +245,40 @@ revoke it at its service first, then replace the line.
 From `deploy/vps`:
 
 ```
-./update.sh --when-idle main      # build first, restart when nobody sits at a table
-./update.sh v0.3.1                # a tag
-./update.sh --dry-run main        # print the steps
+./update.sh --when-idle 0.12.0    # pull first, restart when nobody sits at a table
+./update.sh 0.12.1                # a version (its tag v0.12.1 and its image)
+./update.sh --build 0.12.1        # build the image here from the tag instead of pulling it
+./update.sh --dry-run 0.12.1      # print the steps
 ```
 
-The image is built while the old host runs. With `--when-idle` the script
+The image is pulled (or built) while the old host runs. With `--when-idle` the script
 waits (at most `--wait-max` minutes, 360) until the running host says
 nobody sits at any table, then copies the saved tables to
 `/state/before-update/` in the volume and restarts. Without it the restart
 is at once: the tables are saved on every change, so a game in progress goes
 on from the same turn after a few seconds, and the players' screens come
-back to it by themselves. To go back, run it with the old ref (it prints
-it); the old image stays (`docker image ls asterism-games`).
+back to it by themselves. To go back, run it with the old version (it
+prints it); the old image stays (`docker image ls ghcr.io/ruby-asterism/asterism-games`).
+
+### From 0.11 to 0.12.0 (the published image)
+
+Until 0.11.1 `update.sh` took a ref (a branch, a tag or a commit) and built
+the image `asterism-games:<ref>-<commit>` on the server. From 0.12.0 it
+takes a version and pulls the published image.
+
+1. In `.env`, set `GAMES_IMAGE=ghcr.io/ruby-asterism/asterism-games` (or
+   remove the line: that is the default). Keep `asterism-games` only if
+   you build it yourself (then `--build`, "Building the image yourself").
+   The `GAMES_REF` line is no longer read.
+2. The old `update.sh` cannot pull: take the new one from the tag for this
+   once, then update with it:
+   ```
+   git -C .. fetch -q origin refs/tags/v0.12.0:refs/tags/v0.12.0
+   git -C .. show v0.12.0:deploy/vps/update.sh > /tmp/games-update.sh
+   sh /tmp/games-update.sh -C "$(pwd)" 0.12.0
+   ```
+3. The images built before (`asterism-games:main-<commit>`) stay; remove
+   them once 0.12.0 runs (`docker image ls asterism-games`).
 
 ### From 0.4.0 to 0.5.0 (the console's seats)
 

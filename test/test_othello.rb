@@ -254,7 +254,7 @@ class TestOthello < Minitest::Test
     worst = 0
     until t.status == "over"
       v = t.member_view(t.seats[t.game.turn - 1]["token"], 0)
-      worst = [worst, Asterism::Codec.pack({ "value" => v }).bytesize + MahjongTestHelper::CALL_KEY.bytesize].max
+      worst = [worst, Asterism::Codec.pack({ "value" => v }).bytesize + GamesTestHelper::CALL_KEY.bytesize].max
       t.move(t.seats[t.game.turn - 1]["token"], t.game.n, B.code(t.game.moves.last), 0)
     end
     puts "\n  othello: the largest view (16 members, names of 32 bytes): #{worst} B"

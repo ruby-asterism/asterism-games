@@ -1,0 +1,17 @@
+# Build the game host's image here instead of pulling the published one
+# (docs/install.md, "Building the image yourself"):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml build
+#   docker compose up -d
+#
+# The image gets the name of docker-compose.yml (GAMES_IMAGE and
+# GAMES_VERSION from .env); set GAMES_IMAGE to a name of your own (e.g.
+# asterism-games-local) so a later pull does not replace it. update.sh
+# --build builds this way from the version's tag.
+services:
+  games:
+    build:
+      context: ../..
+      dockerfile: deploy/vps/Dockerfile
+      args:
+        GAMES_VERSION: ${GAMES_VERSION:-0.12.0}

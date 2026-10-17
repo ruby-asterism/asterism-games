@@ -52,7 +52,8 @@ class TestAppPresence < Minitest::Test
     RUBY
     inc = $LOAD_PATH.select { |p| File.exist?(File.join(p, "asterism.rb")) || File.exist?(File.join(p, "asterism/zenoh.rb")) }
     lib = File.expand_path("../lib", __dir__)
-    @pid = Process.spawn(RbConfig.ruby, "-I", lib, *inc.flat_map { ["-I", _1] }, "-e", host, out: File::NULL)
+    app = File.expand_path("../app", __dir__)
+    @pid = Process.spawn(RbConfig.ruby, "-I", lib, "-I", app, *inc.flat_map { ["-I", _1] }, "-e", host, out: File::NULL)
     @children = []
   end
 

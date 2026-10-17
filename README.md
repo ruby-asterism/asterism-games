@@ -7,7 +7,9 @@ Asterism node, exposes each table as an Asterism object, holds the state
 of the games and lets players on boards (Family mruby), browsers and PCs
 play through Asterism calls.
 
-It is two parts, in this repository for now:
+It is two parts, in this one repository, handed out two ways ("The gem
+and the image"): the framework with the two sample games is the gem
+`asterism-games`, and the whole host with mahjong is a docker image.
 
 - **The framework** (`lib/asterism_games.rb`, `lib/asterism_games/*.rb`):
   everything a game host needs whatever the game is. The connection
@@ -18,11 +20,12 @@ It is two parts, in this repository for now:
   next to the rooms, the status (`GET /status`) and the settings. A game
   subclasses `AsterismGames::Game` and `AsterismGames::Remote` and writes
   only its rules and the methods it exposes ("Writing a game"). The
-  framework requires no game; it is meant to become a gem of its own.
-- **The games**: riichi mahjong (`lib/asterism_games/mahjong/`: four
+  framework requires no game.
+- **The games**: riichi mahjong (`app/asterism_games/mahjong/`: four
   players, seats nobody takes are played by CPUs), built on the
   [riichi_engine](https://github.com/HenrikStephensen/riichi_engine) gem (a
-  fork with fixes, see "riichi_engine" below), which only that game needs;
+  fork with fixes, see "riichi_engine" below), which only that game needs,
+  so it is an application on the gem (`app/`) and not in it;
   othello (`lib/asterism_games/othello/`: two seats and the spectators,
   the smallest game on the framework, "The othello table"); and a shared
   drawing board (`lib/asterism_games/board/`: no winner, one picture every
@@ -34,12 +37,16 @@ It is two parts, in this repository for now:
   asterism gem only.
 
 ```
- bin/asterism-games  ──requires──>  asterism_games/mahjong  ──>  riichi_engine
+ bin/asterism-games  ──requires──>  asterism_games/mahjong (app/, when there)  ──>  riichi_engine
         │            ──requires──>  asterism_games/othello
         │            ──requires──>  asterism_games/board
+        │            ──requires──>  your game (--require FILE)
         │                                   │ (Table < Game, Remote < Remote)
         └──requires──>  asterism_games  <───┘
                         (Host, Rooms, Config, Store, Game, Remote)  ──>  asterism
+
+ the gem asterism-games:  lib/ (framework, othello, board), bin/asterism-games, bin/othello-tty
+ the image:               all of the above, app/ (mahjong), config/, the Gemfile's gems
 ```
 
 Status: up to four players at a table (a lobby to sit and start, calls by
@@ -47,13 +54,13 @@ several players decided together, players that drop out played for after a
 short wait until they are back), two tables at once on a local network, or
 a table in each room of an Asterism console on a server ("Rooms") and
 permanent tables next to them for the boards and browsers registered with
-the console ("Permanent tables"; the server's setup: docs/install.md). Not
-published yet.
+the console ("Permanent tables"; the server's setup: docs/install.md).
 
 | Path | What |
 |---|---|
+| `asterism-games.gemspec` | the gem: what it holds and needs ("The gem and the image") |
 | `bin/asterism-games` | the host (loads the framework and the games) |
-| `bin/mahjong-bots` | players without screens, for trying a table (one process each) |
+| `bin/mahjong-bots` | players without screens, for trying a mahjong table (one process each; not in the gem) |
 | `bin/othello-tty` | an othello table in a terminal: the board as text, watch or play by typing squares ("The othello table") |
 | `lib/asterism_games.rb` | the framework, without any game |
 | `lib/asterism_games/game.rb` | the base of a game: the registry, the members and tokens, who joins in a room, the views, the time, saving ("Writing a game") |
@@ -62,22 +69,80 @@ published yet.
 | `lib/asterism_games/rooms.rb` | the rooms' supervisor: one host process per room that opens a table ("Rooms"), and one for the permanent tables ("Permanent tables"); `GET /status` |
 | `lib/asterism_games/config.rb` | the settings (file and environment; each game's table keys come from the game) |
 | `lib/asterism_games/store.rb` | saved states, one JSON file per table |
-| `lib/asterism_games/mahjong.rb` | the mahjong game: requiring it registers `mahjong` |
-| `lib/asterism_games/mahjong/` | `table.rb` (seats, rounds, views, time, the table's settings), `engine.rb` (the calls into riichi_engine), `remote.rb` (the exposed object), `tiles.rb` (tile numbers) |
+| `app/asterism_games/mahjong.rb` | the mahjong game, outside the gem: requiring it registers `mahjong` |
+| `app/asterism_games/mahjong/` | `table.rb` (seats, rounds, views, time, the table's settings), `engine.rb` (the calls into riichi_engine), `remote.rb` (the exposed object), `tiles.rb` (tile numbers) |
 | `lib/asterism_games/othello.rb` | the othello game: requiring it registers `othello` |
 | `lib/asterism_games/othello/` | `board.rb` (the rules, a game as a history, the CPU), `table.rb` (seats, the owner, time, views, saving), `remote.rb` (the exposed object) |
 | `lib/asterism_games/board.rb` | the drawing board: requiring it registers `board` |
 | `lib/asterism_games/board/` | `table.rb` (the strokes, the owner, the limits, the picture in pages, saving), `remote.rb` (the exposed object) |
 | `config/example.yml` | settings to copy |
 | `config/rooms.yml` | the settings of the server's image (rooms) |
-| `deploy/vps/` | the server's image, compose file, `update.sh` (docs/install.md) |
+| `deploy/vps/` | the server's image, compose files, `update.sh` (docs/install.md) |
+| `.github/workflows/image.yml` | builds the image for each tag `v<version>` and publishes it on ghcr.io |
 | `docs/install.md` | putting the host on a server next to an Asterism console |
-| `test/` | the tests (`rake test`); `test/framework/` a small game on the framework alone |
+| `test/` | the tests (`rake test`, `rake test:gem`); `test/framework/` a small game on the framework alone |
+
+## The gem and the image
+
+**The gem** `asterism-games` (`require "asterism_games"`) is for writing a
+game host of your own: the framework, the two sample games that need
+nothing else (othello, the drawing board), `bin/asterism-games` and
+`bin/othello-tty`. It depends on the asterism gem only (0.7.1 or later in
+0.x; what came after 0.7.1, such as `@status` and `on_app_join`, is used
+when there). Not in it: mahjong (`app/`, it needs the riichi_engine fork
+from git), `bin/mahjong-bots`, `deploy/`, `config/` and the tests. The AI
+players' code is in it, and is offered only with a key; Claude needs the
+anthropic gem as well, which is not a dependency (`gem install anthropic`,
+"AI players").
+
+```
+gem install asterism-games              # CRuby 3.2 or newer and a C compiler (asterism-zenoh)
+```
+
+A host of the sample games on a plain zenohd (`games.yml`):
+
+```yaml
+router: tcp/127.0.0.1:7447
+node: games
+state_dir: var/state
+tables:
+  - name: othello1
+    game: othello
+  - name: board1
+    game: board
+```
+
+```
+asterism-games --config games.yml       # games/games/othello1, games/games/board1
+othello-tty --commands "sit,cpu,start"  # in another terminal: play against the CPU
+```
+
+Without a settings file the host serves the first game's tables: with the
+gem alone that is othello (`othello1`). A game of your own ("Writing a
+game") is a file that requires `asterism_games` and registers its table;
+the host loads it with `--require`, and the settings name its tables:
+
+```
+asterism-games --config my.yml --require ./counter.rb
+```
+
+**The image** `ghcr.io/ruby-asterism/asterism-games:<version>` is the
+whole host as the server runs it: the gem's files, mahjong (`app/`), the
+settings of the rooms (`config/rooms.yml`) and the gems of `Gemfile.lock`
+(riichi_engine at a pinned revision, anthropic). The CI
+(`.github/workflows/image.yml`) builds it for each tag `v<version>` (the
+number of `VERSION`) for amd64 and arm64. `docker pull
+ghcr.io/ruby-asterism/asterism-games:0.12.0`; next to a console:
+docs/install.md (`deploy/vps`, which pulls it, or builds it with
+`docker-compose.build.yml`).
 
 ## Running
 
-CRuby 3.2 or newer and a C compiler (asterism-zenoh compiles its extension).
-Bundler fetches the riichi_engine fork from GitHub (see "riichi_engine").
+From this checkout (everything, mahjong too). CRuby 3.2 or newer and a C
+compiler (asterism-zenoh compiles its extension). Bundler fetches the
+riichi_engine fork from GitHub (see "riichi_engine"). The `Gemfile` is for
+this checkout and the image (mahjong, the AI players); the gem's own needs
+are in the gemspec.
 
 ```
 bundle config set --local path vendor/bundle
@@ -108,7 +173,7 @@ A YAML file (`--config PATH` or `ASTERISM_GAMES_CONFIG`; see
 | `app` | `ASTERISM_GAMES_APP` | `games` | the application every game lives under |
 | `credentials` | `ASTERISM_GAMES_CREDENTIALS` | none | a console's `.tar`, for a router over mutual TLS (the router comes from it, and the node ID too unless `node` is given) |
 | `state_dir` | `ASTERISM_GAMES_STATE_DIR` | `var/state` | where the tables are saved |
-| `tables` | | the first game's tables (`mahjong1`, `mahjong2`) | each `{name, game, ...}`; `game` defaults to the first game registered (`mahjong`) |
+| `tables` | | the first game's tables (`mahjong1`, `mahjong2`; with the gem alone `othello1`) | each `{name, game, ...}`; `game` defaults to the first game registered (`mahjong`; with the gem alone `othello`) |
 
 The other keys of a table are its game's (`settings` in the game's class,
 "Writing a game"). A mahjong table takes (the environment applies to every
@@ -475,8 +540,11 @@ end
 ```
 
 `bin/asterism-games` requires the framework and the games it serves
-(`require "asterism_games/mahjong"`, `require "asterism_games/othello"`);
-the settings name a game per table.
+(`asterism_games/mahjong` from `app/` when it is there, then
+`asterism_games/othello` and `asterism_games/board`), then the files given
+with `--require FILE` (a game of your own, with the gem or this checkout);
+the settings name a game per table. The mahjong of `app/` is written the
+same way: it requires the framework by its name, as your game would.
 
 What the framework gives a game:
 
@@ -1212,6 +1280,8 @@ most, the first time a suit pattern with many tiles is counted).
 ```
 bundle exec rake test                                   # MJ_GAMES=20 CPU hanchan, MJ_HUMAN_GAMES=1 four-player hanchan
 MJ_GAMES=4 bundle exec rake test                        # quicker
+bundle exec rake test:gem                               # what the gem holds only: lib/ alone, mahjong never loaded
+gem build asterism-games.gemspec                        # the gem (its files: test/test_gem.rb checks them)
 ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a router
 ```
 
@@ -1335,7 +1405,13 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   with `ASTERISM_TEST_ROUTER`, the host over a router (calls, the state
   put, the profile, and another node killed: away at once, back when its
   node is there again). Also the mahjong game's registration and its exposed
-  methods as before.
+  methods as before, and that nothing of mahjong is in `lib/`.
+- `test_gem.rb`: the gem (`asterism-games.gemspec`): its files are `lib/`,
+  the two commands and the texts, never `app/`, `deploy/`, `config/`, the
+  tests or anything like a key; its version is `VERSION`'s and it depends on
+  asterism only. Under `rake test:gem` (with `test_framework.rb`,
+  `test_othello.rb` and `test_board.rb`, `lib/` alone on the load path) the
+  games are othello and the board and nothing of mahjong is loaded.
 
 `bin/mahjong-bots` fills a table with players over the network (to try a
 second table, or the host under load): `bundle exec bin/mahjong-bots

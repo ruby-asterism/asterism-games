@@ -4,7 +4,10 @@
 # The game host. Settings: README "Settings" (a YAML file given by --config
 # or ASTERISM_GAMES_CONFIG, and the environment).
 #
-#   bin/asterism-games [--config PATH]          # the host (tables, or the rooms' tables)
+#   bin/asterism-games [--config PATH] [--require FILE]...
+#                                               # the host (tables, or the rooms' tables);
+#                                               # --require: a game of your own (README
+#                                               # "Writing a game"), loaded after the others
 #   bin/asterism-games status [--idle] [URL]    # the rooms' host: what GET /status says
 #                                               # (the rooms and the permanent tables);
 #                                               # --idle: exit 0 when nobody sits at a table
@@ -47,13 +50,28 @@ if ARGV.first == "status"
 end
 
 require "asterism_games"
-require "asterism_games/mahjong"
+# The games outside the gem (README "The gem and the image"): app/ of this
+# checkout and of the image, mahjong (which needs riichi_engine, the
+# Gemfile's). Registered first, so a table without "game" is mahjong's as
+# before. The gem has no app/: there the first game is othello.
+app = File.expand_path("../app", __dir__)
+if File.directory?(app)
+  $LOAD_PATH.unshift app
+  require "asterism_games/mahjong"
+end
+# The sample games, in the gem.
 require "asterism_games/othello"
 require "asterism_games/board"
 
 path = ENV["ASTERISM_GAMES_CONFIG"]
-if (i = ARGV.index("--config"))
-  path = ARGV[i + 1]
+ARGV.each_with_index do |a, i|
+  case a
+  when "--config" then path = ARGV[i + 1]
+  when "--require"
+    f = ARGV[i + 1].to_s
+    abort "asterism-games: --require takes a file" if f.empty?
+    require File.exist?(f) ? File.expand_path(f) : f
+  end
 end
 $stdout.sync = true
 config = AsterismGames::Config.load(path)

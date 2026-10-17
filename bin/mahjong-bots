@@ -19,7 +19,7 @@
 #                                [--credentials fmruby-aaaaaa.tar --node fmruby-aaaaaa]
 #                                    # one player as a board with its own certificate
 #                                    # (the permanent tables, README "Permanent tables")
-$LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+$LOAD_PATH.unshift File.expand_path("../lib", __dir__), File.expand_path("../app", __dir__)
 require "asterism"
 require "asterism_games/mahjong/engine"
 require "asterism_games/mahjong/table"
