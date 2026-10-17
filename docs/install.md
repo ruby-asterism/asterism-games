@@ -193,7 +193,9 @@ their saved tables stay in `/state/permanent/`.
 
 A table's owner can seat Claude and Jev next to the CPUs (README "AI
 players") when the host has their keys. They are read from `.env` (the
-host gets every line as its environment) and go nowhere else:
+host gets every line as its environment) and go nowhere else. Jev's key
+comes from TypeSafe's console (console.typesafe.ai): sign in, open Keys
+and create one; it is shown once, so put it straight into `.env`.
 
 1. In `deploy/vps`, check that `.env` is `-rw-------` (`chmod 600 .env`).
 2. Add the keys you have (an editor on the server, not a command line that
@@ -201,8 +203,7 @@ host gets every line as its environment) and go nowhere else:
 
    ```
    ANTHROPIC_API_KEY=...              # Claude (console.anthropic.com, an API key)
-   CLOUDFLARE_ACCOUNT_ID=...          # Jev: the account that runs Workers AI
-   CLOUDFLARE_API_TOKEN=...           # a token with the Workers AI permission
+   TYPESAFE_API_KEY=...               # Jev (console.typesafe.ai, Keys: create an API key)
    ASTERISM_GAMES_AI_DAILY_USD=3.0    # the most they may cost a day
    ```
 

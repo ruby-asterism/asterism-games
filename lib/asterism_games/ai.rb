@@ -43,12 +43,12 @@ module AsterismGames
 
       def claude_model = str("ASTERISM_GAMES_CLAUDE_MODEL", "claude-sonnet-5-5")
       def claude_effort = str("ASTERISM_GAMES_CLAUDE_EFFORT", "low")
-      def jev_model = str("ASTERISM_GAMES_JEV_MODEL", "typesafe/jev")
+      def jev_model = str("ASTERISM_GAMES_JEV_MODEL", "jev-latest")
 
-      # USD per million tokens. The defaults are the published prices of
-      # 2026-10-17: Claude Sonnet 5.5 $2 input, $10 output, $2.50 a 5-minute
-      # cache write, $0.10 a cache hit; Jev on Workers AI $0.042 input,
-      # output free.
+      # USD per million tokens. The defaults are the published prices:
+      # Claude Sonnet 5.5 $2 input, $10 output, $2.50 a 5-minute cache
+      # write, $0.10 a cache hit (checked 2026-10-17); Jev (TypeSafe's API)
+      # $0.042 input, output free (checked 2026-10-18).
       def prices(kind)
         case kind
         when "claude"
@@ -81,9 +81,8 @@ module AsterismGames
             log&.call("games: ANTHROPIC_API_KEY is set but the anthropic gem is missing: no Claude players")
           end
         end
-        acct = @env["CLOUDFLARE_ACCOUNT_ID"].to_s
-        tok = @env["CLOUDFLARE_API_TOKEN"].to_s
-        out["jev"] = Jev.new(acct, tok, model: jev_model) unless acct.empty? || tok.empty?
+        tok = @env["TYPESAFE_API_KEY"].to_s
+        out["jev"] = Jev.new(tok, model: jev_model) unless tok.empty?
         out
       end
 
@@ -336,44 +335,49 @@ module AsterismGames
       end
     end
 
-    # Jev (TypeSafe AI) on Cloudflare Workers AI: a decision model that
-    # picks one of a set of answers. The moves are the choice's criteria
-    # (their numbers as the keys, their texts as the descriptions), the
-    # view is the state.
+    # Jev (TypeSafe) through its own API, POST /v1/systemone: a decision
+    # model that picks one of a set of answers. The view is the state, the
+    # moves are one choice question's criteria (their numbers as the keys,
+    # their texts as the descriptions); the answer's "choice" is the key it
+    # picked, "usage" the tokens it counted (input only is paid).
     class Jev
-      URL = "https://api.cloudflare.com/client/v4/accounts/%s/ai/run"
+      BASE = "https://api.typesafe.ai"
+      PATH = "/v1/systemone"
 
-      def initialize(account, token, model: "typesafe/jev")
+      def initialize(key, model: "jev-latest", base: BASE)
         require "net/http"
         require "openssl"
-        @account = account
-        @token = token
+        @key = key
         @model = model
+        @uri = URI(base.to_s.chomp("/") + PATH)
+      end
+
+      # The request body (without the key).
+      def body(request)
+        view = request["view"]
+        state = view.merge("moves" => nil).compact
+        criteria = (view["moves"] || []).to_h { |m| [m["n"].to_s, m["text"]] }
+        { "state" => state, "model" => @model,
+          "questions" => { "move" => { "type" => "choice", "instructions" => Jev.instructions(request),
+                                       "criteria" => criteria } } }
       end
 
       def decide(request, timeout: 30)
         t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         view = request["view"]
-        state = view.merge("moves" => nil).compact
-        criteria = (view["moves"] || []).to_h { |m| [m["n"].to_s, m["text"]] }
-        body = { "model" => @model,
-                 "input" => { "state" => state,
-                              "questions" => { "move" => { "type" => "choice",
-                                                           "instructions" => Jev.instructions(request),
-                                                           "criteria" => criteria } } } }
-        uri = URI(format(URL, @account))
-        res = Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: [timeout, 5].min,
-                                                  read_timeout: timeout) do |h|
-          req = Net::HTTP::Post.new(uri)
-          req["Authorization"] = "Bearer #{@token}"
+        res = Net::HTTP.start(@uri.host, @uri.port, use_ssl: @uri.scheme == "https",
+                                                    open_timeout: [timeout, 5].min, read_timeout: timeout,
+                                                    write_timeout: timeout) do |h|
+          req = Net::HTTP::Post.new(@uri)
+          req["Authorization"] = "Bearer #{@key}"
           req["Content-Type"] = "application/json"
-          req.body = JSON.generate(body)
+          req.body = JSON.generate(body(request))
           h.request(req)
         end
         raise Error, "jev: HTTP #{res.code}" unless res.is_a?(Net::HTTPSuccess)
         data = JSON.parse(res.body)
-        data = data["result"] if data.is_a?(Hash) && data["result"].is_a?(Hash)
-        u = data["usage"] || {}
+        raise Error, "jev: not an object" unless data.is_a?(Hash)
+        u = data["usage"].is_a?(Hash) ? data["usage"] : {}
         tokens = { "in" => u["input_tokens"].to_i, "out" => u["output_tokens"].to_i }
         choice = data.dig("answers", "move", "choice")
         begin
@@ -384,7 +388,8 @@ module AsterismGames
         Decision.new(n: n, tokens: tokens, ms: ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).round)
       rescue JSON::ParserError
         raise Error, "jev: not JSON"
-      rescue Net::OpenTimeout, Net::ReadTimeout, SocketError, SystemCallError, OpenSSL::SSL::SSLError => e
+      rescue Net::OpenTimeout, Net::ReadTimeout, Net::WriteTimeout, IOError, SocketError, SystemCallError,
+             OpenSSL::SSL::SSLError => e
         raise Error, "jev: #{e.class.name}"
       end
 

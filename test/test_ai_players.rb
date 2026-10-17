@@ -192,18 +192,13 @@ class TestAIPlayers < Minitest::Test
     tok = "cf-token-0123456789abcdef"
     Dir.mktmpdir do |dir|
       logs = []
-      jev = AI::Jev.new("acct123", tok)
-      stub = Object.new
-      def stub.code = "401"
-      def stub.body = "{}"
-      orig = Net::HTTP.method(:start)
-      Net::HTTP.define_singleton_method(:start) { |*_a, **_k, &_b| stub }
-      begin
+      e = nil
+      seen = fake_typesafe(401, '{"error":"invalid key"}') do |base|
+        jev = AI::Jev.new(tok, base: base)
         e = assert_raises(AI::Error) { jev.decide({ "game" => "mahjong", "seat" => 0, "view" => { "moves" => [] } }) }
-      ensure
-        Net::HTTP.define_singleton_method(:start, orig)
       end
       assert_equal "jev: HTTP 401", e.message
+      assert_includes seen[0][:head], "Bearer #{tok}"
       leaky = Object.new
       leaky.define_singleton_method(:decide) { |*_a, **_k| raise "Bearer #{tok} x-api-key #{key}" }
       budget = AI::Budget.new(File.join(dir, "u.json"), daily_usd: 5.0, prices: ->(_) { {} })
@@ -225,9 +220,115 @@ class TestAIPlayers < Minitest::Test
       assert(logs.any? { _1.include?("RuntimeError") }, logs.inspect)
       # Settings: no key, no offer.
       assert_equal({}, AI::Settings.new({}).deciders)
-      assert_equal %w[jev], AI::Settings.new({ "CLOUDFLARE_ACCOUNT_ID" => "a", "CLOUDFLARE_API_TOKEN" => "b" }).deciders.keys
+      assert_equal %w[jev], AI::Settings.new({ "TYPESAFE_API_KEY" => "b" }).deciders.keys
+      assert_equal({}, AI::Settings.new({ "CLOUDFLARE_ACCOUNT_ID" => "a", "CLOUDFLARE_API_TOKEN" => "b" }).deciders)
       assert_equal %w[claude jev], AI::Settings.new({ "ASTERISM_GAMES_AI_FAKE" => "1" }).deciders.keys
     end
+  end
+
+  # A fake TypeSafe API on 127.0.0.1: answers every POST with status and
+  # body (after delay seconds); yields its base URL; returns what it got
+  # ([{head:, body:}]).
+  def fake_typesafe(status, body, delay: 0)
+    require "socket"
+    server = TCPServer.new("127.0.0.1", 0)
+    seen = []
+    th = Thread.new do
+      loop do
+        c = server.accept
+        head = +""
+        while (line = c.gets) && line != "\r\n"
+          head << line
+        end
+        len = head[/^content-length:\s*(\d+)/i, 1].to_i
+        got = c.read(len)
+        seen << { head: head, body: got }
+        sleep delay if delay.positive?
+        reason = status == 200 ? "OK" : "Error"
+        c.write("HTTP/1.1 #{status} #{reason}\r\nContent-Type: application/json\r\n" \
+                "Content-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n#{body}")
+        c.close
+      rescue IOError, SystemCallError
+        c&.close
+      end
+    end
+    yield "http://127.0.0.1:#{server.addr[1]}"
+    seen
+  ensure
+    th&.kill
+    server&.close
+  end
+
+  JEV_VIEW = { "status" => "playing", "hand" => %w[1m 2m 3m],
+               "moves" => [{ "n" => 0, "type" => "discard", "tile" => "1m", "text" => "discard 1m" },
+                           { "n" => 1, "type" => "discard", "tile" => "3m", "text" => "discard 3m" }] }.freeze
+  JEV_REQUEST = { "game" => "mahjong", "table" => "mahjong1", "seat" => 2, "instructions" => "how to play",
+                  "view" => JEV_VIEW }.freeze
+
+  # Jev through TypeSafe's API (POST /v1/systemone): the request's shape,
+  # the answer read back, the tokens counted, a failure, a timeout.
+  def test_the_jev_request
+    key = "ts-key-test-abcdef0123456789"
+    answer = { "model" => "jev-1.13.0",
+               "answers" => { "move" => { "type" => "choice", "choice" => "1", "confidence" => 0.9,
+                                          "probabilities" => { "0" => 0.05, "1" => 0.95 } } },
+               "usage" => { "input_tokens" => 812, "output_tokens" => 21 } }
+    d = nil
+    seen = fake_typesafe(200, JSON.generate(answer)) do |base|
+      d = AI::Jev.new(key, base: base).decide(JEV_REQUEST, timeout: 5)
+    end
+    assert_equal 1, d.n
+    assert_equal({ "in" => 812, "out" => 21 }, d.tokens)
+    assert_kind_of Integer, d.ms
+    head = seen[0][:head]
+    assert_match %r{\APOST /v1/systemone HTTP/1\.1\r\n}, head
+    assert_includes head, "Authorization: Bearer #{key}"
+    assert_match(%r{^Content-Type: application/json}i, head)
+    sent = JSON.parse(seen[0][:body])
+    assert_equal %w[model questions state], sent.keys.sort
+    assert_equal "jev-latest", sent["model"]
+    refute sent["state"].key?("moves")
+    assert_equal %w[1m 2m 3m], sent["state"]["hand"]
+    q = sent["questions"]["move"]
+    assert_equal "choice", q["type"]
+    assert_equal({ "0" => "discard 1m", "1" => "discard 3m" }, q["criteria"])
+    assert_includes q["instructions"], "how to play"
+    refute_includes seen[0][:body], key
+    # The model is a setting.
+    s = AI::Settings.new({ "TYPESAFE_API_KEY" => key, "ASTERISM_GAMES_JEV_MODEL" => "jev-1.14.0" })
+    assert_equal "jev-1.14.0", s.jev_model
+    assert_equal "jev-latest", AI::Settings.new({}).jev_model
+    # What a decision costs: input tokens only.
+    Dir.mktmpdir do |dir|
+      budget = AI::Budget.new(File.join(dir, "u.json"), daily_usd: 3.0, prices: ->(k) { AI::Settings.new({}).prices(k) })
+      usd = budget.record("jev", d.tokens)
+      assert_in_delta 812 * 0.042 / 1_000_000.0, usd, 1e-12
+      e = budget.day["jev"]
+      assert_equal [1, 812, 21], [e["calls"], e["in"], e["out"]]
+    end
+    # A choice that is not a move: a failure that still cost its tokens.
+    bad = answer.merge("answers" => { "move" => { "type" => "choice", "choice" => "7" } })
+    e = nil
+    fake_typesafe(200, JSON.generate(bad)) do |base|
+      e = assert_raises(AI::TokenError) { AI::Jev.new(key, base: base).decide(JEV_REQUEST, timeout: 5) }
+    end
+    assert_equal "jev: move 7 is not offered", e.message
+    assert_equal({ "in" => 812, "out" => 21 }, e.tokens)
+    # An error status, an answer that is not JSON, no answer in time.
+    [[429, "{}", "jev: HTTP 429"], [529, "{}", "jev: HTTP 529"], [422, '{"detail":"x"}', "jev: HTTP 422"],
+     [200, "<html>", "jev: not JSON"]].each do |status, body, msg|
+      fake_typesafe(status, body) do |base|
+        e = assert_raises(AI::Error) { AI::Jev.new(key, base: base).decide(JEV_REQUEST, timeout: 5) }
+      end
+      assert_equal msg, e.message
+      refute_includes e.message, key
+    end
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    fake_typesafe(200, JSON.generate(answer), delay: 3) do |base|
+      e = assert_raises(AI::Error) { AI::Jev.new(key, base: base).decide(JEV_REQUEST, timeout: 0.5) }
+    end
+    assert_equal "jev: Net::ReadTimeout", e.message
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0, :<, 3
   end
 
   # The request Claude gets: the model, the cached instructions, the

@@ -906,7 +906,7 @@ seat by its name (`Claude`, `Jev`, numbered when there are several) with
 | Kind | What answers | Model (setting) |
 |---|---|---|
 | `claude` | Claude through the Messages API (the `anthropic` gem): the instructions (`describe`) as the cached system prompt, the seat's `look` as JSON, a structured answer `{"n": <move>}` | `claude-sonnet-5-5` (`ASTERISM_GAMES_CLAUDE_MODEL`), effort `low` (`ASTERISM_GAMES_CLAUDE_EFFORT`) |
-| `jev` | Jev (TypeSafe AI) on Cloudflare Workers AI: a decision model asked one choice question, the moves as its answers (keys `"0"`, `"1"`, ... with their texts), the `look` as its state | `typesafe/jev` (`ASTERISM_GAMES_JEV_MODEL`) |
+| `jev` | Jev through TypeSafe's own API (`POST https://api.typesafe.ai/v1/systemone`, games 0.11.1): a decision model asked one choice question, the moves as its answers (keys `"0"`, `"1"`, ... with their texts), the `look` as its state; the answer's `usage` is what is counted | `jev-latest` (`ASTERISM_GAMES_JEV_MODEL`; a versioned id such as `jev-1.13.0` keeps one model) |
 
 - **How a decision goes.** For each decision of an AI seat the table asks
   the host (the seat's `look`, exactly what a human in that seat sees); the
@@ -928,12 +928,13 @@ seat by its name (`Claude`, `Jev`, numbered when there are several) with
   day's decisions, tokens and money per kind; the host's `@status` has the
   totals (`ai_today`).
 - **Prices.** USD per million tokens, settings with the published prices
-  as defaults (checked 2026-10-17): Claude Sonnet 5.5 `ASTERISM_GAMES_CLAUDE_USD_IN`
-  2.0, `_OUT` 10.0, `_CACHE_WRITE` 2.5 (5-minute cache), `_CACHE_READ` 0.10;
-  Jev `ASTERISM_GAMES_JEV_USD_IN` 0.042, `_OUT` 0. Change them when the
+  as defaults: Claude Sonnet 5.5 `ASTERISM_GAMES_CLAUDE_USD_IN` 2.0, `_OUT`
+  10.0, `_CACHE_WRITE` 2.5 (5-minute cache), `_CACHE_READ` 0.10 (checked
+  2026-10-17); Jev `ASTERISM_GAMES_JEV_USD_IN` 0.042, `_OUT` 0 (TypeSafe
+  charges input tokens only; checked 2026-10-18). Change them when the
   prices change.
-- **Keys.** `ANTHROPIC_API_KEY` for Claude, `CLOUDFLARE_ACCOUNT_ID` and
-  `CLOUDFLARE_API_TOKEN` for Jev, from the environment (on the VPS:
+- **Keys.** `ANTHROPIC_API_KEY` for Claude, `TYPESAFE_API_KEY` for Jev
+  (console.typesafe.ai, Keys), from the environment (on the VPS:
   `deploy/vps/.env`, mode 600, docs/install.md). Without a kind's key the
   kind is not offered at all (no button). The keys go into no log, no
   state file, no status and no error text (an API's error is logged as its
