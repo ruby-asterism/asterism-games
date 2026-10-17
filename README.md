@@ -340,13 +340,13 @@ Whether the host sees the others come and go is the router's business:
 |---|---|---|
 | a home network (a plain zenohd, no access control) | yes | away at once (measured 10-20 ms after the node left) |
 | a room (console 0.3.0, seats) | yes: a room's host reads the whole room, the seats' liveliness tokens included | away at once (measured 6-7 ms) |
-| the permanent tables (console roles `games-host` and `games`) | no: the role `games-host` may declare a liveliness watch (`Watch asterism/**`), but the router sends it only the tokens on its own keys | the fallback: away after `away_seconds` without a call (measured 13.6 s with the default 10 s) |
+| the permanent tables (console roles `games-host` and `games`) | yes, when the role `games-host` has `Read asterism/*/game` (the console's docs/rooms.md): the router sends the host the players' table apps' liveliness tokens | away at once (measured 13 ms on the console's rehearsal) |
 
-For the permanent tables to see the players too, the host's role needs the
-players' application tokens to read: `Read asterism/*/game` on `games-host`
-(the app `game` the table's screens run as; tried on the console's
-rehearsal, away 13 ms). That is a change of the console's roles, not of the
-host: nothing here changes with it.
+A role `games-host` made before that line (with only `Watch asterism/**`)
+gets just the tokens on its own keys: the host then falls back to the time
+without a call (away after `away_seconds`, measured 13.6 s with the default
+10 s). Add the line to the role (Admin > Relay > Roles, Edit) and Apply;
+nothing in the host changes with it.
 
 The screens follow the host the same way: the tables' apps (fmruby-core
 `flash/app/game/`) and `bin/othello-tty` take a host's tables off their
