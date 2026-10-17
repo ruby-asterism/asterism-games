@@ -356,6 +356,42 @@ sent); at a table, a host that leaves shows the connection lost, the
 screen stops asking its view (one every 30 s, should the word not come)
 and asks again as soon as the host is back.
 
+## Status
+
+The host tells its tables' counts on the network (games 0.9.0), as
+`asterism/<node>/<app>/@status` (asterism's `docs/protocol.md` 8: an
+application's status, a map it puts when it changes and gives to whoever
+asks). One entry per table, with the counts of `GET /status` and nothing
+that names a member (no member names, node IDs or tokens):
+
+```
+asterism/games/games/@status
+{"mahjong1" => {"st" => "play", "members" => 4, "humans" => 1, "cpus" => 3, "away" => 0},
+ "othello1" => {"st" => "wait", "members" => 0, "humans" => 0, "cpus" => 0, "away" => 0}}
+```
+
+- **When.** After a table changes (a join, a seat taken or left, a move)
+  and once a second (an away seat changes the counts with time alone); a
+  put goes out only when the counts differ from the last one. A host puts
+  it as soon as it is connected.
+- **Who reads it.** `asterism watch` and `asterism tree` (the asterism
+  gem's command line), its MCP bridge (`asterism_status`), the console's
+  details of the host's node (console 0.3.4), or anyone with
+  `Asterism.status_of("games", "games")`.
+- **Where.** On a home network and on the permanent tables. The role
+  `games-host` needs `asterism/${node}/*/@status` in "Read and write" (the
+  console's docs/rooms.md): a `**` does not match the chunk `@status`. A
+  room's host tells none (the rooms' rules let it write only its own
+  place, which `@status` is not part of, and the console only watches who
+  is in a room).
+- **The asterism gem.** With an asterism that has `Asterism.status`
+  (after 0.7.1) the host uses it (`net.status`); with the 0.7.1 this
+  repository is pinned to, it does the same by hand on the connection's
+  session (`Host::TablesStatus`: a queryable on the key and a put when the
+  counts change).
+- **Size.** Five tables take about 300 bytes (the largest put is in the
+  log's `largest message` with the others).
+
 ## Writing a game
 
 A game is two classes on the framework: the table (`AsterismGames::Game`:

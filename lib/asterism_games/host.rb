@@ -127,6 +127,7 @@ module AsterismGames
       end
       @net = net
       @connected = true
+      @tables_status = TablesStatus.new(net, node, @config["app"]) if tables_status?
       write_status
       @log.call("games: #{node}/#{@config['app']} up (#{@games.keys.join(', ')}) via " \
                 "#{locator || 'credentials'}#{" in #{@config['namespace']}" if @config['namespace']}")
@@ -160,6 +161,7 @@ module AsterismGames
 
     def down
       @net = nil
+      @tables_status = nil
       @connected = false
       write_status
     end
@@ -190,9 +192,11 @@ module AsterismGames
     # One pass over the games (also used by the tests without a network).
     def step
       now = @clock.call
+      changed = false
       @games.each do |name, g|
         g.tick(now)
         if g.dirty?
+          changed = true
           g.save(now)
           put_state(name, g, now)
         elsif g.unsaved?
@@ -203,6 +207,43 @@ module AsterismGames
         end
       end
       write_status(now) if @config["status_file"] && now - @status_at.to_i >= STATUS_EVERY_MS
+      tell_tables(now, changed: changed)
+    end
+
+    # ------------------------------------------------------------ @status
+
+    # How often the tables' counts are looked at for the status when no
+    # table changed (an away seat changes them with time alone).
+    TABLES_STATUS_EVERY_MS = 1000
+    # The counts the status gives of each table: those of Rooms#status,
+    # nothing that names a member (README "Status").
+    TABLES_STATUS_KEYS = %w[st members humans cpus away].freeze
+
+    # Whether this host tells its tables' counts on
+    # asterism/<node>/<app>/@status (docs/protocol.md 8 of asterism): on a
+    # LAN and for the permanent tables, not in a room (the console's room
+    # rules let a room's host write only its own keys, and the verbatim
+    # chunk @status is not among them; nobody could read it there either).
+    def tables_status?
+      !@config["namespace"]
+    end
+
+    # {table => {"st", "members", "humans", "cpus", "away"}}.
+    def tables_status(now = @clock.call)
+      @games.transform_values { |g| g.summary(now).slice(*TABLES_STATUS_KEYS) }
+    end
+
+    # Hands the counts to the status after a change, and once a second;
+    # Asterism puts them only when they differ from the last put.
+    def tell_tables(now, changed: false)
+      ts = @tables_status
+      return unless ts && @net && !::Asterism.reconnecting?
+      return unless changed || now - @tables_at.to_i >= TABLES_STATUS_EVERY_MS
+      @tables_at = now
+      bytes = ts.set(tables_status(now))
+      note_size("put @status", bytes) if bytes
+    rescue ::Asterism::Error, ArgumentError => e
+      @log.call("games: status: #{e.message}")
     end
 
     def put_state(name, game, now)
@@ -228,6 +269,36 @@ module AsterismGames
     def save_all
       now = @clock.call
       @games.each_value { |g| g.save(now) }
+    end
+
+    # The host's status: Asterism's (net.status, asterism after 0.7.1),
+    # which puts it when it changes and answers who asks. The asterism gem
+    # this host is pinned to (0.7.1) has no status yet: then the same
+    # thing by hand on the connection's session (a queryable on the key
+    # and a put when the counts change).
+    class TablesStatus
+      def initialize(net, node, app)
+        @net = net
+        @key = "asterism/#{node}/#{app}/@status"
+        return if @net.respond_to?(:status)
+        @bytes = nil
+        @qa = net.session.queryable(@key) { |q| q.reply(@key, @bytes) if @bytes }
+      end
+
+      # Sets the status; returns the size of the put (key and payload) when
+      # it changed, nil when it did not.
+      def set(st)
+        bytes = ::Asterism::Codec.pack(st)
+        if @net.respond_to?(:status)
+          return nil if @net.status == st
+          @net.status(st)
+        else
+          return nil if bytes == @bytes
+          @bytes = bytes
+          @net.session.put(@key, bytes)
+        end
+        @key.bytesize + bytes.bytesize
+      end
     end
 
     # Measures every answer an exposed object gives (as the reply payload

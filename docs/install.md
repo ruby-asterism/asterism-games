@@ -142,7 +142,8 @@ of its own, a row of the console's registry.
    closed: the console's docs/rooms.md, "A game host's permanent tables";
    console 0.2.3 shows the tables on the rooms' page):
    - Roles > New role `games-host`: Read and write `asterism/${node}`,
-     `asterism/${node}/games/**`, `asterism/${node}/@profile`; Read
+     `asterism/${node}/games/**`, `asterism/${node}/@profile`,
+     `asterism/${node}/*/@status` (the tables' counts, README "Status"); Read
      `asterism/*/game` (the players' table apps: the host sees them leave
      at once, README "Who is there"); Watch `asterism/**`; not for browsers.
    - Roles > New role `games`: Read `asterism/*/games/**`; Ask

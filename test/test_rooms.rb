@@ -288,10 +288,15 @@ class TestRooms < Minitest::Test
 
   # Records what Host#up asks of the Net.
   class ProfileNet
-    attr_reader :profiles, :joined, :left
+    attr_reader :profiles, :joined, :left, :statuses
 
-    def initialize = @profiles = []
+    def initialize
+      @profiles = []
+      @statuses = []
+    end
+
     def profile(**fields) = @profiles << fields
+    def status(h = nil) = h ? @statuses << h : @statuses.last
     def on_error(&) = nil
     def on_join(&blk) = @joined = blk
     def on_leave(&blk) = @left = blk
@@ -314,6 +319,10 @@ class TestRooms < Minitest::Test
       net = ProfileNet.new
       host.up(net)
       assert_equal(name ? [{ name: name }] : [], net.profiles, "the profile #{cfg['namespace'] ? 'in a room' : name}")
+      # The tables' counts (README "Status"): outside the rooms only.
+      host.tell_tables(0, changed: true)
+      st = host.games.keys.to_h { [_1, { "st" => "wait", "members" => 0, "humans" => 0, "cpus" => 0, "away" => 0 }] }
+      assert_equal(cfg["namespace"] ? [] : [st], net.statuses, "the status #{cfg['namespace'] ? 'in a room' : name}")
       # Who is there: every kind of host hears the nodes leave and come back.
       t = host.games["mahjong1"]
       t.join("node-a", "A", 0)

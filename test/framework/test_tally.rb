@@ -112,6 +112,43 @@ class TestTally < Minitest::Test
     assert_equal 0, AsterismGames::Host.new(c, log: ->(_m) {}).games["tally1"].count, "another format is not read"
   end
 
+  # The host's @status (README "Status"): counts only, the same keys as
+  # the status file without the game's own extras, and none in a room.
+  # TablesStatus with a Net that has net.status (asterism after 0.7.1) and
+  # with one that does not (by hand on the session).
+  def test_the_at_status_has_counts_only
+    c = config({ "tables" => [{ "name" => "tally1" }] })
+    h = AsterismGames::Host.new(c, log: ->(_m) {})
+    tok = h.games["tally1"].join("node-secret", "Carol", ms)["token"]
+    st = h.tables_status(ms)
+    assert_equal({ "tally1" => { "st" => "play", "members" => 1, "humans" => 1, "cpus" => 0, "away" => 0 } }, st)
+    [tok, "Carol", "node-secret"].each { |x| refute_includes JSON.generate(st), x }
+    assert h.tables_status?
+    refute AsterismGames::Host.new(c.merge("namespace" => "room/01"), log: ->(_m) {}).tables_status?, "not in a room"
+
+    with_api = Struct.new(:st) do
+      def status(h = nil) = h ? (self.st = h) : st
+    end.new
+    ts = AsterismGames::Host::TablesStatus.new(with_api, "games", "games")
+    assert_equal "asterism/games/games/@status".bytesize + Asterism::Codec.pack(st).bytesize, ts.set(st)
+    assert_equal st, with_api.st
+    assert_nil ts.set(st), "the same counts again: nothing"
+
+    session = Struct.new(:puts, :qa) do
+      def queryable(key, &blk) = (self.qa = [key, blk])
+      def put(key, bytes) = puts << [key, bytes]
+    end.new([])
+    by_hand = Struct.new(:session).new(session)
+    ts = AsterismGames::Host::TablesStatus.new(by_hand, "games", "games")
+    assert_equal "asterism/games/games/@status", session.qa[0]
+    assert ts.set(st)
+    assert_nil ts.set(st)
+    assert_equal [["asterism/games/games/@status", Asterism::Codec.pack(st)]], session.puts
+    q = Struct.new(:replies) { def reply(k, b) = replies << [k, b] }.new([])
+    session.qa[1].call(q)
+    assert_equal [["asterism/games/games/@status", Asterism::Codec.pack(st)]], q.replies
+  end
+
   def test_the_status_file_has_counts_only
     c = config({ "tables" => [{ "name" => "tally1" }] }).merge("status_file" => File.join(@dir, "host.json"))
     h = AsterismGames::Host.new(c, log: ->(_m) {})
@@ -140,8 +177,10 @@ class TestTally < Minitest::Test
       exit!(0)
     end
     states = Queue.new
+    statuses = Queue.new
     Asterism.connect(router, node: "tally-player-#{Process.pid}", app: "game") do |net|
       net.session.subscribe("asterism/#{node}/games/tally1/state") { |s| states << Asterism::Codec.unpack(s.payload) }
+      net.session.subscribe("asterism/#{node}/games/@status") { |s| statuses << Asterism::Codec.unpack(s.payload) }
       net.start
       t = nil
       50.times do
@@ -164,6 +203,16 @@ class TestTally < Minitest::Test
       end
       assert_equal 3, s && s["n"], "the state put on the table's key"
       assert_equal "asterism-games", net.profile_of(node, icon: false)&.fetch("name")
+      # The tables' counts on the host's @status (README "Status"): put
+      # when they change, and the answer to a get.
+      st = nil
+      30.times do
+        st = statuses.pop(timeout: 0.2)
+        break if st && st.dig("tally1", "members") == 1
+      end
+      assert_equal({ "tally1" => { "st" => "play", "members" => 1, "humans" => 1, "cpus" => 0, "away" => 0 } }, st)
+      got = net.session.get("asterism/#{node}/games/@status", timeout: 2.0).map { Asterism::Codec.unpack(_1.payload) }
+      assert_equal [st], got
       assert t.leave(tok)
       # Who is there (README "Who is there"): another node joins and is
       # killed; the host hears its node leave and shows it away at once
