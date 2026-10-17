@@ -17,7 +17,8 @@ module AsterismGames
     #   sit(token, seat)            -> "ok" or why not (seat -1: any free seat)
     #   stand(token)                -> "ok" or why not
     #   cpu(token, seat, on)        -> "ok" or why not (the owner; seat -1: every empty seat;
-    #                                  on: an AI player's name puts it in, README "AI players")
+    #                                  on: an AI player's name puts it in, README "AI players";
+    #                                  on one seat with a CPU or AI player: turns it into that one)
     #   start(token)                -> "ok" or why not (the owner, four seats taken)
     #   rule(token, item, value)    -> "ok" or why not (the owner, in the lobby:
     #                                  a local rule, README "Local rules")
@@ -45,7 +46,8 @@ module AsterismGames
            stand: [%w[token], "Gives the seat up, in the lobby. \"ok\" or why not."],
            cpu: [%w[token seat on], "The owner (the first to sit): on true puts a CPU in the empty seat (seat -1: " \
                                     "every empty seat), false takes a CPU or AI player out; a name the lobby offers " \
-                                    "(look's \"ai_players\": \"claude\", \"jev\") puts that AI player in."],
+                                    "(look's \"ai_players\": \"claude\", \"jev\") puts that AI player in. On one seat that holds " \
+                                    "a CPU or another AI player, on turns it into the one asked for."],
            start: [%w[token], "The owner starts the game once the four seats are taken. \"ok\" or why not."],
            rule: [%w[token item value], "The owner sets a local rule in the lobby: item 0 the game (0 hanchan, " \
                                         "1 east only), see describe. \"ok\" or why not."],

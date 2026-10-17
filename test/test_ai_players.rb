@@ -49,6 +49,36 @@ class TestAIPlayers < Minitest::Test
     assert_equal "not owner", t.cpu(other, 3, "claude")
   end
 
+  # One call turns a seat round the lobby's cycle (empty, CPU, Claude, Jev,
+  # empty: the table apps' seat button); a refused AI leaves the seat as
+  # it was, and seat -1 changes only empty seats.
+  def test_one_call_changes_a_cpu_or_ai_seat_into_another_kind
+    t = human_table
+    t.ai_kinds = %w[claude jev]
+    tok = t.join("wasm-aaaaa0", "P0", 0)["token"]
+    t.sit(tok, 0, 0)
+    assert_equal "ok", t.cpu(tok, 1, true)
+    assert_equal "no change", t.cpu(tok, 1, true)
+    assert_equal "ok", t.cpu(tok, 1, "claude"), "a CPU into Claude"
+    assert_equal ["", "claude", "", ""], t.public_view(0)["ai"]
+    assert_equal "no change", t.cpu(tok, 1, "claude")
+    assert_equal "ok", t.cpu(tok, 1, "jev"), "Claude into Jev"
+    assert_equal ["P0", "Jev"], t.public_view(0)["nm"][0, 2]
+    assert_equal "ok", t.cpu(tok, 1, false), "Jev out"
+    assert_equal [1, 0, 0, 0], t.public_view(0)["sk"]
+    assert_equal "ok", t.cpu(tok, 1, "jev")
+    assert_equal "ok", t.cpu(tok, 1, true), "an AI player back into a CPU"
+    assert_equal ["P0", "CPU1"], t.public_view(0)["nm"][0, 2]
+    assert_equal "ok", t.cpu(tok, 2, "claude")
+    assert_equal "ok", t.cpu(tok, -1, true), "seat -1 fills the empty seat only"
+    assert_equal ["", "", "claude", ""], t.public_view(0)["ai"]
+    t.ai_kinds = %w[jev]
+    assert_equal "no ai", t.cpu(tok, 1, "claude"), "the day's limit or no key"
+    assert_equal ["P0", "CPU1", "Claude", "CPU2"], t.public_view(0)["nm"], "the CPU stays"
+    assert_equal "no change", t.cpu(tok, 0, "jev"), "a human seat stays"
+    assert_equal 1, t.public_view(0)["sk"][0]
+  end
+
   # Drives a table, answering each AI decision with answer.call(request)
   # => [n or nil, ms later] (nil n: a failure).
   def drive(t, now, until_status: "over", answer:)

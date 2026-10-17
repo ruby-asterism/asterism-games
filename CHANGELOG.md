@@ -3,6 +3,16 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
+## Unreleased (0.12.1)
+
+- Mahjong: `cpu(token, seat, on)` on one seat that holds a CPU or an AI
+  player of another kind turns it into the one asked for in the same call
+  (a CPU into `"claude"`, `"claude"` into `"jev"`, `true` an AI player
+  back into a CPU). A refused AI player (`"no ai"`: no key, or the day's
+  limit) leaves the seat as it was. Seat -1 still fills empty seats only.
+  The table apps' lobby has a button per seat that goes round empty, CPU,
+  Claude, Jev with it.
+
 ## 0.12.0
 
 - **The gem `asterism-games`** (`asterism-games.gemspec`, `require

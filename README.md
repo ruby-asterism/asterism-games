@@ -584,7 +584,7 @@ connects again after 3 s; while a client of a router only reconnects
 | `mine` | none | the same for a node that joined, or nil (nothing is created) |
 | `sit` | token, seat | `"ok"` or why not (`"taken"`, `"not waiting"`, ...); seat -1: the first free one. In the lobby only; a seated member moves |
 | `stand` | token | `"ok"` or why not (lobby only) |
-| `cpu` | token, seat, on | the owner: a CPU into an empty seat (on) or out of it (a CPU or an AI player); seat -1 with on fills every empty seat; on as a name the lobby offers (`"claude"`, `"jev"`) puts that AI player in ("AI players"), `"no ai"` when it is not offered |
+| `cpu` | token, seat, on | the owner: a CPU into an empty seat (on) or out of it (a CPU or an AI player); seat -1 with on fills every empty seat; on as a name the lobby offers (`"claude"`, `"jev"`) puts that AI player in ("AI players"), `"no ai"` when it is not offered; on one seat that holds a CPU or an AI player of another kind, on turns it into the one asked for (games 0.12.1) |
 | `start` | token | the owner, once the four seats are taken and one is a member: the seats are drawn (who deals first) and the game starts |
 | `rule` | token, item, value | the owner, in the lobby: a local rule ("Local rules"); `"ok"` or why not (`"not owner"`, `"not waiting"`, `"no rule"`, `"value"`, `"no change"`) |
 | `view` | token, assist | the member's view (below), or `{"error" => "token"}`; assist: the help its screen shows (Assist, 0-3) |
@@ -965,9 +965,12 @@ one (`MAHJONG_TURN_SECONDS`, or the owner's local rule item 10).
 
 A table's owner puts an AI player into an empty seat as it puts a CPU
 there (games 0.10.0): `cpu(token, seat, "claude")` or `"jev"`, the names
-the lobby view offers (`"ak"`; `look`'s `ai_players`). The table apps
-show them as buttons (`+Claude`, `+Jev`) next to "CPU で埋める", and the
-seat by its name (`Claude`, `Jev`, numbered when there are several) with
+the lobby view offers (`"ak"`; `look`'s `ai_players`). On one seat that
+holds a CPU or another AI player the same call turns it into the one
+asked for (games 0.12.1; `true` turns an AI player back into a CPU, and
+a refused one leaves the seat as it was). The table apps give each seat
+of the lobby a button that goes round empty, CPU, Claude, Jev (the kinds
+offered), and show the seat by its name (`Claude`, `Jev`, numbered when there are several) with
 `[AI]`; the view's `"ai"` gives each seat's kind (`""` for the others),
 `"sk"` keeps 2 for them (an old screen shows a CPU named Claude).
 

@@ -263,7 +263,11 @@ module AsterismGames
       # The owner puts a CPU in an empty seat (on) or takes one out (off);
       # seat -1 with on fills every empty seat. on may name an AI player
       # the host offers ("claude", "jev": the lobby view's "ak", README "AI
-      # players"): that one goes in instead of a CPU.
+      # players"): that one goes in instead of a CPU. On one seat that holds
+      # a CPU or an AI player of another kind, on turns it into the one
+      # asked for in the same call (a CPU into Claude, Claude into Jev, an
+      # AI player back into a CPU); a refused AI ("no ai") leaves it as it
+      # was. Seat -1 never changes a seat that is taken.
       def cpu(token, seat, on)
         node = node_of(token)
         return "token" unless node
@@ -279,6 +283,10 @@ module AsterismGames
         targets.each do |i|
           s = @seats[i]
           if on && s.nil?
+            @seats[i] = cpu_seat
+            @seats[i]["ai"] = ai if ai
+            n += 1
+          elsif on && !seat.negative? && s && s["kind"] == "cpu" && s["ai"] != ai
             @seats[i] = cpu_seat
             @seats[i]["ai"] = ai if ai
             n += 1
