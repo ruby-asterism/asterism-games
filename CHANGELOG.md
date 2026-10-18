@@ -21,8 +21,31 @@ described ("games 0.10.0" and the like).
   `limit_usd`, `own`, `over`; README "Status"). The rooms' status
   (`bin/asterism-games status`) adds `kind_limit_usd` and prints a kind's
   money against its own limit. `ai_usage.json` keeps its form.
+- **Mahjong: the start of a round and the result** (README "Result"),
+  at a table with humans:
+  - After the deal the host waits `deal_pause_seconds` (2,
+    `MAHJONG_DEAL_PAUSE_SECONDS`) while the screens show the round's name
+    ("東1局 0本場"): no clock runs (the dealer's first move has its full
+    time after it), no CPU or AI player plays, `act` is `"not offered"`.
+    New view key `in` (the ms left).
+  - A round's result waits until every human seated and there (not away)
+    has pressed OK, the action next (12): a screen of before gives its
+    OK with its "next" as it did. Whoever does not press, the result
+    moves on `result_auto_seconds` (10, `MAHJONG_RESULT_AUTO_SECONDS`)
+    after the end of its count. The count is the screens' rule too: per
+    winner one second for each yaku line and one for the points, the
+    winners of a double or triple ron one after the other, one second for
+    a round without a win. New view key `ok`: `[the seats that gave their
+    OK, the seats still waited for, the ms until it moves on]` (bits,
+    bits, ms; not in a spectator's delayed view).
+  - **`result_seconds` (`MAHJONG_RESULT_SECONDS`) no longer holds a table
+    with humans**: the fixed 8 s are now only those of a table without
+    humans (CPUs and AI players), which stays as it was (no pause, no
+    OKs). The end of a game (`over`) is as before.
+  - A table saved with a result by 0.14.0 moves on by its saved time.
 - Updating: `./update.sh 0.15.0` and the two lines in `.env`
-  (docs/install.md, "From 0.14 to 0.15.0").
+  (docs/install.md, "From 0.14 to 0.15.0"); the times of the round's start
+  and result have optional lines of their own.
 - **`deploy/vps/update.sh` no longer stops at "local changes" because of
   `credentials/`.** The directory belongs to the container's user (mode
   700, docs/install.md), so git run as the server's user could not stat

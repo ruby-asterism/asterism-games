@@ -185,7 +185,9 @@ mahjong table):
 | `turn_seconds` | `MAHJONG_TURN_SECONDS` | 5 | a player's time for a move (a discard, riichi, a kan, a win); a move that takes longer goes on into the bank ("Time") |
 | `bank_seconds` | `MAHJONG_BANK_SECONDS` | 20 | each player's bank, full again every round; when the move's time and the bank are used up, the drawn tile is discarded (0: no bank, `turn_seconds` a move and no more) |
 | `call_seconds` | `MAHJONG_CALL_SECONDS` | 8 | the time to call a discard, the same for every player who may; after it the call is passed |
-| `result_seconds` | `MAHJONG_RESULT_SECONDS` | 8 | a round's result stays this long (or until a player presses next) |
+| `result_seconds` | `MAHJONG_RESULT_SECONDS` | 8 | a table without humans (CPUs and AI players only): a round's result stays this long. A table with humans waits for their OKs instead ("Result", games 0.15.0) |
+| `result_auto_seconds` | `MAHJONG_RESULT_AUTO_SECONDS` | 10 | a table with humans: a round's result moves on by itself this long after its count, whoever has not pressed OK ("Result") |
+| `deal_pause_seconds` | `MAHJONG_DEAL_PAUSE_SECONDS` | 2 | a table with humans: after the deal the round's name shows this long; no clock runs and no CPU or AI player plays ("Result"; 0: none) |
 | `over_seconds` | `MAHJONG_OVER_SECONDS` | 60 | the end of a game stays this long (or until the owner presses next), then the table is back in its lobby |
 | `away_seconds` | `MAHJONG_AWAY_SECONDS` | 10 | a member whose node leaves the network is away at once; one that has not called the table this long is away too (where the host does not see the nodes come and go: "Who is there") |
 | `away_wait_seconds` | `MAHJONG_AWAY_WAIT_SECONDS` | 2 | an away member's time to discard or to call, instead of `turn_seconds` and the bank / `call_seconds` |
@@ -798,6 +800,40 @@ The player sees the time on its own move: `dl` is `[seats, ms left, the
 bank's ms]` when the move has a bank, the bank being the last part of the
 ms left (the move's own time is what comes before it).
 
+### Result
+
+(games 0.15.0) A table with a human at it:
+
+- **The start of a round.** After the deal the host waits
+  `deal_pause_seconds` (2) while every screen shows the round's name in
+  big letters ("東1局 0本場"). Nobody's time runs (the dealer's first move
+  has its full time from the end of the pause), no CPU or AI player plays,
+  and `act` answers `"not offered"`. The view says it with `in`.
+- **The result waits for every human's OK.** A round's result (a win or
+  a draw) moves on to the next round once every human seated and there
+  (not away, "Players that drop out") has pressed OK: the action next
+  (12), so a screen made before 0.15.0 gives its OK with its next as it
+  did. A seat that has given it has nothing more in `a` (a second next is
+  `"ok"` and changes nothing). An away human is not waited for; with
+  nobody there the time decides.
+- **Or by itself after the count.** Whoever does not press, the result
+  moves on `result_auto_seconds` (10) after the end of its count. The
+  count is the time a screen takes to show the result one step a second,
+  the same rule on both sides: **per winner, one step for each line of
+  its yaku (`y`) and one for its points; with two or three winners their
+  steps one after the other (the sum); a round without a win (a draw, an
+  abortive draw, three rons) one step.** A step is 1 s. The host counts
+  from the moment of the result; a screen that shows all at once (a
+  player who skips the steps) does not change the host's time. The view
+  says whom the result waits for and how long with `ok`.
+- The end of a game (`over`) is as before: the owner's next (or
+  `over_seconds`) takes the table back to the lobby.
+
+A table without humans (`humans` 0, or every human replaced by a CPU)
+has neither: its result stays `result_seconds` (8) and its rounds start
+at once, as before 0.15.0. A table saved with a result before 0.15.0
+moves on by its saved time.
+
 ### Players that drop out
 
 A member whose node leaves the network is away at once ("Who is there"),
@@ -841,6 +877,8 @@ A Hash (MessagePack); tiles are one byte each in binary strings (bin).
 | `res` | at a round's end: `k` (`tsumo_agari`, `ron_agari`, `ryuukyoku`, and the abortive draws `kyuushu_kyuuhai`, `sanchahou`, `suufon_renda`, `suukaikan`, `suucha_riichi`), `rd` (the round: `[bakaze, kyoku, honba]`), `d` (the four score changes), `f` (who dealt in), `wn` (one entry per winner, in turn order from the discarder: `w` seat, `y` the yaku as riichi_engine names them, in Japanese, `yh` the han of each (-1: a yakuman, -2: a double yakuman), `pt` fu, han and points, `h` and `ag` the hand and the winning tile, `pa` pao: `[[the seat that pays, the yakuman], ...]`), `tp` (tenpai seats at a draw), `ng` (the seats with nagashi mangan at a draw; paid in place of the no-ten payments), `rs` (the seats of the three rons at a sanchahou) |
 | `ru`, `rx`, `ry` | the local rules ("Local rules"), one number per item: items 0-10, 11-14 and 15-16 (item 10 the seconds for a move) |
 | `tb`, `tc`, `dc` | item 10's bank, seconds; in the lobby, item 10's choices as codes and item 16's choices in seconds ("Local rules") |
+| `in` | while the round's name shows after the deal ("Result"): the ms left (games 0.15.0) |
+| `ok` | on a result of a table with humans ("Result"): `[the seats that gave their OK as bits, the seats it still waits for as bits (seated, there, no OK yet), the ms until it moves on by itself]`; a screen shows "OK を待っています (n/m)" with n the first's bits and m both together (games 0.15.0) |
 | `fin` | at the end: `[[seat, rank, score, point x 10], ...]` |
 | `fr` | at the end, why the game ended: `normal_end` (the last round played, the fourth round of the extra round too), `tobi`, `all_last_oya_agari` (agari-yame), `all_last_oya_tenpai` (tenpai-yame), `sudden_death` (somebody reached 30,000 in the extra round), `west` (after west 4, the host's, only without `sudden_death`), `rounds` (the host's guard against a loop); none for a game saved before it was added |
 | `me`, `h`, `dt`, `a` | the member's view only: its seat (-1: watching), its hand (sorted, without the drawn tile), the drawn tile (-1 none), what it may do: `[[type, tiles], ...]` |
@@ -856,8 +894,8 @@ table screen.
 Action types: 1 discard (tiles: what may be discarded; send one), 2 riichi
 (tiles: the discards that declare it; send one), 3 tsumo, 4 closed kan, 5
 added kan, 6 pon, 7 chi (one entry per pair), 8 open kan, 9 ron, 10 pass,
-11 nine kinds, 12 next (after a result; after the end of a game, the owner's
-next goes back to the lobby). 13 is only an event (`ev`): three rons, a draw.
+11 nine kinds, 12 next (after a result, the seat's OK, "Result"; after the
+end of a game, the owner's next goes back to the lobby). 13 is only an event (`ev`): three rons, a draw.
 
 ### Message size
 
@@ -1535,6 +1573,12 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   player's short wait leaving the bank, the calls keeping their time, the
   owner's choice (a bank, a fixed time, only the lobby's choices) reaching the
   table, the banks saved, and a table saved before the bank read back.
+- `test_mahjong_result_ok.rb`: the start of a round and the result
+  ("Result"): the pause after the deal (no clock, no CPU or AI move, every
+  round, saved), the result waiting for every human's OK (an away one not
+  counted, an old screen's next as its OK), moving on by itself after the
+  count and 10 s (the count by the yaku lines, a double ron, a draw), the
+  settings, and a table without humans as before.
 - `test_mahjong_records.rb`: the game records ("Game records"): a game's
   record whole (every round replayed from its deal by its moves: each
   discard and call from the hand that holds it, the wins' hands, no tile

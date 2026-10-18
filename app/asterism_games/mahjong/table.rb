@@ -46,6 +46,7 @@ module AsterismGames
                  "turn_seconds" => ["turn_ms", 1000], "bank_seconds" => ["bank_ms", 1000],
                  "call_seconds" => ["call_ms", 1000],
                  "result_seconds" => ["result_ms", 1000], "over_seconds" => ["over_ms", 1000],
+                 "result_auto_seconds" => ["result_auto_ms", 1000], "deal_pause_seconds" => ["deal_pause_ms", 1000],
                  "away_seconds" => ["away_ms", 1000], "away_wait_seconds" => ["away_wait_ms", 1000],
                  "cpu_ms" => ["cpu_ms", 1],
                  "cpu_level" => ["cpu_level", nil], "humans" => ["humans", 1],
@@ -59,6 +60,8 @@ module AsterismGames
                  "MAHJONG_BANK_SECONDS" => ["bank_ms", 1000],
                  "MAHJONG_CALL_SECONDS" => ["call_ms", 1000],
                  "MAHJONG_RESULT_SECONDS" => ["result_ms", 1000],
+                 "MAHJONG_RESULT_AUTO_SECONDS" => ["result_auto_ms", 1000],
+                 "MAHJONG_DEAL_PAUSE_SECONDS" => ["deal_pause_ms", 1000],
                  "MAHJONG_OVER_SECONDS" => ["over_ms", 1000],
                  "MAHJONG_AWAY_SECONDS" => ["away_ms", 1000],
                  "MAHJONG_AWAY_WAIT_SECONDS" => ["away_wait_ms", 1000],
@@ -73,6 +76,10 @@ module AsterismGames
                }
 
       SAVE_FORMAT = 2
+      # The count of a result (README "Result"): a screen shows a win's yaku
+      # one a second and then its points; the host's auto advance counts
+      # from the end of it.
+      COUNT_STEP_MS = 1000
       MAX_ROUNDS = 40 # a hanchan has far fewer; a guard against a loop
       ASSIST_LEVELS = 0..3 # README "Assist"
       ASSIST_DEFAULT = 1   # the riichi help (view's default; a screen always says its level)
@@ -82,7 +89,9 @@ module AsterismGames
         "bank_ms" => 20_000,      # and the bank a move may go on into, one per seat, full again every round (0: none)
         "call_ms" => 8_000,       # every human's time to call a discard
         "cpu_ms" => 700,          # a CPU waits this long before it acts
-        "result_ms" => 8_000,     # the result of a round stays this long
+        "result_ms" => 8_000,     # a table without humans: the result of a round stays this long
+        "result_auto_ms" => 10_000, # a table with humans: after the count, the result moves on by itself
+        "deal_pause_ms" => 2_000, # a table with humans: the round's name shows this long after the deal
         "over_ms" => 60_000,      # the end of a game stays this long (then the lobby)
         "away_wait_ms" => 2_000,  # an away seat's time to discard or call
         "cpu_level" => "normal",  # easy / normal / hard
@@ -140,7 +149,7 @@ module AsterismGames
       RULE_TIMES = [[5, 20], [5, 0], [30, 0], [60, 0], [600, 0]].freeze
       # The public view's keys that belong to the game (a spectator's delayed
       # view takes them from the past, the rest is now).
-      GAME_KEYS = %w[st sv r sc ri dora kw fu hc ls ev cl dl res fin fr].freeze
+      GAME_KEYS = %w[st sv r sc ri dora kw fu hc ls ev cl dl res fin fr in ok].freeze
       # The declarations a screen shows at the seat that made them (the
       # view's "cl", README "Views"): riichi, the calls, the wins, nine kinds.
       CALL_TYPES = %i[riichi pon chi daiminkan ankan kakan tsumo_agari ron_agari kyuushu_kyuuhai sanchahou].freeze
@@ -514,6 +523,7 @@ module AsterismGames
           return next_now(seat, now) ? "ok" : "not offered"
         end
         return "not playing" unless @status == "play"
+        return "not offered" if @intro_at && now < @intro_at
         a = Engine.match(offers(seat), type, tiles)
         unless a
           @stats["refused"] += 1
@@ -540,11 +550,12 @@ module AsterismGames
       def offers(seat)
         return [] if seat.nil? || seat.negative?
         case @status
-        when "result" then return human?(seat) ? [[Engine::NEXT, []]] : []
+        when "result" then return human?(seat) && @oks[seat].zero? ? [[Engine::NEXT, []]] : []
         when "over" then return human?(seat) && @seats[seat]["node"] == @owner ? [[Engine::NEXT, []]] : []
         when "play" then nil
         else return []
         end
+        return [] if intro?
         return [] if @state.phase == :naki_wait && @decl.key?(seat)
         Engine.offers(@state, seat, @rule)
       end
@@ -744,6 +755,7 @@ module AsterismGames
         out = {}
         GAME_KEYS.each { |k| out[k] = v[k] if v.key?(k) }
         out.delete("dl") # a deadline in the past says nothing
+        out.delete("ok") # nor who has given an OK
         out
       end
 
@@ -768,7 +780,9 @@ module AsterismGames
       def step(now)
         case @status
         when "result"
-          return false if now < @next_at
+          ok = all_ok?
+          return false if now < @next_at && !ok
+          @log&.call("mahjong: #{@name}: result moves on (#{ok ? 'every OK' : 'by itself'})") if @ok_humans
           next_round(now)
           true
         when "over"
@@ -781,6 +795,13 @@ module AsterismGames
       end
 
       def step_play(now)
+        if @intro_at
+          return false if now < @intro_at
+          # The round's name has shown: the dealer's first draw and the
+          # first clock follow.
+          @intro_at = nil
+          changed
+        end
         st = @state
         case st.phase
         when :tsumo
@@ -995,7 +1016,11 @@ module AsterismGames
                   "honba" => flow.next_honba, "oya" => flow.next_oya_index, "reason" => flow.reason.to_s }
         @result = res
         @status = "result"
-        @next_at = now + @opts["result_ms"]
+        # A table with humans waits for their OKs, or moves on result_auto_ms
+        # after the count; one without them after result_ms, as before.
+        @oks = [0] * 4
+        @ok_humans = humans?
+        @next_at = now + (@ok_humans ? self.class.count_ms(res) + @opts["result_auto_ms"].to_i : @opts["result_ms"].to_i)
         @deadline = nil
         @cpu_at = nil
         clear_decl
@@ -1006,11 +1031,55 @@ module AsterismGames
         @log&.call("mahjong: #{@name}: round over: #{res['kind']} #{pts.inspect} #{@game['scores'].inspect}")
       end
 
-      # The "next" button: on a round's result (any seated human) or a
-      # finished game (the owner: back to the lobby).
+      # The length of a result's count (README "Result"): per winner one
+      # step a yaku line and one for the points, the winners one after the
+      # other; a round without a win one step.
+      def self.count_ms(res)
+        wins = res.is_a?(Hash) ? Array(res["wins"]) : []
+        return COUNT_STEP_MS if wins.empty?
+        wins.sum { |w| (Array(w["yaku"]).size + 1) * COUNT_STEP_MS }
+      end
+
+      # A seat may play: not while the round's name shows (deal_pause_ms).
+      def intro?
+        @status == "play" && !@intro_at.nil? && @now < @intro_at
+      end
+
+      def humans?
+        (0..3).any? { |i| human?(i) }
+      end
+
+      # The humans a result waits for: seated, not away, no OK yet (bits).
+      def ok_waiting
+        bits { |i| human?(i) && !away?(i) && @oks[i].zero? }
+      end
+
+      def ok_done
+        bits { |i| human?(i) && @oks[i] == 1 }
+      end
+
+      # Every human there pressed OK (one at least is there).
+      def all_ok?
+        return false unless @ok_humans && humans?
+        return false if (0..3).none? { |i| human?(i) && !away?(i) }
+        ok_waiting.zero?
+      end
+
+      # The "next" button: on a round's result the seat's OK (README
+      # "Result"; the result moves on once every human there has given
+      # it), on a finished game the owner's (back to the lobby).
       def next_now(seat, now)
         case @status
-        when "result" then next_round(now)
+        when "result"
+          if @ok_humans
+            if @oks[seat].zero?
+              @oks[seat] = 1
+              @log&.call("mahjong: #{@name}: OK from seat #{seat} (waiting for #{(0..3).select { |i| ok_waiting[i] == 1 }.inspect})")
+              changed
+            end
+          else
+            next_round(now)
+          end
         when "over"
           return false unless offers(seat).any?
           to_lobby
@@ -1045,7 +1114,7 @@ module AsterismGames
           record_game_end
         else
           @game.merge!("bakaze" => f["bakaze"], "kyoku" => f["kyoku"], "honba" => f["honba"], "oya" => f["oya"])
-          new_round
+          new_round(now)
         end
         changed
       end
@@ -1083,6 +1152,9 @@ module AsterismGames
         @deadline = nil
         @deadline_bits = 0
         @next_at = nil
+        @intro_at = nil
+        @oks = [0] * 4
+        @ok_humans = false
         clear_decl
         @sv += 1
         changed
@@ -1097,11 +1169,11 @@ module AsterismGames
         @final = nil
         @final_reason = nil
         record_game_start
-        new_round
+        new_round(now)
         changed
       end
 
-      def new_round
+      def new_round(now)
         # The banks are full again at the start of every round.
         @banks = [bank_ms] * 4
         @state = Engine.setup(@game, @rule)
@@ -1114,6 +1186,12 @@ module AsterismGames
         @cpu_at = nil
         @event = nil
         @call = nil
+        @oks = [0] * 4
+        @ok_humans = false
+        # After the deal a table with humans shows the round's name for
+        # deal_pause_ms: nobody's clock runs, no CPU or AI plays.
+        pause = @opts["deal_pause_ms"].to_i
+        @intro_at = humans? && pause.positive? ? now + pause : nil
         @sv += 1
         record_round_start
       end
@@ -1164,8 +1242,14 @@ module AsterismGames
           v["ev"] = @event
           v["cl"] = @call if @call
           v["dl"] = deadline_view(now)
+          # The round's name shows (deal_pause_ms): the ms left.
+          v["in"] = @intro_at - now if @status == "play" && @intro_at && now < @intro_at
         end
         v["res"] = result_view if @result && (@status == "result" || @status == "over")
+        # A result that waits for the humans' OKs: [the seats that gave it,
+        # the seats it waits for (there, no OK yet), the ms until it moves
+        # on by itself] (README "Result").
+        v["ok"] = [ok_done, ok_waiting, [@next_at - now, 0].max] if @status == "result" && @ok_humans && @next_at
         v["fin"] = @final if @final
         v["fr"] = @final_reason if @final && @final_reason
         v
@@ -1426,6 +1510,7 @@ module AsterismGames
           "deadline_left" => @deadline && [@deadline - now, 0].max, "deadline_bits" => @deadline_bits,
           "wait_spent" => @deadline && @wait_from && [now - @wait_from, 0].max,
           "cpu_left" => @cpu_at && [@cpu_at - now, 0].max, "next_left" => @next_at && [@next_at - now, 0].max,
+          "intro_left" => @intro_at && [@intro_at - now, 0].max, "oks" => @oks, "ok_humans" => @ok_humans,
           "result" => @result, "flow" => @flow, "final" => @final, "final_reason" => @final_reason, "event" => @event,
           "banks" => @banks, "call" => @call, "rec" => @rec, "rec_draw" => @rec_draw,
           "rules" => { "choice" => @choice, "turn_ms" => @time_choice&.at(0), "bank_ms" => @time_choice&.at(1),
@@ -1460,6 +1545,9 @@ module AsterismGames
         @call = d["call"]
         @rec = d["rec"].is_a?(Hash) ? d["rec"] : nil
         @rec_draw = d["rec_draw"]
+        @oks = d["oks"].is_a?(Array) && d["oks"].size == 4 ? d["oks"].map(&:to_i) : [0] * 4
+        # A result saved before the OKs moves on as it did (by its time).
+        @ok_humans = d["ok_humans"] ? true : false
         rules = d["rules"].is_a?(Hash) ? d["rules"] : {}
         @choice = rules["choice"].is_a?(Hash) ? rules["choice"] : {}
         # A table saved before the bank chose a fixed time ("turn_ms" alone).
@@ -1483,6 +1571,7 @@ module AsterismGames
         @wait_from = @deadline && now - d["wait_spent"].to_i
         @cpu_at = d["cpu_left"] && now + d["cpu_left"]
         @next_at = d["next_left"] && now + d["next_left"]
+        @intro_at = d["intro_left"] && now + d["intro_left"]
         super
       end
 
@@ -1511,6 +1600,9 @@ module AsterismGames
         @deadline_bits = 0
         @cpu_at = nil
         @next_at = nil
+        @intro_at = nil       # the round's name shows until then (deal_pause_ms)
+        @oks = [0] * 4        # the seats that gave the result their OK
+        @ok_humans = false    # the result waits for the humans' OKs
         @result = nil
         @flow = nil
         @final = nil

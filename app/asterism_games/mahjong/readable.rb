@@ -32,8 +32,9 @@ module AsterismGames
            "stale" means the table moved on: look again. When "moves" is empty, wait a little and look again
            (0.2-0.5 s); "deadline_ms" is how long the host still waits for you before it plays for you
            (a discard of the drawn tile, or a pass).
-        3. After a round ("status": "result") and at the end ("over") a "next" move may be offered; the round
-           also goes on by itself after a few seconds.
+        3. After a round ("status": "result") and at the end ("over") a "next" move may be offered; after a
+           round it is your OK (the next round starts once every player there gave it), and the round also goes
+           on by itself after some seconds.
         4. points(token) tells what your hand would score: the win offered now, or for each wait of a tenpai
            hand (after each discard that leaves it tenpai, on your turn) the points by ron and by tsumo. It
            leaves out the ura dora and does not check furiten.

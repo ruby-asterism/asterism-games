@@ -293,6 +293,19 @@ prints it); the old image stays (`docker image ls ghcr.io/ruby-asterism/asterism
 Going back to 0.14.0 ignores the two lines (the total's limit applies to
 all again); `ai_usage.json` keeps the same form.
 
+0.15.0 also changes how a round starts and ends at a table with humans
+(README "Result"): the round's name shows for 2 s after the deal, and a
+result waits until every player there has pressed OK (the screens'
+"next"), or moves on by itself 10 s after its count. Nothing to do on
+the server; the screens of before (a board's flash, the browser build)
+play as they did, their "next" being their OK. Two optional lines in
+`.env` change the times (seconds; `MAHJONG_RESULT_SECONDS` now holds
+only the tables without humans):
+```
+MAHJONG_RESULT_AUTO_SECONDS=10
+MAHJONG_DEAL_PAUSE_SECONDS=2
+```
+
 ### From 0.13 to 0.14.0 (the records in SQLite)
 
 0.14.0 keeps the games' records in one SQLite database,

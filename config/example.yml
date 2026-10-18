@@ -11,7 +11,9 @@ tables:
     turn_seconds: 5          # a player's time for a move
     bank_seconds: 20         # and a bank the move goes on into, full every round (0: none; README "Time")
     call_seconds: 8          # every player's time to call a discard
-    result_seconds: 8        # a round's result stays this long (or until "next")
+    result_seconds: 8        # a table without humans: a round's result stays this long
+    result_auto_seconds: 10  # a table with humans: the result moves on this long after its count (or at every human's OK)
+    deal_pause_seconds: 2    # a table with humans: the round's name shows this long after the deal
     over_seconds: 60         # the end of a game stays this long (or until the owner's "next")
     away_seconds: 10         # a player not heard from this long is shown as away
     away_wait_seconds: 2     # an away player's time to discard or call (back: the full times)

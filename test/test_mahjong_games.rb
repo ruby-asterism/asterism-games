@@ -154,7 +154,8 @@ class TestMahjongGames < Minitest::Test
           a = v["a"]
           next if a.empty?
           if rng.rand < 0.02
-            assert_equal "not offered", t.act(tok, t.sv, E::RON, [], now) unless a.any? { |x, _| x == E::RON }
+            # (on a result, which waits for every OK now, "not playing")
+            assert_includes ["not offered", "not playing"], t.act(tok, t.sv, E::RON, [], now) unless a.any? { |x, _| x == E::RON }
             sum["refused_checked"] += 1
           end
           types = a.map(&:first)
