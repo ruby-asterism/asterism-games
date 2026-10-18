@@ -1201,7 +1201,7 @@ module AsterismGames
       # What everybody may see: no hand but the winners' at a win.
       def public_view(now)
         @now = now
-        v = { "v" => @ver, "sv" => @sv, "t" => @name, "st" => @status,
+        v = { "v" => @ver, "sv" => @sv, "t" => @name, "st" => @status, "hv" => AsterismGames::VERSION,
               "nm" => @seats.map { |s| s ? s["name"].to_s : "" },
               "hu" => bits { |i| human?(i) },
               "sk" => @seats.map { |s| s.nil? ? 0 : (s["kind"] == "human" ? 1 : 2) },

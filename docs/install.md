@@ -270,6 +270,12 @@ on from the same turn after a few seconds, and the players' screens come
 back to it by themselves. To go back, run it with the old version (it
 prints it); the old image stays (`docker image ls ghcr.io/ruby-asterism/asterism-games`).
 
+### From 0.16.0 to 0.16.1 (the table shows the host's version)
+
+`./update.sh 0.16.1` (or `--when-idle 0.16.1`). Nothing in `.env`. The
+mahjong table's view carries the host's version (`hv`), which the table
+apps show on the list of tables and the lobby.
+
 ### From 0.15 to 0.16.0 (the rooms of an invite link see each other's records)
 
 0.16.0 lets the rooms made through one invite link of the console list and

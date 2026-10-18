@@ -859,6 +859,7 @@ A Hash (MessagePack); tiles are one byte each in binary strings (bin).
 |---|---|
 | `v` / `sv` | the view's version (any change; in a seat's own view one more after its answer to open calls, "Calls on a discard") / the state version (actions) |
 | `t`, `st` | the table's name; `wait` (the lobby), `play`, `result` (a round's result), `over` |
+| `hv` | the game host's version (games 0.16.1), shown by the table apps on the list and the lobby |
 | `nm`, `hu` | the four names (`""` for an empty seat); the human seats as bits |
 | `sk` | the four seats: 0 empty, 1 a member, 2 a CPU (an AI player too) |
 | `ai`, `ak` | when an AI player sits: each seat's kind (`"claude"`, `"jev"`, `""` for the others); in the lobby, the AI players the owner may seat ("AI players") |

@@ -3,6 +3,13 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
+## 0.16.1
+
+- The mahjong table's view carries the game host's version, `hv`
+  (README, the view's keys), so the table apps can show which host they
+  are playing on (the list of tables and the lobby). Nothing else
+  changes; `.env` and the records stay as they are.
+
 ## 0.16.0
 
 - **The rooms of one invite link see each other's game records** (README
