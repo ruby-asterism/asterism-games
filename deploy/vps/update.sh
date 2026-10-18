@@ -126,7 +126,12 @@ main() {
   TOP=$(git -C "$DIR" rev-parse --show-toplevel 2>/dev/null) || die "$DIR is not in a git checkout of asterism-games"
   GIT=git
   [ -w "$TOP/.git" ] || GIT="$SUDO git"
-  $GIT -C "$TOP" diff --quiet HEAD -- || die "the checkout $TOP has local changes (git status); commit or drop them first"
+  # credentials/ belongs to the container's user (docs/install.md, 700): git
+  # cannot stat the file it tracks there and would call it changed. Its
+  # contents are the host's own and never part of the check.
+  CREDS="$($GIT -C "$DIR" rev-parse --show-prefix)credentials"
+  $GIT -C "$TOP" diff --quiet HEAD -- . ":(exclude)$CREDS" ||
+    die "the checkout $TOP has local changes (git status); commit or drop them first"
   OLD_REF=$($GIT -C "$TOP" symbolic-ref -q --short HEAD || $GIT -C "$TOP" rev-parse HEAD)
   TAG="v$VERSION"
   if ! $GIT -C "$TOP" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then

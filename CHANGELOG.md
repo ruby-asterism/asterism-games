@@ -3,6 +3,16 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
+## Unreleased
+
+- **`deploy/vps/update.sh` no longer stops at "local changes" because of
+  `credentials/`.** The directory belongs to the container's user (mode
+  700, docs/install.md), so git run as the server's user could not stat
+  the `.gitignore` it tracks there and called it changed. The check of the
+  checkout now leaves `credentials/` out (its contents are the host's own).
+  Servers that marked the file with `git update-index --assume-unchanged`
+  to get past it need nothing more.
+
 ## 0.14.0
 
 - **The games' records in SQLite** (README "Game records"): every game a
