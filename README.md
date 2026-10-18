@@ -200,6 +200,8 @@ mahjong table):
 | `spectator_delay_minutes` | `MAHJONG_SPECTATOR_DELAY_MINUTES` | 0 | spectators see the game (and the four hands) this much later ("Spectators"); `spectator_delay_seconds` / `MAHJONG_SPECTATOR_DELAY_SECONDS` as before, in seconds |
 | `rule` | | (below) | riichi_engine rule keys over the host's defaults ("Rules"); the owner's local rules go over them ("Local rules") |
 | `records_kept` | `MAHJONG_RECORDS_KEPT` | 1000 (SQLite), 20 (JSON) | the newest games kept of a table ("Game records") |
+| `owner_handover_seconds` | `MAHJONG_OWNER_HANDOVER_SECONDS` | 60 | the owner away this long: the role goes to a member who is there ("Players that drop out"; 0: never) |
+| `abandon_seconds` | `MAHJONG_ABANDON_SECONDS` | 180 | a game whose seated humans have all been away this long (or have left) is abandoned: back to the lobby, not recorded ("Players that drop out"; 0: never) |
 
 An othello table's keys: "The othello table".
 
@@ -287,7 +289,13 @@ another page after nobody was on it for a while (the door's
 `WS_DOOR_SEAT_IDLE`, 30 minutes): a seat's node ID that has not called the
 table for `rooms.seat_reuse_seconds` (1800) is a new page, and the old
 member leaves (its seat is played by a CPU in a game) before the new one
-joins.
+joins. A page opened again in the same browser comes back with its secret
+and gets the same seat (the console 0.3.9: the door cuts what is left of
+the old connection), so it is the same member, at its seat, with its hand:
+the same person within `seat_reuse_seconds`. That time stays at the door's
+30 minutes (games 0.16.2 looked at it again): the door gives a seat to
+another page only after as long without a connection, and a longer time
+here would hand the old member's seat and hand to that new page.
 
 Nobody else joins a room's table: a `join` or `mine` from another caller
 answers `{"error" => "identity"}` (the screen says to open the room's link
@@ -850,6 +858,31 @@ went away ends as soon as it is seen away, if its short wait is over by
 then. Once its node is back or it calls again it has the full times again;
 its screen asks its view and goes on. A seat is never handed to a CPU because its player is
 away; a member that leaves (`leave`) during a game is.
+
+**The owner away** (games 0.16.2): when the owner has been away for
+`owner_handover_seconds` (60), in the lobby or during a game, the role
+goes to a member who is there: the seated one who sat first, else the
+one who joined first. With nobody there it stays where it is, and passes
+as soon as someone is. The old owner coming back does not take it back.
+The log says `the owner <node> was away for 60 s: <node> is the owner
+now`. In a room a page opened again in the same browser comes back as the
+same seat (the console 0.3.9's door, "Who joins"), and so as the owner if
+the role has not passed yet.
+
+**A table left alone** (games 0.16.2): during a game (`play`, `result`),
+when none of the seated humans counts any more, the game is abandoned. A
+seated human counts while it is there and for `abandon_seconds` (180)
+after it went away; a member that left the table (`leave`) counts no
+more at once (its seat is a CPU's already). The table goes back to the
+lobby as at the end of a game: the CPUs and AI players keep their seats,
+the away humans are taken off theirs (they stay members, watching, and
+may sit again), the owner's role passes as when an owner stands, and
+nothing of the unfinished game is kept: no record, nothing in the stats.
+The log says `game abandoned: no human there for 180 s (seats [0, 2]
+emptied; not recorded)`. One human back within the time keeps the game
+going for everyone (the other away seats are played for as before). A
+table of CPUs only (`humans: 0`, the permanent spectator tables) is never
+abandoned.
 
 ### Views
 
@@ -1662,6 +1695,14 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   stays), the saved form keeps no presence, a room's seat gone for
   `seat_reuse_ms` is a new page when its node comes back, an away mahjong
   seat, and the host telling every table.
+- `test_mahjong_owner_handover.rb`: the owner away ("Players that drop
+  out"): the role passes after `owner_handover_ms` to the seated member who
+  sat first, else by join order, stays with nobody there, is not taken
+  back, also during a game, 0 turns it off; a table left alone: a game whose
+  humans are all away for `abandon_ms` goes back to the lobby without a
+  record, a member who left stops counting at once, one human back in time
+  keeps the game, a result is abandoned too, a table of CPUs plays on, 0
+  turns it off.
 - `test_network.rb`: the same refusals through a router, with the host in a
   child process, and the caller from Asterism (a call that brings `from:`
   is refused, the numbers of arguments are counted) (skipped without

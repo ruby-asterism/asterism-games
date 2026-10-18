@@ -3,6 +3,29 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
+## 0.16.2
+
+- **The owner away hands the role on** (README "Players that drop out"):
+  when a mahjong table's owner has been away for `owner_handover_seconds`
+  (`MAHJONG_OWNER_HANDOVER_SECONDS`, 60; 0: never), in the lobby or in a
+  game, the role goes to a member who is there: the seated one who sat
+  first, else the one who joined first. The old owner coming back does
+  not take it back. One log line.
+- **A table left alone ends its game** (README "Players that drop out"):
+  during a game, when no seated human is there any more (a member who
+  left counts no more at once, an away one for `abandon_seconds`,
+  `MAHJONG_ABANDON_SECONDS`, 180; 0: never), the game is abandoned: back
+  to the lobby, the CPUs kept, the away humans off their seats, nothing
+  recorded (no record, nothing in the stats). One log line. Tables of CPUs
+  only (`humans: 0`) are not touched.
+- `seat_reuse_seconds` stays 1800 (README "Who joins"): with the console
+  0.3.9 a page opened again in the same browser comes back as the same
+  seat, and the time still has to match the door's `WS_DOOR_SEAT_IDLE`,
+  after which a seat may go to another page.
+- Updating: `./update.sh 0.16.2` (docs/install.md); nothing in `.env`
+  (the two settings have their defaults). Works with any console; with
+  0.3.9 a closed tab opened again is the same person.
+
 ## 0.16.1
 
 - The mahjong table's view carries the game host's version, `hv`

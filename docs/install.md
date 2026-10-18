@@ -270,6 +270,18 @@ on from the same turn after a few seconds, and the players' screens come
 back to it by themselves. To go back, run it with the old version (it
 prints it); the old image stays (`docker image ls ghcr.io/ruby-asterism/asterism-games`).
 
+### From 0.16.1 to 0.16.2 (the owner away, a table left alone)
+
+`./update.sh 0.16.2` (or `--when-idle 0.16.2`). Nothing in `.env`. A
+mahjong table's owner away for a minute hands the role to a member who
+is there, and a game whose seated humans have all been away for three
+minutes (or have left) goes back to the lobby without a record (README
+"Players that drop out"). Other times, in `.env`:
+`MAHJONG_OWNER_HANDOVER_SECONDS` and `MAHJONG_ABANDON_SECONDS` (0 turns
+either off). With the console 0.3.9 a page of a room opened again in the
+same browser comes back as the same seat; the order of the updates does
+not matter.
+
 ### From 0.16.0 to 0.16.1 (the table shows the host's version)
 
 `./update.sh 0.16.1` (or `--when-idle 0.16.1`). Nothing in `.env`. The

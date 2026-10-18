@@ -66,7 +66,12 @@ module AsterismGames
       "room_id" => nil,         # in a room: its ID, against which joins are checked (README "Who joins")
       "trusted_nodes" => [],    # in a room: node IDs the router binds to their callers (the seats)
       "trusted_prefix" => nil,  # in a room: the host's own names (it and its bots), bound likewise
-      "seat_reuse_ms" => 1_800_000 # a seat's node ID silent this long is a new page on that seat
+      # A seat's node ID silent this long is a new page on that seat: the
+      # door's WS_DOOR_SEAT_IDLE, after which it may give the seat to
+      # another page. A page back with its secret within it (the console
+      # 0.3.9) is the same person; a longer time would hand an old
+      # member's seat to a new page.
+      "seat_reuse_ms" => 1_800_000
     }.freeze
 
     @registry = {}

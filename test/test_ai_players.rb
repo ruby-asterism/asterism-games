@@ -12,9 +12,10 @@ class TestAIPlayers < Minitest::Test
   AI = AsterismGames::AI
 
   # A table with one human (seat by the draw), one AI player of kind and
-  # two CPUs, started.
+  # two CPUs, started. The human never calls (away): abandon_ms 0 lets
+  # the game run to its end.
   def ai_table(kind = "claude", **opts)
-    t = human_table(**opts)
+    t = human_table(abandon_ms: 0, **opts)
     t.ai_kinds = %w[claude jev]
     tok = t.join("wasm-aaaaa0", "P0", 0)["token"]
     assert_equal "ok", t.sit(tok, 0, 0)
@@ -170,7 +171,7 @@ class TestAIPlayers < Minitest::Test
 
   # A table with one human, a claude and a jev player and a CPU, started.
   def two_kinds_table(**opts)
-    t = human_table(**opts)
+    t = human_table(abandon_ms: 0, **opts)
     t.ai_kinds = %w[claude jev]
     tok = t.join("wasm-aaaaa0", "P0", 0)["token"]
     assert_equal "ok", t.sit(tok, 0, 0)

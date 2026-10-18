@@ -53,7 +53,8 @@ module AsterismGames
                  "spectators" => ["spectators", 1], "spectator_delay_seconds" => ["spectator_delay_ms", 1000],
                  "spectator_delay_minutes" => ["spectator_delay_ms", 60_000],
                  "ai_turn_seconds" => ["ai_turn_ms", 1000], "ai_call_seconds" => ["ai_call_ms", 1000],
-                 "rule" => ["rule", :hash], "records_kept" => ["records_kept", 1]
+                 "rule" => ["rule", :hash], "records_kept" => ["records_kept", 1],
+                 "owner_handover_seconds" => ["owner_handover_ms", 1000], "abandon_seconds" => ["abandon_ms", 1000]
                },
                env: {
                  "MAHJONG_TURN_SECONDS" => ["turn_ms", 1000],
@@ -72,7 +73,9 @@ module AsterismGames
                  "MAHJONG_SPECTATOR_DELAY_MINUTES" => ["spectator_delay_ms", 60_000],
                  "MAHJONG_AI_TURN_SECONDS" => ["ai_turn_ms", 1000],
                  "MAHJONG_AI_CALL_SECONDS" => ["ai_call_ms", 1000],
-                 "MAHJONG_RECORDS_KEPT" => ["records_kept", 1]
+                 "MAHJONG_RECORDS_KEPT" => ["records_kept", 1],
+                 "MAHJONG_OWNER_HANDOVER_SECONDS" => ["owner_handover_ms", 1000],
+                 "MAHJONG_ABANDON_SECONDS" => ["abandon_ms", 1000]
                }
 
       SAVE_FORMAT = 2
@@ -100,6 +103,8 @@ module AsterismGames
         "spectator_delay_ms" => 0, # what spectators see is this old (README "Spectators")
         "ai_turn_ms" => 30_000,   # an AI player's time for a move (README "AI players"); then the CPU plays it
         "ai_call_ms" => 15_000,   # and for its answer to a discard it may call
+        "owner_handover_ms" => 60_000, # the owner away this long: the role goes to a member who is there (0: never)
+        "abandon_ms" => 180_000,  # a game whose seated humans are all away this long is abandoned (0: never)
         "rule" => {}              # riichi_engine rule keys over Engine::RULE_DEFAULTS
         # and Game::DEFAULTS: away_ms (10 s), the rooms' room_id, trusted_nodes,
         # trusted_prefix and seat_reuse_ms (README "Who joins")
@@ -725,8 +730,66 @@ module AsterismGames
           changed
         end
         expire_members(now)
+        hand_over_owner(now)
+        abandon_game(now)
         200.times { break unless step(now) }
         note_for_spectators(now)
+      end
+
+      # ------------------------------------------------------------ an owner away, a table left alone
+
+      # The owner away for owner_handover_ms (README "Players that drop
+      # out"): the role goes to a member who is there, the seated one who
+      # sat first, else the one who joined first. Nobody there: it stays.
+      # In every status; the old owner coming back does not take it back.
+      def hand_over_owner(now)
+        ms = @opts["owner_handover_ms"].to_i
+        m = @owner && @members[@owner]
+        return unless ms.positive? && m && member_away?(@owner) && now - last_there(m) >= ms
+        heir = owner_heir
+        return unless heir
+        @log&.call("mahjong: #{@name}: the owner #{@owner} was away for #{(now - last_there(m)) / 1000} s: " \
+                   "#{heir} is the owner now")
+        @owner = heir
+        changed
+      end
+
+      # The member who takes an away owner's role, or nil: there (not
+      # away), seated first (by when they sat), else by when they joined.
+      def owner_heir
+        there = @members.keys.reject { |n| n == @owner || member_away?(n) }
+        seated = there.select { |n| seat_index(n) }
+        return seated.min_by { |n| @seats[seat_index(n)]["sat"].to_i } unless seated.empty?
+        there.min_by { |n| @members[n]["at"].to_i }
+      end
+
+      # A seated human that still counts for the game: there, or away for
+      # less than abandon_ms (a member who left the table is no longer in
+      # its seat: a CPU plays it).
+      def human_counts?(seat, now, ms)
+        return false unless human?(seat)
+        return true unless away?(seat)
+        m = @members[@seats[seat]["node"]]
+        m ? now - last_there(m) < ms : false
+      end
+
+      # A game (play, result) with no human that counts (human_counts?) is
+      # abandoned (README "Players that drop out"): back to the lobby, the
+      # away humans off their seats, the CPUs kept, nothing recorded. A
+      # table of CPUs only (humans 0) plays on.
+      def abandon_game(now)
+        ms = @opts["abandon_ms"].to_i
+        return unless ms.positive? && %w[play result].include?(@status) && @opts["humans"].to_i.positive?
+        return if (0..3).any? { |i| human_counts?(i, now, ms) }
+        off = (0..3).select { |i| human?(i) }
+        off.each { |i| @seats[i] = nil }
+        @rec = nil
+        @rec_draw = nil
+        to_lobby
+        pass_owner unless @owner && @members[@owner] && !member_away?(@owner)
+        name_cpus
+        @log&.call("mahjong: #{@name}: game abandoned: no human there for #{ms / 1000} s " \
+                   "(seats #{off.inspect} emptied; not recorded)")
       end
 
       # ------------------------------------------------------------ spectators
