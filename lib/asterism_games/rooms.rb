@@ -420,7 +420,7 @@ module AsterismGames
     # has played today.
     def ai_status
       s = AI::Settings.new
-      b = AI::Budget.new(ai_usage_file, daily_usd: s.daily_usd, prices: ->(k) { s.prices(k) })
+      b = AI::Budget.new(ai_usage_file, daily_usd: s.daily_usd, kind_usd: s.kind_daily_usd, prices: ->(k) { s.prices(k) })
       sum = b.summary(kinds: true)
       sum["calls"].zero? && sum["kinds"].empty? ? nil : sum
     end

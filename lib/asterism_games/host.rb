@@ -99,9 +99,11 @@ module AsterismGames
       settings = AI::Settings.new
       deciders = settings.deciders(log: @log)
       path = @config["ai_usage_file"] || File.join(@config["state_dir"], "ai_usage.json")
-      budget = AI::Budget.new(path, daily_usd: settings.daily_usd, prices: ->(k) { settings.prices(k) })
+      own = deciders.empty? ? settings.kind_daily_usd : settings.kind_daily_usd(log: @log)
+      budget = AI::Budget.new(path, daily_usd: settings.daily_usd, kind_usd: own,
+                                    prices: ->(k) { settings.prices(k) })
       unless deciders.empty?
-        @log.call("games: AI players: #{deciders.keys.join(', ')} (at most $#{settings.daily_usd} a day, " \
+        @log.call("games: AI players: #{deciders.keys.join(', ')} (#{AI::Hub.limits_text(deciders.keys, budget)}, " \
                   "#{settings.calls_per_game} decisions a game)")
       end
       AI::Hub.new(deciders, budget, calls_per_game: settings.calls_per_game, threads: settings.threads, log: @log)
@@ -309,8 +311,18 @@ module AsterismGames
       # The AI players' totals of today (README "AI players"): money and
       # counts only.
       if @ai&.any?
-        u = @ai.budget.summary
+        b = @ai.budget
+        u = b.summary
         st[AI_STATUS_KEY] = { "calls" => u["calls"], "usd" => u["usd"].round(2), "limit_usd" => u["limit_usd"] }
+        # Per kind (0.15.0), when some kind has a limit of its own: its
+        # money, the limit it stops at, whether that is its own, whether
+        # it has stopped for today.
+        unless b.kind_usd.empty?
+          st[AI_STATUS_KEY]["kinds"] = @ai.deciders.keys.to_h do |k|
+            [k, { "usd" => b.usd_today(k).round(4), "limit_usd" => b.limit_usd(k), "own" => b.own_limit?(k),
+                  "over" => b.over?(k) }]
+          end
+        end
       end
       st
     end

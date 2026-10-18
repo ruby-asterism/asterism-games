@@ -37,6 +37,26 @@ module AsterismGames
       end
 
       def daily_usd = num("ASTERISM_GAMES_AI_DAILY_USD", 3.0)
+
+      # The kinds' own daily limits, ASTERISM_GAMES_AI_DAILY_USD_<KIND>
+      # (CLAUDE, JEV): {kind => USD}, only the kinds that have one. A kind
+      # without one follows daily_usd (the day's total of every kind). A
+      # value that is not a number, or is negative, is left out (said in
+      # the log when log is given).
+      def kind_daily_usd(log: nil)
+        LABELS.keys.each_with_object({}) do |kind, out|
+          k = "ASTERISM_GAMES_AI_DAILY_USD_#{kind.upcase}"
+          v = @env[k].to_s.strip
+          next if v.empty?
+          f = Float(v, exception: false)
+          if f.nil? || !f.finite? || f.negative?
+            log&.call("games: AI players: #{k} is not a number of dollars (0 or more); ignored, " \
+                      "#{kind} follows ASTERISM_GAMES_AI_DAILY_USD")
+            next
+          end
+          out[kind] = f
+        end
+      end
       def calls_per_game = num("ASTERISM_GAMES_AI_CALLS_PER_GAME", 400).to_i
       def threads = [num("ASTERISM_GAMES_AI_THREADS", 4).to_i, 1].max
       def fake? = %w[1 true yes].include?(@env["ASTERISM_GAMES_AI_FAKE"].to_s.downcase)
@@ -106,14 +126,20 @@ module AsterismGames
     # tables): {"days" => {"2026-10-17" => {kind => {"calls", "in", "out",
     # "cache_write", "cache_read", "usd"}}}}. Counts and money only: no
     # key, no table, no player.
+    #
+    # The limits: daily_usd for the day's total of every kind, and
+    # kind_usd ({kind => USD}) for the kinds that have their own. A kind
+    # with its own stops when its own money of the day reaches it; the
+    # others when the day's total reaches daily_usd.
     class Budget
       KEEP_DAYS = 31
 
-      attr_reader :path, :daily_usd
+      attr_reader :path, :daily_usd, :kind_usd
 
-      def initialize(path, daily_usd:, prices:, clock: -> { Time.now })
+      def initialize(path, daily_usd:, prices:, kind_usd: {}, clock: -> { Time.now })
         @path = path
         @daily_usd = daily_usd.to_f
+        @kind_usd = kind_usd.to_h { |k, v| [k.to_s, v.to_f] }.freeze
         @prices = prices
         @clock = clock
         @lock = Mutex.new
@@ -158,20 +184,37 @@ module AsterismGames
         (@cache["days"] || {})[date] || {}
       end
 
-      def usd_today = day.values.sum { |e| e["usd"].to_f }
+      # Today's money: every kind's (kind nil), or one kind's.
+      def usd_today(kind = nil)
+        return day.values.sum { |e| e["usd"].to_f } if kind.nil?
+        (day[kind.to_s] || {})["usd"].to_f
+      end
 
-      def over?
+      # Whether the kind has a limit of its own.
+      def own_limit?(kind) = @kind_usd.key?(kind.to_s)
+
+      # The limit the kind stops at: its own, else the total's (kind nil:
+      # the total's).
+      def limit_usd(kind = nil) = (kind && @kind_usd[kind.to_s]) || @daily_usd
+
+      # Whether the kind stops for today: its own money against its own
+      # limit, else the day's total against daily_usd (kind nil: the total).
+      def over?(kind = nil)
+        return usd_today(kind) >= @kind_usd[kind.to_s] if kind && own_limit?(kind)
         usd_today >= @daily_usd
       end
 
       # The totals of today, for the status: {"date", "calls", "tokens_in",
-      # "tokens_out", "usd", "limit_usd"} (and per kind with kinds: true).
+      # "tokens_out", "usd", "limit_usd"} (and per kind with kinds: true),
+      # and "kind_limit_usd" ({kind => USD}) when some kind has its own
+      # limit.
       def summary(kinds: false)
         d = day
         out = { "date" => today, "calls" => d.values.sum { |e| e["calls"].to_i },
                 "tokens_in" => d.values.sum { |e| e["in"].to_i + e["cache_write"].to_i + e["cache_read"].to_i },
                 "tokens_out" => d.values.sum { |e| e["out"].to_i },
                 "usd" => d.values.sum { |e| e["usd"].to_f }.round(4), "limit_usd" => @daily_usd }
+        out["kind_limit_usd"] = @kind_usd.dup unless @kind_usd.empty?
         out["kinds"] = d if kinds
         out
       end

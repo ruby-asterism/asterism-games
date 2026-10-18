@@ -230,8 +230,17 @@ and create one; it is shown once, so put it straight into `.env`.
    ASTERISM_GAMES_AI_DAILY_USD=3.0    # the most they may cost a day
    ```
 
+   Or a limit for each kind (0.15.0; a kind stops alone when its own money
+   of the day reaches it, README "AI players"):
+
+   ```
+   ASTERISM_GAMES_AI_DAILY_USD_CLAUDE=10
+   ASTERISM_GAMES_AI_DAILY_USD_JEV=2
+   ```
+
 3. `docker compose up -d games`. The log says
-   `games: AI players: claude, jev (at most $3.0 a day, 400 decisions a game)`;
+   `games: AI players: claude, jev (at most $3.0 a day, 400 decisions a game)`
+   (with the kinds' limits: `at most $10.0 a day for claude, $2.0 for jev`);
    the table apps' lobby shows `+Claude` / `+Jev` to the owner.
 
 `./update.sh` keeps `.env`. What they cost is in the volume
@@ -260,6 +269,29 @@ is at once: the tables are saved on every change, so a game in progress goes
 on from the same turn after a few seconds, and the players' screens come
 back to it by themselves. To go back, run it with the old version (it
 prints it); the old image stays (`docker image ls ghcr.io/ruby-asterism/asterism-games`).
+
+### From 0.14 to 0.15.0 (a daily limit per AI kind)
+
+0.15.0 lets each kind of AI player have a daily limit of its own (README
+"AI players"). Without the new lines nothing changes.
+
+1. Add the limits to `.env` (an editor on the server), for example:
+   ```
+   ASTERISM_GAMES_AI_DAILY_USD_CLAUDE=10
+   ASTERISM_GAMES_AI_DAILY_USD_JEV=2
+   ```
+   `ASTERISM_GAMES_AI_DAILY_USD` may stay: it is the limit of a kind
+   without a line of its own (the day's total of every kind).
+2. `./update.sh 0.15.0` (or `--when-idle 0.15.0`). The host reads `.env`
+   when it starts, so the update's restart takes the new lines in.
+3. The log says
+   `games: AI players: claude, jev (at most $10.0 a day for claude, $2.0 for jev, 400 decisions a game)`.
+   A value it cannot read is said there too (`... is not a number of
+   dollars (0 or more); ignored ...`), and that kind follows
+   `ASTERISM_GAMES_AI_DAILY_USD`.
+
+Going back to 0.14.0 ignores the two lines (the total's limit applies to
+all again); `ai_usage.json` keeps the same form.
 
 ### From 0.13 to 0.14.0 (the records in SQLite)
 

@@ -465,7 +465,17 @@ joins); it is there once a game has ended. The rooms' status file
 
 `ais` counts the AI players' seats (they are counted in `cpus` too), and
 `ai_today` is the AI players' totals of the day (README "AI players"),
-only on a host that can seat them.
+only on a host that can seat them. When some kind has a daily limit of its
+own (games 0.15.0) `ai_today` also has `kinds`, one entry for each kind
+the host offers: its money of the day (`usd`), the limit it stops at
+(`limit_usd`: its own, or the total's), whether that limit is its own
+(`own`) and whether it has stopped for today (`over`):
+
+```
+"ai_today" => {"calls" => 84, "usd" => 0.02, "limit_usd" => 3.0,
+               "kinds" => {"claude" => {"usd" => 0.0198, "limit_usd" => 10.0, "own" => true, "over" => false},
+                           "jev" => {"usd" => 0.0002, "limit_usd" => 2.0, "own" => true, "over" => false}}}
+```
 
 - **When.** After a table changes (a join, a seat taken or left, a move)
   and once a second (an away seat changes the counts with time alone); a
@@ -1161,6 +1171,19 @@ offered), and show the seat by its name (`Claude`, `Jev`, numbered when there ar
   then its AI seats become CPUs. `bin/asterism-games status` prints the
   day's decisions, tokens and money per kind; the host's `@status` has the
   totals (`ai_today`).
+- **A limit per kind** (games 0.15.0). `ASTERISM_GAMES_AI_DAILY_USD_CLAUDE`
+  and `ASTERISM_GAMES_AI_DAILY_USD_JEV` (the kind's name in capitals) give
+  a kind a daily limit of its own. A kind with one stops when its own money
+  of the day reaches it: no table offers it any more and its seats become
+  CPUs, while the other kinds go on. A kind without one follows
+  `ASTERISM_GAMES_AI_DAILY_USD` as before: it stops when the day's total of
+  every kind reaches it. Without any of them everything is as before
+  0.15.0. A value that is not a number of dollars (0 or more) is ignored,
+  with a line in the log. The log says the limits at the start
+  (`games: AI players: claude, jev (at most $10.0 a day for claude, $2.0
+  for jev, 400 decisions a game)`) and once for each kind that stops
+  (`today's limit for claude ($10.0) is reached`); a new day lets it play
+  again. `ai_today` on `@status` then has `kinds` (README "Status").
 - **Prices.** USD per million tokens, settings with the published prices
   as defaults: Claude Sonnet 5.5 `ASTERISM_GAMES_CLAUDE_USD_IN` 2.0, `_OUT`
   10.0, `_CACHE_WRITE` 2.5 (5-minute cache), `_CACHE_READ` 0.10 (checked

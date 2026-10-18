@@ -168,6 +168,148 @@ class TestAIPlayers < Minitest::Test
     assert_equal 1, t.stats["ai_off"]
   end
 
+  # A table with one human, a claude and a jev player and a CPU, started.
+  def two_kinds_table(**opts)
+    t = human_table(**opts)
+    t.ai_kinds = %w[claude jev]
+    tok = t.join("wasm-aaaaa0", "P0", 0)["token"]
+    assert_equal "ok", t.sit(tok, 0, 0)
+    assert_equal "ok", t.cpu(tok, 1, "claude")
+    assert_equal "ok", t.cpu(tok, 2, "jev")
+    assert_equal "ok", t.cpu(tok, -1, true)
+    assert_equal "ok", t.start(tok, 0)
+    t
+  end
+
+  def ai_kinds_seated(t) = (0..3).select { |i| t.ai_seat?(i) }.map { |i| t.instance_variable_get(:@seats)[i]["ai"] }.sort
+
+  def test_a_kinds_own_limit_stops_that_kind_only
+    Dir.mktmpdir do |dir|
+      day = Time.utc(2026, 10, 17, 12)
+      t = two_kinds_table
+      budget = AI::Budget.new(File.join(dir, "u.json"), daily_usd: 100.0, kind_usd: { "claude" => 0.001 },
+                                                        prices: ->(_) { { "in" => 2.0, "out" => 10.0 } }, clock: -> { day })
+      logs = []
+      hub = AI::Hub.new({ "claude" => AI::Fake.new, "jev" => AI::Fake.new }, budget, threads: 1, log: ->(m) { logs << m })
+      games = { "t" => t }
+      hub.step(games, 0)
+      assert_equal %w[claude jev], t.ai_kinds
+      budget.record("claude", { "in" => 1000, "out" => 10 }) # $0.0021
+      assert budget.over?("claude")
+      refute budget.over?("jev")
+      refute budget.over?, "the total is far from 100"
+      hub.step(games, 10)
+      hub.step(games, 20)
+      assert_equal %w[jev], ai_kinds_seated(t), "the claude seat is a CPU, the jev seat stays"
+      assert_equal %w[jev], t.ai_kinds, "jev is still offered"
+      assert_equal %w[claude], hub.over
+      said = logs.grep(/today's limit/)
+      assert_equal 1, said.size, "once"
+      assert_match(/today's limit for claude \(\$0\.001\) is reached/, said[0])
+      # jev goes on asking: drive the table with the hub until a jev request goes out.
+      asked = hub.stats["asked"]
+      200.times do |i|
+        break if hub.stats["asked"] > asked
+        hub.step(games, 30 + i * 1000)
+        t.tick(30 + i * 1000)
+      end
+      assert_operator hub.stats["asked"], :>, asked, "jev is asked after claude stopped"
+      # A new day: claude is offered again.
+      day = Time.utc(2026, 10, 18, 12)
+      sleep 1.1 # the budget reads its file again after a second
+      hub.step(games, 300_000)
+      assert_equal %w[claude jev], t.ai_kinds
+      assert_equal [], hub.over
+      hub.stop
+    end
+  end
+
+  def test_a_kind_without_its_own_limit_follows_the_total
+    Dir.mktmpdir do |dir|
+      t = two_kinds_table
+      budget = AI::Budget.new(File.join(dir, "u.json"), daily_usd: 0.01, kind_usd: { "jev" => 5.0 },
+                                                        prices: ->(_) { { "in" => 2.0, "out" => 10.0 } })
+      hub = AI::Hub.new({ "claude" => AI::Fake.new, "jev" => AI::Fake.new }, budget, threads: 1)
+      games = { "t" => t }
+      budget.record("jev", { "in" => 4000 }) # $0.008: jev's own limit is far, the total is not reached
+      hub.step(games, 0)
+      assert_equal %w[claude jev], ai_kinds_seated(t)
+      budget.record("jev", { "in" => 1000 }) # $0.010 in all: the total reaches 0.01
+      refute budget.over?("jev"), "jev has its own limit"
+      assert budget.over?("claude"), "claude follows the total of every kind"
+      assert_equal 0.01, budget.limit_usd("claude")
+      assert_equal 5.0, budget.limit_usd("jev")
+      hub.step(games, 10)
+      assert_equal %w[jev], ai_kinds_seated(t)
+      assert_equal %w[jev], t.ai_kinds
+      s = budget.summary
+      assert_equal 0.01, s["limit_usd"]
+      assert_equal({ "jev" => 5.0 }, s["kind_limit_usd"])
+      hub.stop
+    end
+  end
+
+  def test_without_kinds_limits_all_stop_together_as_before
+    Dir.mktmpdir do |dir|
+      t = two_kinds_table
+      budget = AI::Budget.new(File.join(dir, "u.json"), daily_usd: 0.001, prices: ->(_) { { "in" => 2.0, "out" => 10.0 } })
+      logs = []
+      hub = AI::Hub.new({ "claude" => AI::Fake.new, "jev" => AI::Fake.new }, budget, threads: 1, log: ->(m) { logs << m })
+      games = { "t" => t }
+      hub.step(games, 0)
+      budget.record("jev", { "in" => 1000 }) # $0.002 by jev alone stops both
+      assert budget.over?("claude")
+      assert budget.over?("jev")
+      hub.step(games, 10)
+      hub.step(games, 20)
+      assert_equal [], ai_kinds_seated(t)
+      assert_equal [], t.ai_kinds
+      assert_equal 1, t.stats["ai_off"], "one ai_off! for all the seats, as in 0.14.0"
+      assert_equal ["games: AI players: today's limit of $0.001 is reached; no more AI players today, " \
+                    "those seated are played by the CPU"], logs.grep(/today's limit/)
+      refute budget.summary.key?("kind_limit_usd")
+      assert_equal "at most $0.001 a day", AI::Hub.limits_text(%w[claude jev], budget)
+      hub.stop
+    end
+  end
+
+  def test_the_kinds_limits_from_the_environment
+    logs = []
+    s = AI::Settings.new({ "ASTERISM_GAMES_AI_DAILY_USD_CLAUDE" => "10", "ASTERISM_GAMES_AI_DAILY_USD_JEV" => "2.5" })
+    assert_equal({ "claude" => 10.0, "jev" => 2.5 }, s.kind_daily_usd(log: ->(m) { logs << m }))
+    assert_empty logs
+    assert_equal({}, AI::Settings.new({}).kind_daily_usd)
+    assert_equal({ "jev" => 0.0 }, AI::Settings.new({ "ASTERISM_GAMES_AI_DAILY_USD_JEV" => "0" }).kind_daily_usd)
+    bad = AI::Settings.new({ "ASTERISM_GAMES_AI_DAILY_USD_CLAUDE" => "ten", "ASTERISM_GAMES_AI_DAILY_USD_JEV" => "-1" })
+    assert_equal({}, bad.kind_daily_usd(log: ->(m) { logs << m }))
+    assert_equal 2, logs.size
+    assert_match(/ASTERISM_GAMES_AI_DAILY_USD_CLAUDE is not a number.*ignored, claude follows ASTERISM_GAMES_AI_DAILY_USD/, logs[0])
+    assert_match(/ASTERISM_GAMES_AI_DAILY_USD_JEV/, logs[1])
+    b = AI::Budget.new("/nonexistent/u.json", daily_usd: 3.0, kind_usd: { "claude" => 10.0, "jev" => 2.0 }, prices: ->(_) { {} })
+    assert_equal "at most $10.0 a day for claude, $2.0 for jev", AI::Hub.limits_text(%w[claude jev], b)
+    b = AI::Budget.new("/nonexistent/u.json", daily_usd: 3.0, kind_usd: { "claude" => 10.0 }, prices: ->(_) { {} })
+    assert_equal "at most $10.0 a day for claude, $3.0 for jev with every kind's together",
+                 AI::Hub.limits_text(%w[claude jev], b)
+  end
+
+  def test_the_kinds_on_the_hosts_status
+    Dir.mktmpdir do |dir|
+      budget = AI::Budget.new(File.join(dir, "u.json"), daily_usd: 3.0, kind_usd: { "claude" => 0.001 },
+                                                        prices: ->(_) { { "in" => 2.0, "out" => 10.0 } })
+      hub = AI::Hub.new({ "claude" => AI::Fake.new, "jev" => AI::Fake.new }, budget, threads: 1)
+      cfg = AsterismGames::Config.new({ "state_dir" => dir, "node" => "games-host", "app" => "games", "ai_hub" => hub,
+                                        "tables" => [{ "name" => "mahjong1", "game" => "mahjong" }] }, {})
+      host = AsterismGames::Host.new(cfg, log: ->(_m) {})
+      budget.record("claude", { "in" => 1000 })
+      st = host.tables_status["ai_today"]
+      assert_equal 1, st["calls"]
+      assert_equal 3.0, st["limit_usd"]
+      assert_equal({ "usd" => 0.002, "limit_usd" => 0.001, "own" => true, "over" => true }, st["kinds"]["claude"])
+      assert_equal({ "usd" => 0.0, "limit_usd" => 3.0, "own" => false, "over" => false }, st["kinds"]["jev"])
+      hub.stop
+    end
+  end
+
   def test_the_budget_counts_per_day_in_a_file
     Dir.mktmpdir do |dir|
       day = Time.utc(2026, 10, 17, 12)

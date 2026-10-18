@@ -605,13 +605,21 @@ module AsterismGames
       end
 
       # The AI seats become CPUs (the day's money, or the game's decisions,
-      # are used up).
-      def ai_off!(why)
-        seats = (0..3).select { |i| ai_seat?(i) }
+      # are used up): all of them, or those of one kind (its own daily
+      # limit, README "AI players").
+      def ai_off!(why, kind: nil)
+        seats = (0..3).select { |i| ai_seat?(i) && (kind.nil? || @seats[i]["ai"] == kind) }
         return false if seats.empty?
         seats.each { |i| @seats[i].delete("ai") }
-        @ai_want.clear
-        @ai_got.clear
+        if kind
+          seats.each do |i|
+            @ai_want.delete(i)
+            @ai_got.delete(i)
+          end
+        else
+          @ai_want.clear
+          @ai_got.clear
+        end
         @stats["ai_off"] += 1
         @log&.call("mahjong: #{@name}: AI seats #{seats.inspect} are CPUs now (#{why})")
         name_cpus

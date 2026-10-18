@@ -3,8 +3,26 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
-## Unreleased
+## 0.15.0
 
+- **A daily limit per AI kind** (README "AI players"):
+  `ASTERISM_GAMES_AI_DAILY_USD_CLAUDE` and `ASTERISM_GAMES_AI_DAILY_USD_JEV`
+  give a kind a limit of its own. A kind with one stops when its own money
+  of the day reaches it: no table offers it any more and its seats are
+  played by the CPU, while the other kinds go on. A kind without one
+  follows `ASTERISM_GAMES_AI_DAILY_USD` as before (the day's total of
+  every kind). Without any of them the host behaves as 0.14.0. A value
+  that is not a number of dollars (0 or more) is ignored with a line in
+  the log; the start's log line says each kind's limit, and the stop is
+  said once per kind (`today's limit for claude ($10.0) is reached`). A
+  new day lets the kind play again.
+- `@status`'s `ai_today` keeps `calls`, `usd` and `limit_usd` and, when a
+  kind has a limit of its own, adds `kinds` (each kind's `usd`,
+  `limit_usd`, `own`, `over`; README "Status"). The rooms' status
+  (`bin/asterism-games status`) adds `kind_limit_usd` and prints a kind's
+  money against its own limit. `ai_usage.json` keeps its form.
+- Updating: `./update.sh 0.15.0` and the two lines in `.env`
+  (docs/install.md, "From 0.14 to 0.15.0").
 - **`deploy/vps/update.sh` no longer stops at "local changes" because of
   `credentials/`.** The directory belongs to the container's user (mode
   700, docs/install.md), so git run as the server's user could not stat

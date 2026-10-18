@@ -39,7 +39,8 @@ if ARGV.first == "status"
     puts "  permanent tables#{" (#{perm['node']})" if perm['node']}: #{text.call(perm)}"
   end
   if (ai = s["ai"])
-    kinds = (ai["kinds"] || {}).map { |k, e| "#{k} #{e['calls']} (#{e['in'].to_i + e['cache_read'].to_i + e['cache_write'].to_i} in, #{e['out']} out tokens, $#{format('%.4f', e['usd'].to_f)}#{", #{e['failed']} failed" if e['failed']})" }
+    own = ai["kind_limit_usd"] || {}
+    kinds = (ai["kinds"] || {}).map { |k, e| "#{k} #{e['calls']} (#{e['in'].to_i + e['cache_read'].to_i + e['cache_write'].to_i} in, #{e['out']} out tokens, $#{format('%.4f', e['usd'].to_f)}#{" of $#{own[k]}" if own[k]}#{", #{e['failed']} failed" if e['failed']})" }
     puts "  AI players #{ai['date']}: #{ai['calls']} decisions, $#{format('%.4f', ai['usd'].to_f)} of $#{ai['limit_usd']}" \
          "#{" (#{kinds.join('; ')})" unless kinds.empty?}"
   end
