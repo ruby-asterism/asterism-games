@@ -23,10 +23,10 @@ class TestRecordBook < Minitest::Test
     { "n" => n, "v" => v, "p" => [[names[0], "human", 1], [names[1], "human", 2], ["CPU1", "cpu", 3], ["Claude", "claude", 4]] }
   end
 
-  def book(dir, table: "t", place: "lan", room: nil, kept: 5, db: nil)
+  def book(dir, table: "t", place: "lan", room: nil, kept: 5, db: nil, group: nil)
     RB.open(db: db || File.join(dir, RB::DB_NAME), game: "g", table: table, place: place, room: room,
             store: AsterismGames::Store.new(File.join(dir, place, room.to_s)), kept: kept, json_kept: 3,
-            summarize: SUMMARY)
+            summarize: SUMMARY, group: group)
   end
 
   def teardown
@@ -123,6 +123,87 @@ class TestRecordBook < Minitest::Test
       # A room's book opened again (the room closed; another one) finds them.
       RB::Database.close_all
       assert_equal 3, book(dir, place: "room", room: "bbbb").size
+    end
+  end
+
+  G1 = "0123456789abcdef"
+  G2 = "fedcba9876543210"
+
+  def test_the_rooms_of_one_group_give_out_each_others_games
+    skip "no sqlite3 (rake test:gem)" unless RB.sqlite?
+    Dir.mktmpdir do |dir|
+      a = book(dir, place: "room", room: "aaaa", group: G1, kept: 10)
+      b = book(dir, place: "room", room: "bbbb", group: G1, kept: 10)
+      c = book(dir, place: "room", room: "cccc", group: G2, kept: 10)
+      d = book(dir, place: "room", room: "dddd", kept: 10) # an admin's room
+      other = book(dir, table: "u", place: "room", room: "bbbb", group: G1, kept: 10)
+      perm = book(dir, place: "permanent")
+      lan = book(dir)
+      ida = a.add(game(1))
+      idd = d.add(game(2))
+      # Room B of the same group lists A's game and reads it.
+      assert_equal 1, b.size
+      assert_equal [1], b.list(0, 10).map { |r, _| r["n"] }
+      assert_equal 1, b.get(ida)["n"]
+      # Not another group, not an admin's room, not another table, not the
+      # permanent or the LAN tables.
+      [c, d, other, perm, lan].each do |o|
+        assert_nil o.get(ida)
+        refute_includes o.list(0, 10).map { |r, _| r["id"] }, ida
+      end
+      # The admin's room sees its own only; nobody else sees it.
+      assert_equal [2], d.list(0, 10).map { |r, _| r["n"] }
+      [a, b, c].each { |o| assert_nil o.get(idd) }
+      # B's own games and A's, newest first.
+      idb = b.add(game(3))
+      assert_equal [3, 1], b.list(0, 10).map { |r, _| r["n"] }
+      assert_equal [3, 1], a.list(0, 10).map { |r, _| r["n"] }
+      # The stats of "table" and the last result stay the room's own.
+      assert_equal 0, c.stat_rows.size
+      assert_equal 4, a.stat_rows.size
+      assert_equal 1, a.last[0]["n"]
+      assert_equal idb, b.last[0]["id"]
+      assert_equal 12, lan.stat_rows(everything: true).size
+      # A group that does not look like one is none.
+      assert_nil book(dir, place: "room", room: "eeee", group: "x").group
+      assert_nil book(dir, place: "lan", group: G1).group, "only a room has a group"
+      # Kept with the game.
+      assert_equal [[ida, G1], [idd, nil], [idb, G1]],
+                   a.db.read { |x| x.execute("SELECT id, grp FROM games ORDER BY id") }
+    end
+  end
+
+  def test_a_database_of_before_the_groups_gains_the_column_and_its_games_keep_none
+    skip "no sqlite3 (rake test:gem)" unless RB.sqlite?
+    Dir.mktmpdir do |dir|
+      # The schema of games 0.14.0 / 0.15.0, with a room's game in it.
+      db = SQLite3::Database.new(File.join(dir, RB::DB_NAME))
+      db.execute_batch(<<~SQL)
+        CREATE TABLE games (id INTEGER PRIMARY KEY AUTOINCREMENT, game TEXT NOT NULL, place TEXT NOT NULL, room TEXT,
+          tbl TEXT NOT NULL, time INTEGER NOT NULL, at TEXT NOT NULL, variant TEXT, reason TEXT, rounds INTEGER,
+          body TEXT NOT NULL);
+        CREATE TABLE seats (game_id INTEGER NOT NULL REFERENCES games (id) ON DELETE CASCADE, seat INTEGER NOT NULL,
+          name TEXT NOT NULL, kind TEXT NOT NULL, rank INTEGER, score INTEGER, points INTEGER, counts TEXT,
+          PRIMARY KEY (game_id, seat));
+        INSERT INTO games (game, place, room, tbl, time, at, body)
+          VALUES ('g', 'room', 'aaaa', 't', 1, '2026-10-18 00:00', '{"n":0,"id":1,"p":[]}');
+        PRAGMA user_version = 1;
+      SQL
+      db.close
+      a = book(dir, place: "room", room: "aaaa", group: G1)
+      b = book(dir, place: "room", room: "bbbb", group: G1)
+      assert_includes a.db.read { |x| x.execute("PRAGMA table_info(games)").map { |r| r[1] } }, "grp"
+      assert_equal 1, a.db.read { |x| x.get_first_value("PRAGMA user_version") }, "the format stays 1"
+      assert_equal [0], a.list(0, 10).map { |r, _| r["n"] }, "the room still has its old game"
+      assert_equal 0, b.size, "an old game has no group: only its own room gives it out"
+      b.add(game(1))
+      assert_equal [1, 0], a.list(0, 10).map { |r, _| r["n"] }
+      RB::Database.close_all
+      # A host of 0.15.0 writes it as before (its columns, grp left NULL).
+      db = SQLite3::Database.new(File.join(dir, RB::DB_NAME))
+      db.execute("INSERT INTO games (game, place, room, tbl, time, at, body) VALUES ('g', 'room', 'cccc', 't', 2, 'x', '{}')")
+      assert_equal [nil, G1, nil], db.execute("SELECT grp FROM games ORDER BY id").flatten
+      db.close
     end
   end
 

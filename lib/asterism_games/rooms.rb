@@ -12,7 +12,7 @@ module AsterismGames
   # The console writes the open rooms to rooms.json (the file its door
   # reads) in the "rooms" volume, next to the room slots' certificates:
   #
-  #   {"slots": {"01": {"room": "<uid>", "until": <Unix s>, "max": 16, "app": "/app/..."}},
+  #   {"slots": {"01": {"room": "<uid>", "until": <Unix s>, "max": 16, "app": "/app/...", "group": "<hex>"}},
   #    "revoked": [{"room": "<uid>", "until": <Unix s>}], ...}
   #   certs/room-01.tar   the slot's certificate (namespace room/01)
   #
@@ -41,6 +41,13 @@ module AsterismGames
   # as they are; nobody else joins. A host whose trust changes (the
   # console was updated during the room) is started again.
   #
+  # Game records (README "Game records"): a room made from an invite link
+  # has the link's group ("group", console 0.3.8; not secret, the same for
+  # every room of the link). The host keeps it with the room's games and
+  # lists the games of the rooms of the same group too. A room without one
+  # (made by an admin, or a console before 0.3.8) sees its own games only.
+  # A room's group is read when its host starts.
+  #
   # A room's tables are saved under state_dir/rooms/<slot>/ with the room's
   # ID (room.json). When the slot holds another room, or the room was
   # closed or has ended, the directory is removed: a new room on the slot
@@ -64,8 +71,9 @@ module AsterismGames
     PERMANENT_PROFILE_NAME = "permanent tables"
 
     # The rooms that should have a host, from rooms.json's content:
-    # {slot => {"room", "until", "app"}} (open, not ended, opening one of
-    # the apps). nil content (no file, not readable): nil.
+    # {slot => {"room", "until", "app", "seats", "group"}} (open, not ended,
+    # opening one of the apps; "group" nil when it has none or one that
+    # does not look like one). nil content (no file, not readable): nil.
     def self.wanted(data, apps, now)
       return nil unless data.is_a?(Hash) && data["slots"].is_a?(Hash)
       revoked = Array(data["revoked"]).map { |r| r.is_a?(Hash) ? r["room"] : nil }.compact
@@ -73,8 +81,9 @@ module AsterismGames
         next unless slot.to_s.match?(/\A\d{2}\z/) && r.is_a?(Hash) && r["room"].is_a?(String)
         next if revoked.include?(r["room"]) || r["until"].to_i <= now
         next unless apps.include?(r["app"].to_s)
+        group = r["group"].is_a?(String) && r["group"].match?(RecordBook::SQLiteBook::GROUP) ? r["group"] : nil
         out[slot.to_s] = { "room" => r["room"], "until" => r["until"].to_i, "app" => r["app"].to_s,
-                           "seats" => r["seats"].to_i.clamp(0, 99) }
+                           "seats" => r["seats"].to_i.clamp(0, 99), "group" => group }
       end
     end
 
@@ -225,7 +234,7 @@ module AsterismGames
         c["next_at"] = now + BACKOFF_MAX_S
         return
       end
-      cfg = child_config(slot, tar, d, room["room"], trust, room["app"])
+      cfg = child_config(slot, tar, d, room["room"], trust, room["app"], room["group"])
       c.merge!("room" => room["room"], "until" => room["until"], "since" => Time.now.utc.iso8601, "next_at" => nil,
                "trust" => trust)
       c["pid"] = @spawn.call(slot, cfg)
@@ -253,8 +262,10 @@ module AsterismGames
 
     # room_id: the room's ID, with which its tables check who joins (README
     # "Rooms", "Who joins"); trust: trust_for's; app: what the room's link
-    # opens (its game's tables; nil: every table of rooms.tables).
-    def child_config(slot, tar, dir, room_id = nil, trust = { "own" => false, "seats" => [], "prefix" => nil }, app = nil)
+    # opens (its game's tables; nil: every table of rooms.tables); group:
+    # its invite link's group (nil: none), kept with its games' records.
+    def child_config(slot, tar, dir, room_id = nil, trust = { "own" => false, "seats" => [], "prefix" => nil }, app = nil,
+                     group = nil)
       tables = app ? Config.tables_for_app(@rooms["tables"], app) : @rooms["tables"]
       router = @rooms["router"] || (trust["own"] && @permanent ? @permanent["router"] : nil)
       { "node" => @rooms["node"], "app" => @config["app"], "credentials" => tar,
@@ -262,7 +273,7 @@ module AsterismGames
         "status_file" => File.join(dir, "host.json"), "tables" => tables, "room_id" => room_id,
         "trusted_nodes" => trust["seats"], "trusted_prefix" => trust["prefix"],
         "seat_reuse_ms" => @rooms["seat_reuse_seconds"].to_i * 1000, "ai_usage_file" => ai_usage_file,
-        "records_db" => records_db, "records_place" => "room" }
+        "records_db" => records_db, "records_place" => "room", "records_group" => group }
     end
 
     # What the AI players cost, shared by every host process (README "AI

@@ -15,6 +15,10 @@ module AsterismGames
   #   together, by table name: the rooms' mahjong1). A room's games stay
   #   when the room closes; only that room's host gives them out (its book
   #   is scoped to the room's ID), the others count them in their stats.
+  #   A room made from a console's invite link has the link's group
+  #   (rooms.json "group", games 0.16.0), kept with each of its games: a
+  #   room of the same group gives out those games too (its list and
+  #   record, not its stats nor its last result).
   #   After every game a consistent copy is made with VACUUM INTO next to
   #   the database (records-backup.sqlite3, through a *.tmp name), which a
   #   backup takes; a host that finds no database but the copy starts from
@@ -47,11 +51,13 @@ module AsterismGames
 
     # The book of one table. db: the database's path ("json" or nil: the
     # JSON form); game: the game's name; place: "lan" / "permanent" /
-    # "room"; room: the room's ID in a room.
-    def self.open(db:, game:, table:, place:, room:, store:, kept:, json_kept:, summarize:, log: nil)
+    # "room"; room: the room's ID in a room; group: in a room, the group
+    # of the invite link it was made from (nil: none; the JSON form has no
+    # use for it, a room's records go with the room).
+    def self.open(db:, game:, table:, place:, room:, store:, kept:, json_kept:, summarize:, log: nil, group: nil)
       if db && db != "json" && sqlite?
         SQLiteBook.new(Database.shared(db, log: log), game: game, table: table, place: place, room: room, kept: kept,
-                                                       summarize: summarize, log: log)
+                                                       summarize: summarize, log: log, group: group)
       else
         JSONBook.new(store, "#{table}.records", kept: json_kept, summarize: summarize, log: log)
       end
@@ -222,43 +228,59 @@ module AsterismGames
         retry
       end
 
+      # Format 1, and the column grp added to it (games 0.16.0: the group
+      # of a room's invite link, NULL for every other game and for the games
+      # before it). The column is added in place and the format stays 1, so
+      # a host before 0.16.0 put back reads and writes the same database
+      # (it names its columns, and leaves grp NULL).
       def schema
         transaction do
           v = @db.get_first_value("PRAGMA user_version").to_i
-          next if v == VERSION
           raise "records: #{@path} has format #{v}, this host reads #{VERSION}" if v > VERSION
-          @db.execute_batch(<<~SQL)
-            CREATE TABLE IF NOT EXISTS games (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              game TEXT NOT NULL,
-              place TEXT NOT NULL,
-              room TEXT,
-              tbl TEXT NOT NULL,
-              time INTEGER NOT NULL,
-              at TEXT NOT NULL,
-              variant TEXT,
-              reason TEXT,
-              rounds INTEGER,
-              body TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS games_place ON games (game, place, tbl, id);
-            CREATE INDEX IF NOT EXISTS games_room ON games (room, tbl, id);
-            CREATE INDEX IF NOT EXISTS games_time ON games (game, time);
-            CREATE TABLE IF NOT EXISTS seats (
-              game_id INTEGER NOT NULL REFERENCES games (id) ON DELETE CASCADE,
-              seat INTEGER NOT NULL,
-              name TEXT NOT NULL,
-              kind TEXT NOT NULL,
-              rank INTEGER,
-              score INTEGER,
-              points INTEGER,
-              counts TEXT,
-              PRIMARY KEY (game_id, seat)
-            );
-            CREATE INDEX IF NOT EXISTS seats_who ON seats (kind, name);
-            PRAGMA user_version = #{VERSION};
-          SQL
+          create_tables if v < VERSION
+          add_group_column
         end
+      end
+
+      def add_group_column
+        cols = @db.execute("PRAGMA table_info(games)").map { |r| r[1] }
+        return if cols.include?("grp")
+        @db.execute("ALTER TABLE games ADD COLUMN grp TEXT")
+        @db.execute("CREATE INDEX IF NOT EXISTS games_grp ON games (grp, tbl, id)")
+      end
+
+      def create_tables
+        @db.execute_batch(<<~SQL)
+          CREATE TABLE IF NOT EXISTS games (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game TEXT NOT NULL,
+            place TEXT NOT NULL,
+            room TEXT,
+            tbl TEXT NOT NULL,
+            time INTEGER NOT NULL,
+            at TEXT NOT NULL,
+            variant TEXT,
+            reason TEXT,
+            rounds INTEGER,
+            body TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS games_place ON games (game, place, tbl, id);
+          CREATE INDEX IF NOT EXISTS games_room ON games (room, tbl, id);
+          CREATE INDEX IF NOT EXISTS games_time ON games (game, time);
+          CREATE TABLE IF NOT EXISTS seats (
+            game_id INTEGER NOT NULL REFERENCES games (id) ON DELETE CASCADE,
+            seat INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            rank INTEGER,
+            score INTEGER,
+            points INTEGER,
+            counts TEXT,
+            PRIMARY KEY (game_id, seat)
+          );
+          CREATE INDEX IF NOT EXISTS seats_who ON seats (kind, name);
+          PRAGMA user_version = #{VERSION};
+        SQL
       end
 
       # A write transaction (BEGIN IMMEDIATE: the lock is taken first, so
@@ -290,16 +312,22 @@ module AsterismGames
     end
 
     # The SQLite form: a table's view of the shared database (its game,
-    # place, table and, in a room, the room's ID).
+    # place, table and, in a room, the room's ID and its invite link's
+    # group).
     class SQLiteBook
-      attr_reader :db
+      # What a group may look like (the console writes a random hex string);
+      # anything else is taken as none.
+      GROUP = /\A[A-Za-z0-9_-]{8,64}\z/
 
-      def initialize(db, game:, table:, place:, room:, kept:, summarize:, log: nil)
+      attr_reader :db, :group
+
+      def initialize(db, game:, table:, place:, room:, kept:, summarize:, log: nil, group: nil)
         @db = db
         @game = game
         @table = table
         @place = place.to_s
         @room = place.to_s == "room" ? room.to_s : nil
+        @group = @room && group.is_a?(String) && group.match?(GROUP) ? group : nil
         @kept = kept
         @summarize = summarize
         @log = log
@@ -307,9 +335,18 @@ module AsterismGames
 
       def kind = "sqlite"
 
-      # The games this table gives out: in a room the room's, else the
-      # table's of its place.
+      # The games this table gives out (list, record): in a room the room's
+      # and those of the rooms of the same group, else the table's of its
+      # place.
       def scope_sql(t = "")
+        return own_sql(t) unless @group
+        ["#{t}game = ? AND #{t}place = 'room' AND #{t}tbl = ? AND (#{t}room = ? OR #{t}grp = ?)",
+         [@game, @table, @room, @group]]
+      end
+
+      # The games this table played itself: in a room the room's, else the
+      # table's of its place (the stats of "table", the last result).
+      def own_sql(t = "")
         if @room
           ["#{t}game = ? AND #{t}place = 'room' AND #{t}room = ? AND #{t}tbl = ?", [@game, @room, @table]]
         else
@@ -329,13 +366,16 @@ module AsterismGames
         id
       end
 
-      # The game's row and its seats' (the record's id is the row's).
-      def insert(d, rec)
+      # The game's row and its seats' (the record's id is the row's); group:
+      # the group kept with it (the games taken in from the JSON form, of
+      # before 0.16.0, keep none).
+      def insert(d, rec, group = @group)
         s = @summarize.call(rec)
         rec.delete("id")
-        d.execute("INSERT INTO games (game, place, room, tbl, time, at, variant, reason, rounds, body) " \
-                  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '')",
-                  [@game, @place, @room, @table, rec["time"].to_i, rec["at"].to_s, s["variant"], s["reason"], s["rounds"]])
+        d.execute("INSERT INTO games (game, place, room, grp, tbl, time, at, variant, reason, rounds, body) " \
+                  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')",
+                  [@game, @place, @room, group, @table, rec["time"].to_i, rec["at"].to_s, s["variant"], s["reason"],
+                   s["rounds"]])
         id = d.last_insert_row_id
         rec["id"] = id
         d.execute("UPDATE games SET body = ? WHERE id = ?", [JSON.generate(rec), id])
@@ -350,7 +390,7 @@ module AsterismGames
       # The newest kept of the table: a room's tables count together (the
       # rooms' table of that name), the others by their place.
       def trim(d)
-        where, args = @room ? ["game = ? AND place = 'room' AND tbl = ?", [@game, @table]] : scope_sql
+        where, args = @room ? ["game = ? AND place = 'room' AND tbl = ?", [@game, @table]] : own_sql
         d.execute("DELETE FROM games WHERE id IN (SELECT id FROM games WHERE #{where} ORDER BY id DESC LIMIT -1 OFFSET ?)",
                   args + [@kept])
       end
@@ -362,7 +402,7 @@ module AsterismGames
         @db.transaction do |d|
           recs.each do |r|
             r = r.dup
-            insert(d, r)
+            insert(d, r, nil)
             n += 1
           end
           trim(d)
@@ -393,15 +433,22 @@ module AsterismGames
         body && JSON.parse(body)
       end
 
+      # The newest game this table played itself (a room's own, not its
+      # group's).
       def last
-        list(0, 1).first
+        where, args = own_sql
+        body = @db.read { |d| d.get_first_value("SELECT body FROM games WHERE #{where} ORDER BY id DESC LIMIT 1", args) }
+        return nil unless body
+        r = JSON.parse(body)
+        [r, @summarize.call(r)]
       end
 
       # The rows of the stats: this table's games (everything: false; in a
-      # room the room's) or every game of this game in the database
-      # (everything: true: every table, place and room, closed rooms too).
+      # room the room's own, not its group's) or every game of this game in
+      # the database (everything: true: every table, place and room, closed
+      # rooms too).
       def stat_rows(since: nil, variant: nil, everything: false)
-        where, args = everything ? ["g.game = ?", [@game]] : scope_sql("g.")
+        where, args = everything ? ["g.game = ?", [@game]] : own_sql("g.")
         if since
           where += " AND g.time >= ?"
           args += [since]

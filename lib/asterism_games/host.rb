@@ -61,8 +61,10 @@ module AsterismGames
           t = t.merge(config.slice("room_id", "trusted_nodes", "trusted_prefix", "seat_reuse_ms").compact)
         end
         # Where the games' records go (README "Game records"): the one
-        # database of the state volume, and which tables these are.
+        # database of the state volume, and which tables these are; in a
+        # room made from an invite link, the link's group (games 0.16.0).
         t = t.merge("records_db" => records_db, "records_place" => records_place)
+        t = t.merge("records_group" => config["records_group"]) if config["room_id"] && config["records_group"]
         name = t["name"]
         g = klass.new(name, t.reject { |k, _| %w[name game].include?(k) }, store: @store, log: @log)
         g.resume_clock(@clock.call)

@@ -8,8 +8,9 @@ module AsterismGames
     # end is kept as a record in the table's book (AsterismGames::RecordBook):
     # the SQLite database the host gives (state_dir/records.sqlite3, shared
     # by the rooms' and the permanent tables' hosts; the RECORDS_KEPT_DB
-    # newest of a table, a room's kept when it closes), or without the
-    # sqlite3 gem the JSON file next to the table's saved state (the
+    # newest of a table, a room's kept when it closes; a room made from an
+    # invite link lists the games of the rooms of the same link too), or
+    # without the sqlite3 gem the JSON file next to the table's saved state (the
     # RECORDS_KEPT newest, a room's go with the room). A game in progress is
     # never shown; its record so far is part of the table's saved state, so
     # a host started again goes on with it. The stats (stats_answer) count
@@ -44,8 +45,9 @@ module AsterismGames
         @rec_draw = nil # [seat, tile] of the last draw (a discard of it is tsumogiri)
         @book = RecordBook.open(db: @opts["records_db"], game: "mahjong", table: @name,
                                 place: @opts["records_place"] || (@opts["room_id"] ? "room" : "lan"),
-                                room: @opts["room_id"], store: @store, kept: records_kept(RECORDS_KEPT_DB),
-                                json_kept: records_kept(RECORDS_KEPT), summarize: method(:record_summary), log: @log)
+                                room: @opts["room_id"], group: @opts["records_group"], store: @store,
+                                kept: records_kept(RECORDS_KEPT_DB), json_kept: records_kept(RECORDS_KEPT),
+                                summarize: method(:record_summary), log: @log)
         import_json_records if @book.kind == "sqlite"
       end
 

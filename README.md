@@ -1005,6 +1005,25 @@ assistant through `asterism mcp`).
   the table apps) only by the room's own host while the room is open: no
   other room, no permanent table and no LAN table lists them. The stats
   count them ("Stats": names and numbers, never a record).
+- **The rooms of one invite link** (games 0.16.0, with a console 0.3.8):
+  a room made through a console's invite link has the link's group
+  (`rooms.json` `"group"`, a random string that is not the link's secret).
+  The room's host keeps it with each game the room plays, and its
+  `records` and `record` give out the room's own games and those of every
+  other room of the same group, open or closed (the same table name:
+  `mahjong1`), newest first. So the next room of the same link lists and
+  replays the games of the last one. A room without a group (made by an
+  admin, or by a console before 0.3.8) gives out its own games only, as
+  before; another group's rooms, the permanent tables and the LAN tables
+  give out none of them. The stats (`"table"` is the room's own games) and
+  `@status`'s `last` stay the room's own. The games played before 0.16.0
+  have no group and stay their own room's. A room's group is read when
+  its host starts (a room open across the console's update gets it at
+  the host's next start). The newest kept are counted as before (the
+  rooms' tables of one name together, whatever their group). In the
+  database: the column `grp` of `games` (NULL outside such rooms), added
+  in place on the first start of 0.16.0; the format stays 1, so a host of
+  0.14.0 or 0.15.0 put back reads and writes the same database.
 - **Taken in once.** A host of 0.14.0 that finds a table's
   `<table>.records.json` (0.13.0) next to a database takes its games in
   (the same games, in their order, with their times) and renames the file

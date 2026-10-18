@@ -3,6 +3,25 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
+## 0.16.0
+
+- **The rooms of one invite link see each other's game records** (README
+  "Game records"; with a console 0.3.8): the host reads a room's
+  `"group"` from `rooms.json` (the console's invite link it was made
+  from; not secret) and gives it to the room's host, which keeps it with
+  each game the room plays. A room's `records` and `record` give out its
+  own games and those of the rooms of the same group (the same table
+  name). Rooms without a group (made by an admin, or a console before
+  0.3.8), the permanent tables and the LAN tables are as before. The
+  stats and `@status`'s `last` stay the room's own; the newest kept are
+  counted as before.
+- The records' database gains the column `grp` (added in place on the
+  first start; the format stays 1, so 0.15.0 put back reads it as
+  before). The games of before keep none and stay their own room's.
+- Updating: `./update.sh 0.16.0` (docs/install.md, "From 0.15 to
+  0.16.0"); nothing in `.env`. Either the console or the host may be
+  updated first.
+
 ## 0.15.0
 
 - **A daily limit per AI kind** (README "AI players"):

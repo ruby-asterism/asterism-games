@@ -270,6 +270,25 @@ on from the same turn after a few seconds, and the players' screens come
 back to it by themselves. To go back, run it with the old version (it
 prints it); the old image stays (`docker image ls ghcr.io/ruby-asterism/asterism-games`).
 
+### From 0.15 to 0.16.0 (the rooms of an invite link see each other's records)
+
+0.16.0 lets the rooms made through one invite link of the console list and
+replay each other's mahjong game records (README "Game records"). It needs
+the console 0.3.8, which writes each such room's group to `rooms.json`;
+with an older console nothing changes.
+
+1. `./update.sh 0.16.0` (or `--when-idle 0.16.0`). Nothing in `.env`.
+2. On its first start the host adds the column `grp` to the records'
+   database (`/state/records.sqlite3`); it takes no time and the format
+   stays 1. The games already kept have no group and stay their own
+   room's.
+3. The console may be updated before or after. A room that is open while
+   the console is updated gets its group at its host's next start (a
+   restart of the games host, e.g. this update after the console's).
+
+Going back to 0.15.0 (`./update.sh 0.15.0`) keeps the database as it is:
+0.15.0 ignores the column and gives each room its own games again.
+
 ### From 0.14 to 0.15.0 (a daily limit per AI kind)
 
 0.15.0 lets each kind of AI player have a daily limit of its own (README

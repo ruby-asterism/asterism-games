@@ -395,6 +395,77 @@ class TestMahjongRecords < Minitest::Test
     end
   end
 
+  def test_the_rooms_of_one_invite_link_see_each_others_games
+    skip "no sqlite3" unless AsterismGames::RecordBook.sqlite?
+    Dir.mktmpdir do |dir|
+      cfg = AsterismGames::Config.new({ "state_dir" => File.join(dir, "state"),
+                                        "rooms" => { "dir" => File.join(dir, "rooms"), "max" => 3 } }, {})
+      FileUtils.mkdir_p(File.join(dir, "rooms", "certs"))
+      %w[01 02 03].each { |s| File.write(File.join(dir, "rooms", "certs", "room-#{s}.tar"), "") }
+      spawned = {}
+      rooms = AsterismGames::Rooms.new(cfg, log: ->(_m) {}, clock: -> { 1000.0 },
+                                            spawn: lambda { |slot, c|
+                                              spawned[slot] = c
+                                              fork { sleep 30 }
+                                            })
+      path = File.join(dir, "rooms", "rooms.json")
+      app = "/app/game/mahjong/mahjong.app.rb"
+      g1 = "0123456789abcdef0123456789abcdef"
+      g2 = "fedcba9876543210fedcba9876543210"
+      write = lambda do |slots, revoked = []|
+        File.write("#{path}.tmp", JSON.generate({ "format" => 1, "slots" => slots, "revoked" => revoked }))
+        File.rename("#{path}.tmp", path)
+        tm = Time.now + rand(100)
+        File.utime(tm, tm, path)
+      end
+      opts = lambda do |c|
+        { "humans" => 0, "cpu_ms" => 0, "result_ms" => 0, "rule" => { "game_type" => "tonpuu" } }
+          .merge(c.slice("room_id", "records_db", "records_place", "records_group").compact)
+      end
+      table = ->(slot) { M::Table.new("mahjong1", opts.call(spawned[slot]), store: AsterismGames::Store.new(spawned[slot]["state_dir"])) }
+      # Room A of invite link 1 plays a game to the end, and closes.
+      write.call({ "01" => { "room" => "aaaa", "until" => 99_999, "app" => app, "group" => g1 } })
+      rooms.check(1000)
+      assert_equal g1, spawned["01"]["records_group"]
+      a = table.call("01")
+      play_out(a)
+      id = a.records_page["records"][0]["id"]
+      write.call({}, [{ "room" => "aaaa", "until" => 99_999 }])
+      rooms.check(1001)
+      # Room B of the same link, C of another link, D an admin's (no group).
+      write.call({ "01" => { "room" => "bbbb", "until" => 99_999, "app" => app, "group" => g1 },
+                   "02" => { "room" => "cccc", "until" => 99_999, "app" => app, "group" => g2 },
+                   "03" => { "room" => "dddd", "until" => 99_999, "app" => app } },
+                 [{ "room" => "aaaa", "until" => 99_999 }])
+      rooms.check(1002)
+      assert_nil spawned["03"]["records_group"]
+      b = table.call("01")
+      page = b.records_page
+      assert_equal 1, page["total"]
+      assert_equal id, page["records"][0]["id"]
+      assert_equal a.record_answer(id), b.record_answer(id), "the same game, head and rounds"
+      assert_equal a.record_answer(id, 0), b.record_answer(id, 0)
+      # B's own: the stats of "table" and the last result are of B's games only.
+      assert_equal 0, b.stats_answer(0, "", "table")["games"]
+      assert_equal 1, b.stats_answer(0, "", "all")["games"]
+      assert_nil b.last_result
+      perm = M::Table.new("mahjong1", { "humans" => 4, "records_db" => spawned["01"]["records_db"], "records_place" => "permanent" },
+                          store: AsterismGames::Store.new(File.join(dir, "state", "permanent")))
+      lan = M::Table.new("mahjong1", { "humans" => 4, "records_db" => spawned["01"]["records_db"] }, store: AsterismGames::Store.new(dir))
+      [table.call("02"), table.call("03"), perm, lan].each do |o|
+        assert_equal 0, o.records_page["total"], "another link's room, an admin's room, the permanent and LAN tables"
+        assert_equal({ "error" => "no record" }, o.record_answer(id))
+      end
+      # D's own game stays D's; B does not list it.
+      d = table.call("03")
+      play_out(d)
+      idd = d.records_page["records"][0]["id"]
+      assert_equal [id], b.records_page["records"].map { |e| e["id"] }
+      assert_equal({ "error" => "no record" }, b.record_answer(idd))
+      rooms.stop_all
+    end
+  end
+
   # The stats as the records count them, counted here another way: the
   # wins from the moves (tsumo / ron, not at a sanchahou), a deal-in per
   # round from a ron move's seat, riichi from the moves.

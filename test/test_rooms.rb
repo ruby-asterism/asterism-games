@@ -49,6 +49,29 @@ class TestRooms < Minitest::Test
     assert_equal({}, R.wanted({ "slots" => {} }, [APP], @now))
   end
 
+  def test_wanted_reads_the_invite_links_group
+    data = { "slots" => { "01" => room("a").merge("group" => "0123456789abcdef"), "02" => room("b"),
+                          "03" => room("c").merge("group" => "../x y"), "04" => room("d").merge("group" => 12) } }
+    w = R.wanted(data, [APP], @now)
+    assert_equal({ "01" => "0123456789abcdef", "02" => nil, "03" => nil, "04" => nil }, w.transform_values { _1["group"] })
+  end
+
+  def test_the_room_host_is_given_its_group
+    write_rooms({ "01" => room("aaaa").merge("group" => "0123456789abcdef"), "02" => room("bbbb") })
+    @rooms.check(@now)
+    c = @spawned.to_h
+    assert_equal "0123456789abcdef", c["01"]["records_group"]
+    assert_nil c["02"]["records_group"], "a room without one (an admin's, a console before 0.3.8)"
+    # The host gives it to a room's tables, and nothing outside a room.
+    t = AsterismGames::Host.new(c["01"].merge("ai_hub" => Object.new), log: ->(_m) {})
+    assert_equal "0123456789abcdef", t.games["mahjong1"].instance_variable_get(:@opts)["records_group"]
+    lan = AsterismGames::Host.new({ "state_dir" => File.join(@dir, "lan"), "tables" => [{ "name" => "mahjong1", "game" => "mahjong" }],
+                                    "records_group" => "0123456789abcdef", "ai_hub" => Object.new }, log: ->(_m) {})
+    assert_nil lan.games["mahjong1"].instance_variable_get(:@opts)["records_group"]
+  ensure
+    AsterismGames::RecordBook::Database.close_all if AsterismGames::RecordBook.sqlite?
+  end
+
   # ------------------------------------------------- which tables a room gets
 
   OTHELLO = "/app/game/othello/othello.app.rb"
