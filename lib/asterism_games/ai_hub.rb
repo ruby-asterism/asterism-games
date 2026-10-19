@@ -65,7 +65,7 @@ module AsterismGames
         k = kinds
         games.each_value do |g|
           next unless g.respond_to?(:ai_requests)
-          g.ai_kinds = k
+          g.ai_kinds = AI.kinds_for(g.class.respond_to?(:game_name) ? g.class.game_name : nil, k)
           g.ai_calls_per_game = @calls_per_game
           if @budget.kind_usd.empty?
             # No kind has its own limit: all stop together, as before 0.15.0.

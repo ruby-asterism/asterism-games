@@ -43,10 +43,24 @@ described ("games 0.10.0" and the like).
   the client ends. A pipe, a file and `--commands` work as before.
 - The gem holds the mahjong client (`lib/asterism_games/play/`), not the
   table: it needs neither riichi_engine nor the framework.
+- **Jev at the othello table** (README "AI players", "The othello
+  table"): the owner may seat Jev as at mahjong, `cpu(token, seat,
+  "jev")`; the view has `ak` (`["jev"]` when the host has Jev's key) and
+  `ai`, `@status` `ais`. Othello offers Jev only (`AI::GAME_KINDS`, the
+  one place that says which game seats which kinds; mahjong keeps Claude
+  and Jev). A move Jev does not answer in `ai_turn_seconds` (30 s,
+  `OTHELLO_AI_TURN_SECONDS`), answers out of range or fails is the CPU's;
+  the day's money and the game's decisions are counted with mahjong's,
+  and when they run out Jev's seat becomes the CPU. `play othello`: `A`
+  (or `ai`) puts Jev in the other seat and turns it back into the CPU;
+  the board's first line says when Jev is thinking. The same key
+  (`TYPESAFE_API_KEY`) as mahjong's Jev: nothing new to set.
 - `asterism-games --help` (and `help`, `-h`) prints the usage; it used to
   start the host.
 - Updating: `./update.sh 0.17.0` (docs/install.md); nothing in `.env`. The
-  host and the tables do not change.
+  mahjong table does not change; the othello table offers Jev where
+  `TYPESAFE_API_KEY` is already set, and old table apps keep playing it
+  with the CPU.
 
 ## 0.16.3
 

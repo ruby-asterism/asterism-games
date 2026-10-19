@@ -12,7 +12,8 @@ module AsterismGames
     #   mine                    -> the same for a node that joined, or nil
     #   sit(token, seat)        -> "ok" or why not (seat -1: the free seat)
     #   stand(token)            -> "ok" or why not
-    #   cpu(token, seat, on)    -> "ok" or why not (the owner; seat -1: every seat)
+    #   cpu(token, seat, on)    -> "ok" or why not (the owner; seat -1: every seat;
+    #                              on: true, false or an AI player of the view's "ak")
     #   start(token)            -> "ok" or why not (the owner, both seats taken)
     #   move(token, n, square)  -> "ok" or why not ("token", "stale", "illegal",
     #                              "not your turn", "not playing", "not seated");
@@ -28,7 +29,8 @@ module AsterismGames
       docs sit: [%w[token seat], "Takes seat 0 or 1 (-1: the free one), in the lobby. \"ok\" or why not."],
            stand: [%w[token], "Gives the seat up, in the lobby."],
            cpu: [%w[token seat on], "The owner (the first to sit): on true puts a CPU in the empty seat (-1: every " \
-                                    "empty seat), false takes it out."],
+                                    "empty seat), false takes it out; on \"jev\" (one of the view's ak) puts that AI " \
+                                    "player there, or turns the seat's CPU into it (true turns it back)."],
            start: [%w[token], "The owner starts the game once both seats are taken (the colours are drawn)."],
            move: [%w[token n square], "Plays square (\"d3\": column a-h, row 1-8) as the seat to move. n is the " \
                                       "view's \"n\" (moves so far), so a move meant for an older board is refused " \
@@ -37,7 +39,7 @@ module AsterismGames
            view: [%w[token], "The table: st (wait, play, over), nm names, sk seats (0 empty, 1 member, 2 CPU), " \
                              "bd the board (64 of . B W, a1 b1 .. h8), tn the seat to move (-1), n moves so far, " \
                              "lg the legal squares of the side to move (\"d3c4\"), cnt [black, white], " \
-                             "res the result, me your seat. Seat 0 is black (B), seat 1 white (W): the seats are drawn at the start."],
+                             "res the result, me your seat, ai the seats' AI players (\"jev\"), ak the AI players the owner may seat. Seat 0 is black (B), seat 1 white (W): the seats are drawn at the start."],
            table: [[], "The table's view without me (what the state key has)."]
 
       def sit(token, seat, from: nil)
@@ -52,7 +54,7 @@ module AsterismGames
 
       def cpu(token, seat, on, from: nil)
         mark(token, from)
-        @game.cpu(token, seat.to_i, on ? true : false)
+        @game.cpu(token, seat.to_i, on.is_a?(String) ? on : (on ? true : false))
       end
 
       def start(token, from: nil)

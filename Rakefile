@@ -14,7 +14,7 @@ Rake::TestTask.new(:test) do |t|
   t.warning = false
 end
 
-GEM_TESTS = %w[test/test_framework.rb test/test_othello.rb test/test_board.rb test/test_gem.rb
+GEM_TESTS = %w[test/test_framework.rb test/test_othello.rb test/test_othello_ai.rb test/test_board.rb test/test_gem.rb
                test/test_record_book.rb test/test_play.rb test/test_play_keys.rb].freeze
 
 Rake::TestTask.new("test:gem_files") do |t|

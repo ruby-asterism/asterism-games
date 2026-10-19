@@ -28,6 +28,18 @@ module AsterismGames
 
     LABELS = { "claude" => "Claude", "jev" => "Jev" }.freeze
 
+    # The kinds each game may seat (README "AI players"): the one place
+    # that decides it. Othello offers Jev only (games 0.17.0), whatever
+    # other keys the host has; a game not named here offers none.
+    GAME_KINDS = { "mahjong" => %w[claude jev], "othello" => %w[jev] }.freeze
+
+    # The kinds a table of game may offer, of those the host can offer
+    # now (in the host's order).
+    def self.kinds_for(game, kinds)
+      allowed = GAME_KINDS[game.to_s] || []
+      Array(kinds).map(&:to_s).select { |k| allowed.include?(k) }
+    end
+
     # The settings, from the environment (README "AI players").
     class Settings
       attr_reader :env

@@ -1494,8 +1494,14 @@ offered), and show the seat by its name (`Claude`, `Jev`, numbered when there ar
 - **Writing another decider.** `decide(request, timeout:)` returning
   `AI::Decision.new(n:, tokens:, ms:)` (lib/asterism_games/ai.rb); the
   request is `{"game", "table", "seat", "instructions", "view"}`.
-- The othello table has no AI players yet (its `move` has names and texts
-  in the meta, so an assistant can play it through `asterism mcp`).
+- **Which game seats which kinds** (games 0.17.0): `AI::GAME_KINDS` in
+  lib/asterism_games/ai.rb is the one place that says it. Mahjong seats
+  `claude` and `jev`; othello seats `jev` only, whatever other keys the
+  host has (its `"ak"` is `["jev"]` with Jev's key, else absent, and
+  `cpu(token, seat, "claude")` is `"no ai"`). Othello's Jev uses the same
+  key (`TYPESAFE_API_KEY`), the same decider, the same money of the day
+  and the same `ASTERISM_GAMES_AI_CALLS_PER_GAME` as mahjong's; nothing is
+  set for it alone. See "The othello table" for its view and its time.
 
 ## The othello table
 
@@ -1519,6 +1525,19 @@ game between two machines without a host is fmruby-core's
 - After the game the board and the result stay (`"st" => "over"`) until
   someone sits or stands (back to the lobby) or the owner starts again.
 - A member who leaves during a game hands its seat to the CPU.
+- **Jev** (games 0.17.0, "AI players"): when the host has Jev's key the
+  owner may put Jev in the empty seat, or turn the CPU there into Jev,
+  with `cpu(token, seat, "jev")` (`true` turns it back into the CPU, `false`
+  takes it out). Jev is asked each move with more than one legal square:
+  the request's `"game"` is `"othello"`, `"instructions"` the rules and how
+  to read the view, `"view"` `{"you" => "B" / "W", "board" => the eight
+  rows from row 1 (columns a-h), "discs" => {"B", "W"}, "n", "last",
+  "moves" => [{"n", "square", "turns", "text"}]}`; the answer is a move's
+  `n`. One out of range, one that does not come in `ai_turn_seconds` (30 s)
+  or a failure is played by the CPU, and the game goes on. When the day's
+  money is spent, or the game has asked `ASTERISM_GAMES_AI_CALLS_PER_GAME`
+  decisions, Jev's seat becomes the CPU. The table apps show Jev by its
+  name with `[AI]` and say when it is thinking; `dl` counts its time down.
 - Nothing in othello is hidden, so every member sees the same view: the
   table's view (the one the host puts on the state key) and `me`, the
   member's seat.
@@ -1529,7 +1548,7 @@ game between two machines without a host is fmruby-core's
 | `mine` | none | the same for a node that joined, or nil |
 | `sit` | token, seat | `"ok"` or why not; seat -1: the free seat (else the CPU's). Not during a game |
 | `stand` | token | `"ok"` or why not |
-| `cpu` | token, seat, on | the owner: the CPU into an empty seat (on) or out of it; seat -1: every seat |
+| `cpu` | token, seat, on | the owner: the CPU into an empty seat (on) or out of it; seat -1: every seat. on `"jev"` (one of `ak`): Jev instead of the CPU, or the CPU there into Jev; `"no ai"` when it is not offered |
 | `start` | token | the owner, both seats taken |
 | `move` | token, n, square | `"ok"`, or why not (`"stale"`: n is not the view's `n`, `"illegal"`, `"not your turn"`, `"not seated"`, `"not playing"`); square as `"d3"` |
 | `resign` | token | `"ok"` or why not |
@@ -1540,11 +1559,14 @@ game between two machines without a host is fmruby-core's
 The view: `st` (`wait` / `play` / `over`), `nm` the seats' names, `sk`
 (0 empty, 1 member, 2 CPU), `aw` (bits: a seated member is away), `ow` the
 owner's seat, `mb` the members (`[name, seat, flags]`), `ts` the seconds
-for a move; with a game `bd` (64 characters of `.` `B` `W`, a1 first, row
+for a move, `ai` the seats' AI players (`["", "jev"]`; only when there is
+one; `sk` keeps 2 for them, so an old screen shows a CPU named Jev), `ak`
+the AI players the owner may seat (out of a game, only when the host
+offers some); with a game `bd` (64 characters of `.` `B` `W`, a1 first, row
 by row), `tn` the seat to move (-1 none), `n` the moves so far (passes
 too), `last`, `lg` the legal squares of the side to move (`"d3c4f5e6"`),
 `cnt` the discs `[black, white]`, `dl` the ms left of a member's move (with
-a time per move); after it `res` (`{"w" => the seat that won, -1 a draw,
+a time per move) or of Jev's; after it `res` (`{"w" => the seat that won, -1 a draw,
 "why" => "count" / "resign", "b", "wc"}`). At most about 900 B with 16
 members of 32-byte names (`rake test` prints it); a game between two
 players about 330 B.
@@ -1555,6 +1577,7 @@ players about 330 B.
 | `cpu_ms` | `OTHELLO_CPU_MS` | 700 | the CPU's pause before it plays |
 | `away_seconds` | `OTHELLO_AWAY_SECONDS` | 10 | as for mahjong: away at once when its node leaves, or after this long without a call ("Who is there") |
 | `spectators` | `OTHELLO_SPECTATORS` | 14 | members without a seat at most (in the lobby the free seats count besides) |
+| `ai_turn_seconds` | `OTHELLO_AI_TURN_SECONDS` | 30 | Jev's time for a move; then the CPU plays it |
 
 The CPU is small: the square with the best weight (corners first, the
 squares next to a corner last), then the most discs turned.
@@ -1567,8 +1590,13 @@ mruby). The options are every client's ("Playing in a terminal"). It joins the t
 draws the board as text at every change (it takes the state the host puts
 and asks its view; X black, O white, `*` the squares it may play) and on a
 terminal reads keys ("Keys": the arrows move a cursor, Enter plays), else
-commands: `sit`, `stand`, `cpu`, `start`, a square (`d3`), `resign`,
-`auto` (play the first legal square for you), `quit`. When the table's
+commands: `sit`, `stand`, `cpu`, `ai [KIND]` (Jev in the other seat, when
+the host offers it), `start`, a square (`d3`), `resign`, `auto` (play the
+first legal square for you), `quit`. With keys the owner's `A` puts Jev in
+the other seat (empty or the CPU's) and turns it back into the CPU the
+next time (`[A] Jev`, `[A] back to the CPU`; not shown when the host
+offers no AI player); the seat shows `Jev (AI)` and the first line
+`Jev is thinking, 28 s left` on its moves. When the table's
 host leaves the network (Asterism's `on_leave`) it says the connection is
 lost and stops asking until the host is back (`on_join`; every 30 s
 meanwhile, should the word not come). Without `--table` it looks for a

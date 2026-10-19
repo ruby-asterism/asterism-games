@@ -15,10 +15,12 @@ module AsterismGames
     class OthelloTty
       HELP = <<~TEXT
         On a terminal it reads keys: the arrows move the cursor on the board, Enter (or
-        Space) plays there, Esc resigns (after "resign? [Y/N]"); in the lobby S sit or stand, C the CPU, Enter start; Q or
-        Ctrl+C quits; : (or /) opens a line for a command.
+        Space) plays there, Esc resigns (after "resign? [Y/N]"); in the lobby S sit or stand, C the CPU, A an AI
+        player (Jev, when the host offers one; again: back to the CPU), Enter start; Q or Ctrl+C quits; : (or /)
+        opens a line for a command.
         Othello commands (one per line, or after :): d3 (play there), sit [0|1], stand, cpu (fill the
-        empty seat; the owner), start (the owner), resign, auto (let the client play your
+        empty seat, or turn the AI player back into the CPU; the owner), ai [KIND] (an AI player the host
+        offers in the other seat; the owner), start (the owner), resign, auto (let the client play your
         moves: the first legal square; again to stop), view, help, quit.
         Without --table it takes the first othello table it finds (looking again whenever
         a node joins the network, for 10 s).
@@ -162,10 +164,19 @@ module AsterismGames
         return true if words.empty?
         r = case words[0]
             when "quit", "exit", "q" then return false
-            when "help", "?" then "d3 | sit [0|1] | stand | cpu | start | resign | auto | view | quit"
+            when "help", "?" then "d3 | sit [0|1] | stand | cpu | ai [KIND] | start | resign | auto | view | quit"
             when "sit" then @table.sit(@token, (words[1] || -1).to_i)
             when "stand" then @table.stand(@token)
-            when "cpu" then @table.cpu(@token, -1, true)
+            when "cpu"
+              o = self.class.other_seat(@view)
+              o && self.class.ai_seat?(@view, o) ? @table.cpu(@token, o, true) : @table.cpu(@token, -1, true)
+            when "ai"
+              kind = words[1] || self.class.ai_kinds(@view).first
+              o = self.class.other_seat(@view)
+              if kind.nil? then "the host offers no AI players"
+              elsif o.nil? then "sit first (the owner seats an AI player)"
+              else @table.cpu(@token, o, kind)
+              end
             when "start" then @table.start(@token)
             when "resign" then @table.resign(@token)
             when "auto" then (@auto = !@auto) ? "auto: on" : "auto: off"
@@ -206,11 +217,46 @@ module AsterismGames
         [(x + dx).clamp(0, 7), (y + dy).clamp(0, 7)]
       end
 
+      # The AI players the host offers (the lobby view's "ak"; none from a
+      # host without them).
+      def self.ai_kinds(v)
+        ak = v.is_a?(Hash) ? v["ak"] : nil
+        ak.is_a?(Array) ? ak.map(&:to_s) : []
+      end
+
+      # Seat i's AI player ("jev"), or nil.
+      def self.ai_kind(v, i)
+        ai = v.is_a?(Hash) ? v["ai"] : nil
+        k = ai.is_a?(Array) ? ai[i].to_s : ""
+        k.empty? ? nil : k
+      end
+
+      def self.ai_seat?(v, i) = !ai_kind(v, i).nil?
+
+      # The seat that is not this member's (nil without a seat).
+      def self.other_seat(v)
+        me = v.is_a?(Hash) ? v["me"].to_i : -1
+        me.between?(0, 1) ? 1 - me : nil
+      end
+
+      # What A does for the owner: Jev into the other seat (empty or a
+      # CPU), or the AI player there back into the CPU. nil: nothing to do.
+      def self.ai_key_command(v)
+        o = other_seat(v) or return nil
+        return nil if (v["sk"] || [])[o] == 1
+        return "cpu" if ai_seat?(v, o)
+        kind = ai_kinds(v).first
+        kind ? "ai #{kind}" : nil
+      end
+
+      # The name an AI player goes by (as the host names it).
+      def self.ai_label(kind) = kind == "jev" ? "Jev" : kind.to_s.capitalize
+
       # A game this member plays (seated, going on): Esc offers to resign.
       def self.own_game?(v) = v.is_a?(Hash) && v["st"] == "play" && v["me"].to_i >= 0
 
       # One key as a command. Returns [:cursor, [x, y]], [:cmd, line] (a
-      # square, sit, stand, cpu, start, resign), [:confirm, on] (the
+      # square, sit, stand, cpu, ai KIND, start, resign), [:confirm, on] (the
       # question "resign?" shown or put away), [:note, text], [:line],
       # [:quit] or [:none]. confirm: the question is up (Y resigns, N or Esc
       # cancels, other keys wait).
@@ -238,6 +284,10 @@ module AsterismGames
         case k
         when "s" then [:cmd, me >= 0 ? "stand" : "sit"]
         when "c" then view["ow"] == me && me >= 0 ? [:cmd, "cpu"] : [:note, "the owner puts the CPU in"]
+        when "a"
+          return [:note, "the owner seats an AI player"] unless view["ow"] == me && me >= 0
+          c = ai_key_command(view)
+          c ? [:cmd, c] : [:note, ai_kinds(view).empty? ? "the host offers no AI players" : "the other seat is a player's"]
         when :enter then view["ow"] == me && me >= 0 ? [:cmd, "start"] : [:none]
         else [:none]
         end
@@ -318,7 +368,8 @@ module AsterismGames
           who = names[i].to_s.empty? ? "(empty)" : names[i]
           tags = []
           tags << "you" if i == me
-          tags << "CPU" if v["sk"].to_a[i] == 2
+          ai = self.class.ai_kind(v, i)
+          tags << (ai ? "AI" : "CPU") if v["sk"].to_a[i] == 2
           tags << "owner" if v["ow"] == i
           tags << "away" if v["aw"].to_i[i] == 1
           turn = v["tn"] == i ? " <" : ""
@@ -362,7 +413,14 @@ module AsterismGames
         words = [me >= 0 ? "[S] stand" : "[S] sit"]
         if me >= 0 && v["ow"] == me
           sk = v["sk"] || [0, 0]
-          words << "[C] CPU" if sk.any?(&:zero?)
+          o = self.class.other_seat(v)
+          words << "[C] CPU" if sk.any?(&:zero?) || self.class.ai_seat?(v, o)
+          a = self.class.ai_key_command(v)
+          if a == "cpu"
+            words << "[A] back to the CPU"
+          elsif a
+            words << "[A] #{self.class.ai_label(a.split[1])}"
+          end
           words << "[Enter] start" unless sk.any?(&:zero?)
         end
         "#{words.join(' ')}  #{common}"
@@ -373,7 +431,9 @@ module AsterismGames
         when "wait" then "lobby (sit, cpu, start)"
         when "play"
           t = v["dl"] ? format(", %d s left", (v["dl"].to_i + 999) / 1000) : ""
-          "move #{v['n'].to_i + 1}, last #{v['last'] || '-'}#{t}"
+          tn = v["tn"].to_i
+          think = tn >= 0 && self.class.ai_seat?(v, tn) ? ", #{(v['nm'] || [])[tn]} is thinking" : ""
+          "move #{v['n'].to_i + 1}, last #{v['last'] || '-'}#{think}#{t}"
         when "over"
           r = v["res"] || {}
           w = r["w"].to_i
@@ -389,7 +449,7 @@ module AsterismGames
         return "your move: a square (* marks them), or resign" if v["st"] == "play" && v["tn"] == me
         return "waiting for the other player" if v["st"] == "play"
         return "seated (start: the owner plays again; stand: leave the seat)" if v["st"] == "over"
-        "seated (the colours are drawn at the start)"
+        "seated (the colours are drawn at the start)#{'; ai: an AI player in the other seat' if v['ow'] == me && !self.class.ai_kinds(v).empty?}"
       end
     end
   end
