@@ -1252,6 +1252,7 @@ pipe or a file (and the tests) they read lines as before, and
 |---|---|
 | the arrows | move the cursor on the board (`[ ]` around the square; it stops at the edges; it starts on a legal square) |
 | Enter, Space | play there (a square that is not legal: a short note, nothing sent) |
+| Esc | during this member's own game: resign, after `resign? [Y] yes [N] no` on the last line (`Y` resigns, `N` or Esc cancels; as the othello app). `:resign` also works |
 | `S` | the lobby (or after a game): sit, or stand |
 | `C` | the owner: the CPU into the empty seat |
 | Enter | the lobby (or after a game), the owner: start |

@@ -15,7 +15,7 @@ module AsterismGames
     class OthelloTty
       HELP = <<~TEXT
         On a terminal it reads keys: the arrows move the cursor on the board, Enter (or
-        Space) plays there; in the lobby S sit or stand, C the CPU, Enter start; Q or
+        Space) plays there, Esc resigns (after "resign? [Y/N]"); in the lobby S sit or stand, C the CPU, Enter start; Q or
         Ctrl+C quits; : (or /) opens a line for a command.
         Othello commands (one per line, or after :): d3 (play there), sit [0|1], stand, cpu (fill the
         empty seat; the owner), start (the owner), resign, auto (let the client play your
@@ -58,6 +58,8 @@ module AsterismGames
         # a game shows), a line being typed after ":".
         @keys = keys
         @cursor = nil
+        # Esc during this member's game: "resign? [Y/N]" (as the othello app).
+        @confirm = false
         @typing = false
         @path = path
         @name = name
@@ -141,6 +143,7 @@ module AsterismGames
           @view = v
           @played = true if v.is_a?(Hash) && v["st"] == "play"
           @cursor = self.class.place_cursor(v, @cursor)
+          @confirm = false unless self.class.own_game?(v)
           draw
         end
         play_auto
@@ -203,17 +206,28 @@ module AsterismGames
         [(x + dx).clamp(0, 7), (y + dy).clamp(0, 7)]
       end
 
+      # A game this member plays (seated, going on): Esc offers to resign.
+      def self.own_game?(v) = v.is_a?(Hash) && v["st"] == "play" && v["me"].to_i >= 0
+
       # One key as a command. Returns [:cursor, [x, y]], [:cmd, line] (a
-      # square, sit, stand, cpu, start), [:note, text], [:line], [:quit] or
-      # [:none].
-      def self.key_command(key, view, cursor)
+      # square, sit, stand, cpu, start, resign), [:confirm, on] (the
+      # question "resign?" shown or put away), [:note, text], [:line],
+      # [:quit] or [:none]. confirm: the question is up (Y resigns, N or Esc
+      # cancels, other keys wait).
+      def self.key_command(key, view, cursor, confirm: false)
         k = key.is_a?(String) ? key.downcase : key
         return [:quit] if [:ctrl_c, :ctrl_q, "q"].include?(k)
+        if confirm && own_game?(view)
+          return [:cmd, "resign"] if k == "y"
+          return [:confirm, false] if k == "n" || k == :esc
+          return [:none]
+        end
         return [:line] if [":", "/"].include?(k)
         return [:none] unless view.is_a?(Hash) && !view["error"]
         me = view["me"].to_i
         if view["st"] == "play"
           return [:none] if me.negative?
+          return [:confirm, true] if k == :esc
           return [:cursor, step(cursor, k)] if KEY_STEPS.key?(k)
           return [:none] unless %i[enter space].include?(k)
           return [:note, "not your move"] unless view["tn"] == me
@@ -231,16 +245,23 @@ module AsterismGames
 
       # One key (Play.key_loop); false to quit, :line for a line to type.
       def key(k)
-        r = self.class.key_command(k, @view, @cursor)
+        r = self.class.key_command(k, @view, @cursor, confirm: @confirm)
         case r[0]
         when :quit then return false
         when :line then return :line
+        when :confirm
+          @lock.synchronize do
+            @confirm = r[1]
+            draw
+          end
+        when :cmd
+          @confirm = false
+          return command(r[1])
         when :cursor
           @lock.synchronize do
             @cursor = r[1]
             draw
           end
-        when :cmd then return command(r[1])
         when :note then say(r[1])
         end
         true
@@ -334,8 +355,9 @@ module AsterismGames
         common = "[:] type a command  [Q] quit"
         if v["st"] == "play"
           return "watching  #{common}" if me.negative?
-          return "your move: [arrows] move [Enter] play (* marks the squares)  #{common}" if v["tn"] == me
-          return "waiting for the other player  [arrows] move  #{common}"
+          return "resign? [Y] yes [N] no" if @confirm
+          return "your move: [arrows] move [Enter] play (* marks the squares) [Esc] resign  #{common}" if v["tn"] == me
+          return "waiting for the other player  [arrows] move [Esc] resign  #{common}"
         end
         words = [me >= 0 ? "[S] stand" : "[S] sit"]
         if me >= 0 && v["ow"] == me

@@ -267,6 +267,51 @@ class TestPlayKeys < Minitest::Test
     assert_equal [:line], O.key_command(":", lobby, nil)
   end
 
+  # Esc during this member's own game: "resign? [Y/N]" (as the othello
+  # app); Y resigns, N or Esc cancels, other keys wait; not for a spectator
+  # nor outside a game.
+  def test_othello_resign_asks_first
+    v = othello_view
+    assert_equal [:confirm, true], O.key_command(:esc, v, [3, 2])
+    assert_equal [:confirm, true], O.key_command(:esc, othello_view(tn: 1), nil), "on the other's move too"
+    assert_equal [:cmd, "resign"], O.key_command("y", v, [3, 2], confirm: true)
+    assert_equal [:cmd, "resign"], O.key_command("Y", v, [3, 2], confirm: true)
+    assert_equal [:confirm, false], O.key_command("n", v, [3, 2], confirm: true)
+    assert_equal [:confirm, false], O.key_command(:esc, v, [3, 2], confirm: true)
+    assert_equal [:none], O.key_command(:enter, v, [3, 2], confirm: true), "Enter does not play meanwhile"
+    assert_equal [:none], O.key_command(:up, v, [3, 2], confirm: true)
+    assert_equal [:quit], O.key_command("q", v, [3, 2], confirm: true)
+    assert_equal [:none], O.key_command(:esc, othello_view(me: -1), nil), "a spectator has nothing to resign"
+    assert_equal [:none], O.key_command(:esc, othello_view(st: "wait"), nil)
+    assert_equal [:none], O.key_command("y", othello_view(st: "over"), nil, confirm: true), "the game ended meanwhile"
+    # The client: the question on the last line, cancelled, then answered.
+    out = StringIO.new
+    sent = []
+    table = Object.new
+    table.define_singleton_method(:resign) { |token| sent << token; "ok" }
+    table.define_singleton_method(:view) { |_t| v }
+    tty = O.allocate
+    { out: out, path: "games/games/othello1", note: "", keys: true, typing: false, view: v, cursor: [3, 2],
+      confirm: false, lock: Mutex.new, table: table, token: "tk", auto: false, played: true }.each do |k, x|
+      tty.instance_variable_set(:"@#{k}", x)
+    end
+    tty.key(:esc)
+    assert_equal true, tty.instance_variable_get(:@confirm)
+    assert_match(/resign\? \[Y\] yes \[N\] no$/, out.string)
+    tty.key("n")
+    assert_equal false, tty.instance_variable_get(:@confirm)
+    assert_empty sent, "N: nothing sent"
+    tty.key(:esc)
+    tty.key("y")
+    assert_equal ["tk"], sent, "Y: resigned"
+    assert_equal false, tty.instance_variable_get(:@confirm)
+    tty.instance_variable_set(:@confirm, true)
+    tty.instance_variable_set(:@view, nil)
+    table.define_singleton_method(:view) { |_t| v.merge("st" => "over") }
+    tty.refresh
+    assert_equal false, tty.instance_variable_get(:@confirm), "the question goes when the game is over"
+  end
+
   def test_othello_board_with_the_cursor
     assert_equal " . . . . . . . .", O.board_row(%w[. . . . . . . .], nil)
     assert_equal "[.]. . . . . . .", O.board_row(%w[. . . . . . . .], 0)

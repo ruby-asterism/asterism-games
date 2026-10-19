@@ -35,7 +35,8 @@ described ("games 0.10.0" and the like).
   `K` `L` `J` the kans, `N` nine kinds, Esc pass, Enter the result's OK;
   the lobby `1`-`4` sit, `S` stand, `C` CPUs, Enter start. Othello: the
   arrows move a cursor on the board (it stops at the edges), Enter plays
-  there; `S` sit or stand, `C` the CPU, Enter start. `Q`, Ctrl+Q or Ctrl+C
+  there, Esc resigns after asking (`resign? [Y] yes [N] no`: `Y` resigns,
+  `N` or Esc cancels); `S` sit or stand, `C` the CPU, Enter start. `Q`, Ctrl+Q or Ctrl+C
   quits, and `:` (or `/`) opens a line for any command as typed before.
   The last line names the keys that work now (`[R]リーチ [T]ツモ`). The
   terminal is in raw mode only while keys are read and is put back however
