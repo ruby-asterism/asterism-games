@@ -62,9 +62,6 @@ class TestPlay < Minitest::Test
     out, st = Open3.capture2e(RbConfig.ruby, BIN, "play", "chess")
     assert_equal 2, st.exitstatus
     assert_match(/no game "chess"/, out)
-    out, st = Open3.capture2e(RbConfig.ruby, File.join(ROOT, "bin/othello-tty"), "--help")
-    assert st.success?
-    assert_match(/Othello commands/, out)
   end
 
   # ------------------------------------------------------------ tiles

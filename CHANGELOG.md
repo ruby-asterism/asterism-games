@@ -3,6 +3,14 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
+## 0.17.1
+
+- `bin/othello-tty` is gone: `asterism-games play othello` is the same
+  client, and the gem installs `asterism-games` only.
+- The first version published on rubygems.org: `gem install
+  asterism-games` gives `asterism-games play` with the asterism gem and
+  nothing else. The host and the tables are 0.17.0's.
+
 ## 0.17.0
 
 - **`asterism-games play <game>`** (README "Playing in a terminal"): the

@@ -270,12 +270,20 @@ on from the same turn after a few seconds, and the players' screens come
 back to it by themselves. To go back, run it with the old version (it
 prints it); the old image stays (`docker image ls ghcr.io/ruby-asterism/asterism-games`).
 
-### From 0.16.3 to 0.17.0 (asterism-games play)
+### From 0.17.0 to 0.17.1 (the gem without othello-tty)
+
+Nothing to do on a server: the host and the tables are the same as
+0.17.0's. `bin/othello-tty` is gone (`asterism-games play othello` is
+it), and 0.17.1 is the first version on rubygems.org
+(`gem install asterism-games`).
+
+### From 0.16.3 to 0.17.0 (asterism-games play, Jev at the othello table)
 
 `./update.sh 0.17.0` (or `--when-idle 0.17.0`). Nothing in `.env`. The
-host and the tables do not change; the version adds the terminal clients
-(`asterism-games play othello`, `play mahjong`; README "Playing in a
-terminal"), which players run on their own machines.
+version adds the terminal clients (`asterism-games play othello`, `play
+mahjong`; README "Playing in a terminal"), which players run on their own
+machines, and Jev at the othello table with the key the mahjong tables
+already use (README "AI players").
 
 ### From 0.16.2 to 0.16.3 (asterism 0.8.0)
 

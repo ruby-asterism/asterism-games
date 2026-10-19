@@ -28,7 +28,7 @@ class TestGem < Minitest::Test
     assert_includes files, "lib/asterism_games/othello.rb"
     assert_includes files, "lib/asterism_games/board.rb"
     assert_includes files, "VERSION", "version.rb reads it"
-    assert_equal %w[asterism-games othello-tty], spec.executables.sort
+    assert_equal %w[asterism-games], spec.executables.sort
     spec.executables.each { |e| assert_includes files, "bin/#{e}" }
   end
 

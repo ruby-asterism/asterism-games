@@ -31,10 +31,10 @@ Gem::Specification.new do |s|
   # Listed by name and pattern, never from git: nothing else in the
   # checkout (app/, deploy/, credentials, var/) can slip in.
   s.files = Dir["lib/asterism_games.rb", "lib/asterism_games/**/*.rb"] +
-            ["bin/asterism-games", "bin/othello-tty", "VERSION", "README.md", "CHANGELOG.md", "LICENSE"]
+            ["bin/asterism-games", "VERSION", "README.md", "CHANGELOG.md", "LICENSE"]
   s.require_paths = ["lib"]
   s.bindir = "bin"
-  s.executables = ["asterism-games", "othello-tty"]
+  s.executables = ["asterism-games"]
   # 0.7.1 is enough: what came after it (the methods' texts in the meta,
   # @status, on_app_join) is used when the asterism gem has it.
   # The AI players' Claude needs the anthropic gem, which is not a

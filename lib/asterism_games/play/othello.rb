@@ -5,7 +5,7 @@ require "asterism"
 module AsterismGames
   module Play
     # An othello table in a terminal (README "The othello table"):
-    # `asterism-games play othello` (and bin/othello-tty, which calls it).
+    # `asterism-games play othello`.
     # It joins the table, shows the board as text at every change (the
     # state the host puts) and reads commands: watch, or sit and type the
     # squares ("d3"). When the table's host leaves the network (Asterism's
@@ -100,7 +100,7 @@ module AsterismGames
       def start
         r = @table.join(@name)
         # "identity": in a room, only the seats and the host's names join.
-        abort "othello-tty: #{@path}: join refused: #{r.is_a?(Hash) ? r['error'] : r.inspect}" unless r.is_a?(Hash) && r["token"]
+        abort "play othello: #{@path}: join refused: #{r.is_a?(Hash) ? r['error'] : r.inspect}" unless r.is_a?(Hash) && r["token"]
         @token = r["token"]
         host, app, tname = @path.split("/")
         # The state the host puts after every change (and every 5 s): a newer

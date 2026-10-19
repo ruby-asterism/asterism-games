@@ -46,7 +46,7 @@ and the image"): the framework with the two sample games is the gem
         └──requires──>  asterism_games  <───┘
                         (Host, Rooms, Config, Store, Game, Remote)  ──>  asterism
 
- the gem asterism-games:  lib/ (framework, othello, board, the terminal clients), bin/asterism-games, bin/othello-tty
+ the gem asterism-games:  lib/ (framework, othello, board, the terminal clients), bin/asterism-games
  the image:               all of the above, app/ (mahjong), config/, the Gemfile's gems
 ```
 
@@ -62,7 +62,6 @@ the console ("Permanent tables"; the server's setup: docs/install.md).
 | `asterism-games.gemspec` | the gem: what it holds and needs ("The gem and the image") |
 | `bin/asterism-games` | the host (loads the framework and the games); `status`; `play <game>`, a table in this terminal ("Playing in a terminal"); `help` |
 | `bin/mahjong-bots` | players without screens, for trying a mahjong table (one process each; not in the gem) |
-| `bin/othello-tty` | `asterism-games play othello`, under its old name |
 | `lib/asterism_games/play.rb`, `lib/asterism_games/play/` | the terminal clients ("Playing in a terminal"): the options, `othello.rb`, `mahjong.rb` with `mahjong_text.rb` (tiles as text, widths, reading the input) and `mahjong_screen.rb` (the screen); they need neither the framework nor riichi_engine |
 | `lib/asterism_games.rb` | the framework, without any game |
 | `lib/asterism_games/game.rb` | the base of a game: the registry, the members and tokens, who joins in a room, the views, the time, saving ("Writing a game") |
@@ -90,7 +89,7 @@ the console ("Permanent tables"; the server's setup: docs/install.md).
 game host of your own: the framework, the two sample games that need
 nothing else (othello, the drawing board), `bin/asterism-games` (with
 `play`, the terminal clients of othello and mahjong: a mahjong table needs
-riichi_engine, its client does not) and `bin/othello-tty`. It depends on
+riichi_engine, its client does not). It depends on
 the asterism gem only (0.7.1 or later in
 0.x; what came after 0.7.1, such as `@status` and `on_app_join`, is used
 when there). Not in it: mahjong (`app/`, it needs the riichi_engine fork
@@ -402,7 +401,7 @@ list's flag), a mahjong seat is played for after a short wait, the status
 counts it. The host learns it from Asterism, not from the calls (games
 0.8.0), and by the player's table app (games 0.10.0): a table app runs as
 the application **`game`** of its node (the boards' and the browsers'
-table apps, `bin/othello-tty`, `bin/mahjong-bots` do), and the host
+table apps, `asterism-games play`, `bin/mahjong-bots` do), and the host
 follows the liveliness token `asterism/<node>/game`. The Net's
 `on_app_leave` tells it that the table app left the network (a closed
 browser tab, a board's app that closed, a process killed, a line that
@@ -447,7 +446,7 @@ without a call (away after `away_seconds`, measured 13.6 s with the default
 nothing in the host changes with it.
 
 The screens follow the host the same way: the tables' apps (fmruby-core
-`flash/app/game/`) and `bin/othello-tty` take a host's tables off their
+`flash/app/game/`) and `asterism-games play` take a host's tables off their
 list when its node leaves and look for them again when a node joins
 (Asterism's `each` reads the liveliness they already follow: no message is
 sent); at a table, a host that leaves shows the connection lost, the
@@ -1584,8 +1583,7 @@ squares next to a corner last), then the most discs turned.
 
 ### In a terminal: `asterism-games play othello`
 
-(`bin/othello-tty` until games 0.17.0; it is still there and runs this,
-with the same options.) CRuby and the asterism gem only (no Family
+(`bin/othello-tty` until games 0.17.0; it is gone in 0.17.1.) CRuby and the asterism gem only (no Family
 mruby). The options are every client's ("Playing in a terminal"). It joins the table,
 draws the board as text at every change (it takes the state the host puts
 and asks its view; X black, O white, `*` the squares it may play) and on a
