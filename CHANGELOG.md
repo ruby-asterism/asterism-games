@@ -9,13 +9,20 @@ described ("games 0.10.0" and the like).
   tables from a terminal, CRuby and the asterism gem only. `play othello`
   is what `bin/othello-tty` was (the script stays and runs it, with the
   same options). `play mahjong` is new: the table list, the lobby (sit,
-  stand, CPUs, tonpuu or hanchan, start), the rounds with the tiles as
-  emoji (🀇🀈🀉; `--tiles mpsz` for 1m 2m 3m and 東 ... 中), the result
+  stand, CPUs, tonpuu or hanchan, start), the rounds with the tiles in
+  kanji as the table app draws them (the hand in two rows, 一..九 or
+  full-width １..９ over 萬 筒 索; 一萬 ４筒 ３索 東 in the rivers), or
+  `--tiles emoji` (🀇🀈🀉; the fonts decide how they look, 🀄 is often a
+  colour emoji) or `--tiles mpsz` (1m 4p 3s and 東 ... 中), the result
   with its yaku and points and the OKs it waits for, the end of the game,
   and watching. Discard by the letter under a tile or by the tile (`6s`,
   `0p`); `riichi`, `tsumo`, `ron`, `pon`, `chi`, `kan`, `pass`, `ok`, with
   a choice when there are several ways; the last line says what can be
-  done now. Tiles and letters keep their columns however wide a terminal
+  done now, and on a terminal the time left counts down in place once a
+  second (only that line is rewritten, the cursor saved and put back, so
+  a line being typed is untouched). `--commands "sit,cpu,start"` waits
+  for the moment the table can take each command (the lobby, the owner's
+  role, the four seats). Tiles and letters keep their columns however wide a terminal
   or a font makes an emoji (each put at its column with the cursor). Both
   take `--router`, `--credentials`, `--namespace`, `--table`, `--name`,
   and with neither of the first two `ASTERISM_ROUTER` /

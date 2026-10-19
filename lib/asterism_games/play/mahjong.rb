@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "asterism"
+require "io/console"
 require_relative "mahjong_text"
 require_relative "mahjong_screen"
 
@@ -40,6 +41,13 @@ module AsterismGames
       ASSIST = 1 # the riichi help (README "Assist")
       VIEW_EVERY_S = 2.0
       HOST_GONE_EVERY_S = 30.0
+      # The countdown on a terminal: the lines with the time are rewritten
+      # in place this often.
+      TIMER_EVERY_S = 1.0
+
+      # --commands that only work in the lobby, and those of the owner.
+      LOBBY_WORDS = %w[sit stand cpu nocpu ai start tonpuu hanchan rule].freeze
+      OWNER_WORDS = %w[cpu nocpu ai start tonpuu hanchan rule].freeze
 
       REASONS = {
         "token" => "卓の人ではない", "not seated" => "席に着いていない", "stale" => "画面が古い: 読み直し中",
@@ -99,7 +107,7 @@ module AsterismGames
 
       attr_reader :view
 
-      def initialize(net, path, name, style: "emoji", out: $stdout)
+      def initialize(net, path, name, style: "kanji", out: $stdout)
         @net = net
         @path = path
         @name = name
@@ -117,6 +125,10 @@ module AsterismGames
         @played = false
         @host = path.split("/").first
         @host_gone = false
+        @queue = []
+        @queue_lock = Mutex.new
+        @waiting_for = nil
+        @drawn_lines = nil
       end
 
       # Asterism's on_leave / on_join (the receiving thread: nothing here
@@ -153,6 +165,7 @@ module AsterismGames
           @wake << true if v.is_a?(Hash) && (!@view.is_a?(Hash) || v["v"] != @view["v"])
         end
         refresh
+        @timer = Thread.new { timer_loop } if @out.tty?
         # And a view every VIEW_EVERY_S anyway: the host sees that this
         # member is still here.
         @ticker = Thread.new do
@@ -169,6 +182,7 @@ module AsterismGames
 
       def stop
         @ticker&.kill
+        @timer&.kill
         @table.leave(@token) if @token
       rescue Asterism::Error
         nil
@@ -192,6 +206,55 @@ module AsterismGames
           draw if signature(v) != @drawn
         end
         play_auto
+        run_queue
+      end
+
+      # --commands: run in order, each when the table can take it. A lobby
+      # command waits for the lobby (the table may still show the end of a
+      # game, or a game may be going on, when the client joins), an owner's
+      # command for this member to be seated and the owner, start for the
+      # four seats to be taken; one that is answered "no" is not tried
+      # again. Run from every refresh (the ticker's too), so a wait ends by
+      # itself.
+      def queue_commands(list)
+        @queue_lock.synchronize { @queue.concat(list) }
+        run_queue
+      end
+
+      def run_queue
+        return unless @queue_lock.try_lock
+        begin
+          until @queue.empty?
+            c = @queue.first
+            why = not_ready(c)
+            if why
+              if @waiting_for != [c, why]
+                @waiting_for = [c, why]
+                say("--commands: #{c} (#{why})")
+              end
+              break
+            end
+            @queue.shift
+            @waiting_for = nil
+            command(c)
+          end
+        ensure
+          @queue_lock.unlock
+        end
+      end
+
+      # Why a command cannot run yet (Japanese, for the screen), or nil.
+      def not_ready(c)
+        w = c.split.first.to_s.downcase
+        return nil unless LOBBY_WORDS.include?(w)
+        v = @view
+        return "画面を待っています" unless v.is_a?(Hash) && !v["error"]
+        return "待ち合わせを待っています" unless v["st"] == "wait"
+        return nil unless OWNER_WORDS.include?(w)
+        return "席に着くのを待っています" unless v["me"].to_i >= 0
+        return "卓の主を待っています" unless v["ow"] == v["me"]
+        return "4 席がそろうのを待っています" if w == "start" && (v["sk"] || [0]).any?(&:zero?)
+        nil
       end
 
       # What a redraw depends on: the view without the times that only
@@ -307,6 +370,10 @@ module AsterismGames
         return unless v.is_a?(Hash)
         @drawn = signature(v)
         lines = @screen.lines(v, note: @note, pending: @pending)
+        @drawn_lines = lines
+        @drawn_view = v
+        @drawn_args = { note: @note, pending: @pending }
+        @drawn_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         if @out.tty?
           @out.print("\e[H\e[2J")
           @out.puts(lines)
@@ -317,6 +384,54 @@ module AsterismGames
           @out.puts("> ")
         end
         @out.flush
+      end
+
+      # The countdown on a terminal (the move's time and the bank, the
+      # result's OK wait): about once a second the screen is worked out
+      # again from the view as drawn, with the time gone since taken off,
+      # and only the lines that changed are rewritten where they are:
+      # ESC 7 saves the cursor (where the player is typing, after "> "),
+      # the line is cleared and written, ESC 8 puts the cursor back. The
+      # line being typed is never touched, and the terminal's own line
+      # editing (it echoes and erases at the cursor) goes on as before.
+      def timer_loop
+        loop do
+          sleep TIMER_EVERY_S
+          @lock.synchronize { tick_timer }
+        rescue StandardError
+          nil
+        end
+      end
+
+      def tick_timer
+        v = @drawn_view
+        return unless v.is_a?(Hash) && @drawn_lines && (v["dl"] || v["ok"])
+        lines = @screen.lines(counted_down(v), **@drawn_args)
+        return unless lines.size == @drawn_lines.size
+        rows = (@out.winsize[0] rescue nil)
+        # The screen scrolled when it is taller than the terminal: the
+        # lines that went off the top are not rewritten.
+        shift = rows ? [@drawn_lines.size + 1 - rows, 0].max : 0
+        out = +""
+        lines.each_with_index do |l, i|
+          next if l == @drawn_lines[i] || i < shift
+          out << "\e[#{i + 1 - shift};1H\e[2K#{l}"
+        end
+        @drawn_lines = lines
+        return if out.empty?
+        @out.print("\e7#{out}\e8")
+        @out.flush
+      end
+
+      # The view with the time since it was drawn taken off its clocks.
+      def counted_down(v)
+        ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - @drawn_at) * 1000).to_i
+        c = v.dup
+        if (dl = v["dl"]).is_a?(Array) && dl.size > 1
+          c["dl"] = [dl[0], [dl[1].to_i - ms, 0].max, *dl[2..]]
+        end
+        c["ok"] = [v["ok"][0], v["ok"][1], [v["ok"][2].to_i - ms, 0].max] if v["ok"].is_a?(Array) && v["ok"].size > 2
+        c
       end
     end
   end

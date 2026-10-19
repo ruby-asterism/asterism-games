@@ -11,7 +11,7 @@ module AsterismGames
   module Play
     GAMES = {
       "othello" => ["othello", "an othello table: the board as text, play by typing squares (d3)"],
-      "mahjong" => ["mahjong", "a mahjong table: the tiles as emoji (or 123m text), play by letters or 6s"]
+      "mahjong" => ["mahjong", "a mahjong table: the tiles as kanji, emoji or 123m text, play by letters or 6s"]
     }.freeze
 
     USAGE = <<~TEXT
@@ -32,7 +32,10 @@ module AsterismGames
         --until-over          quit when a game it saw played is over
         -h, --help            this text (and the game's own: play <game> --help)
       mahjong only:
-        --tiles emoji|mpsz    how tiles show: emoji (default, 🀇🀈🀉) or text (1m 2m 3m)
+        --tiles kanji|emoji|mpsz
+                              how tiles show: kanji (default: 一萬 ４筒 ３索 東, the hand in
+                              two rows like the table app), emoji (🀇🀈🀉; the font draws
+                              them, 🀄 often in colour) or text (1m 4p 3s 東)
 
       With neither --router nor --credentials, ASTERISM_ROUTER and
       ASTERISM_CREDENTIALS from the environment are used (as the asterism
@@ -81,7 +84,7 @@ module AsterismGames
     # The options of every game (and --tiles); raises ArgumentError.
     def parse(args, game = nil, env: ENV)
       opts = { router: nil, table: nil, name: nil, node: nil, credentials: nil, namespace: nil,
-               commands: [], until_over: false, tiles: "emoji", help: false }
+               commands: [], until_over: false, tiles: "kanji", help: false }
       args = args.dup
       until args.empty?
         k = args.shift
@@ -102,7 +105,7 @@ module AsterismGames
         when "--tiles"
           raise ArgumentError, "--tiles is mahjong's" unless game.nil? || game == "mahjong"
           opts[:tiles] = need.call
-          raise ArgumentError, "--tiles emoji or --tiles mpsz" unless %w[emoji mpsz].include?(opts[:tiles])
+          raise ArgumentError, "--tiles kanji, emoji or mpsz" unless %w[kanji emoji mpsz].include?(opts[:tiles])
         when "-h", "--help" then opts[:help] = true
         else raise ArgumentError, "unknown option #{k}"
         end
@@ -166,7 +169,12 @@ module AsterismGames
     # (until_over) the game it saw is over. The end of a pipe or a file
     # keeps it running (auto plays on) until Ctrl-C.
     def read_loop(client, opts, input: $stdin)
-      opts[:commands].each { |c| client.command(c) }
+      # A client that can wait for the right moment takes them as a queue.
+      if client.respond_to?(:queue_commands)
+        client.queue_commands(opts[:commands])
+      else
+        opts[:commands].each { |c| client.command(c) }
+      end
       reader = Thread.new do
         quit = false
         while (line = input.gets)

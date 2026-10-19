@@ -32,6 +32,9 @@ class TestPlay < Minitest::Test
     assert_nil o[:credentials], "a router on the line never meets a .tar from the environment"
     o = AsterismGames::Play.parse(%w[--credentials a.tar], "mahjong", env: env)
     assert_nil o[:locator], "a .tar alone: its router"
+    assert_equal "kanji", AsterismGames::Play.parse([], "mahjong", env: {})[:tiles], "kanji tiles by default"
+    assert_equal "emoji", AsterismGames::Play.parse(%w[--tiles emoji], "mahjong", env: {})[:tiles]
+    assert_equal "kanji", AsterismGames::Play::MahjongScreen.new.style
     o = AsterismGames::Play.parse([], "othello", env: {})
     assert_equal "tcp/127.0.0.1:7447", o[:locator], "nothing at all: a zenohd on this machine"
     assert_raises(ArgumentError) { AsterismGames::Play.parse(%w[--tiles ascii], "mahjong", env: {}) }
@@ -52,7 +55,7 @@ class TestPlay < Minitest::Test
     out, st = Open3.capture2e(RbConfig.ruby, BIN, "play", "--help")
     assert st.success?
     assert_match(/mahjong .*othello|othello .*\n.*mahjong/m, out)
-    assert_match(/--tiles emoji\|mpsz/, out)
+    assert_match(/--tiles kanji\|emoji\|mpsz/, out)
     out, st = Open3.capture2e(RbConfig.ruby, BIN, "play", "mahjong", "--help")
     assert st.success?
     assert_match(/riichi \[e\|6s\]/, out)
@@ -92,6 +95,21 @@ class TestPlay < Minitest::Test
     assert_equal [2, 13], T.parse_tiles("3m 4p")
     assert_equal [30, 30], T.parse_tiles("東東")
     assert_nil T.parse_tiles("3q")
+  end
+
+  def test_tiles_in_kanji
+    assert_equal %w[一萬 五萬 九萬 五萬], [0, 4, 8, 9].map { |c| T.tile(c, "kanji") }
+    assert_equal %w[１筒 ５筒 ９筒 １索 ５索], [10, 19, 18, 20, 29].map { |c| T.tile(c, "kanji") }
+    assert_equal %w[東 南 西 北 白 發 中 裏], (30..37).map { |c| T.tile(c, "kanji") }
+    assert_equal %w[一 萬], T.kanji_rows(0)
+    assert_equal %w[５ 筒], T.kanji_rows(19), "the red five is the five (drawn red)"
+    assert_equal ["東", ""], T.kanji_rows(30)
+    refute_match(/[①-⑨]/, (0..37).map { |c| T.tile(c, "kanji") }.join, "no circled digits")
+    (0..37).each { |c| T.kanji_rows(c).each { |x| assert_includes [0, 2], T.width(x), "#{c}: two columns" } }
+    assert_equal 0, T.parse_tile("一萬")
+    assert_equal 13, T.parse_tile("４筒")
+    assert_equal 22, T.parse_tile("3索")
+    assert_equal [22, 23], T.parse_tiles("３索４索")
   end
 
   # ------------------------------------------------------------ widths
@@ -252,6 +270,32 @@ class TestPlay < Minitest::Test
     assert_match(/^北 Claude\s+24000\* 東 2m \[4s\]$/, mp.join("\n"))
   end
 
+  def test_the_round_screen_in_kanji
+    long = [36, 10, 8, 33, 1, 18, 23 | 0x40, 30, 5, 14, 22, 27, 31, 2, 16, 20, 34, 7].pack("C*").b
+    v = round_view(kw: [[36, 18].pack("C*").b, [33, 8, 18, 31].pack("C*").b, [35, 18, 25].pack("C*").b, long],
+                   h: [0, 1, 2, 13, 19, 15, 21, 22, 23, 30, 30, 35, 35].pack("C*").b,
+                   a: [[T::DAHAI, [0, 24].pack("C*").b]])
+    lines = AsterismGames::Play::MahjongScreen.new(style: "kanji").lines(v)
+    assert_equal "東1局 0本場  供託0  残り62  ドラ 發", lines[0]
+    assert_includes lines, "南 Jev     25000  北 九萬 ９筒 南"
+    assert_includes lines, "   鳴き           ３筒 ３筒 ３筒"
+    i = lines.index { |l| l.start_with?("北 Claude") }
+    assert_equal "北 Claude  24000* 中 １筒 九萬 北 二萬 ９筒 [４索] 東 六萬 ５筒 ３索 ８索 南", lines[i]
+    assert_equal "                  三萬 ７筒 １索 白 八萬", lines[i + 1], "a long river goes on below"
+    lines.each { |l| assert_operator T.width(l), :<=, 80, l }
+    j = lines.index { |l| l.start_with?("一 ") }
+    assert_equal "一 二 三 ４ ５ ６ ２ ３ ４ 東 東 發 發    ５", lines[j]
+    assert_equal "萬 萬 萬 筒 筒 筒 索 索 索                索", lines[j + 1]
+    assert_equal "a  b  c  d  e  f  g  h  i  j  k  l  m     n", lines[j + 2]
+    assert_equal "赤: e", lines[j + 3]
+    # Each letter under its tile: the same column in all three rows.
+    cols = ->(l) { col = 0; l.each_char.filter_map { |ch| at = col; col += T.char_width(ch); at unless ch == " " } }
+    assert_equal cols.call(lines[j + 2]), cols.call(lines[j])
+    tty = AsterismGames::Play::MahjongScreen.new(style: "kanji", cursor: true).lines(v)
+    assert_includes tty.join, "\e[31m５\e[0m", "the red five in red on a terminal"
+    assert_includes tty.join, "\e[31m筒\e[0m"
+  end
+
   def test_the_other_screens
     s = AsterismGames::Play::MahjongScreen.new(style: "mpsz")
     lobby = s.lines({ "st" => "wait", "t" => "mahjong1", "hv" => "0.17.0", "me" => 0, "ow" => 0,
@@ -289,11 +333,52 @@ class TestPlay < Minitest::Test
     assert_match(/観戦中/, text)
   end
 
+  # A terminal for the timer: a StringIO that says it is one.
+  class TtyOut < StringIO
+    def tty? = true
+    def winsize = [40, 100]
+  end
+
+  # The countdown: about once a second only the lines whose time changed
+  # are rewritten in place, between ESC 7 and ESC 8 (the cursor where the
+  # player types is saved and put back); the screen is not cleared. In a
+  # pipe there is no timer.
+  def test_the_timer_rewrites_only_the_time_line_on_a_terminal
+    require "asterism_games/play/mahjong"
+    net = Struct.new(:x) { def [](*, **) = nil }.new
+    out = TtyOut.new
+    c = AsterismGames::Play::Mahjong.new(net, "games/games/mahjong1", "Alice", style: "emoji", out: out)
+    c.instance_variable_set(:@view, round_view)
+    c.send(:draw)
+    lines = c.instance_variable_get(:@drawn_lines)
+    assert_match(/あと 5\+20秒\z/, lines.last)
+    out.truncate(0)
+    out.rewind
+    c.instance_variable_set(:@drawn_at, c.instance_variable_get(:@drawn_at) - 3.2)
+    c.send(:tick_timer)
+    s = out.string
+    refute_includes s, "\e[2J", "no clearing"
+    assert s.start_with?("\e7") && s.end_with?("\e8"), "the cursor saved and put back"
+    assert_equal ["\e[#{lines.size};1H\e[2K自分の番: 打つ牌 (文字か 6s)、tsumo  あと 2+20秒"],
+                 s.delete_prefix("\e7").delete_suffix("\e8").scan(/\e\[\d+;1H\e\[2K[^\e]*/), "only the time line"
+    out.truncate(0)
+    out.rewind
+    c.send(:tick_timer)
+    assert_empty out.string, "nothing changed: nothing written"
+    c.instance_variable_set(:@drawn_at, c.instance_variable_get(:@drawn_at) - 10)
+    c.send(:tick_timer)
+    assert_match(/あと 0\+12秒/, out.string, "the move's time gone, then the bank counts down")
+    pipe = StringIO.new
+    p2 = AsterismGames::Play::Mahjong.new(net, "games/games/mahjong1", "Alice", out: pipe)
+    assert_nil p2.instance_variable_get(:@timer), "no timer in a pipe"
+  end
+
   # ------------------------------------------------------------ through a router
 
   ROUTER = ENV["ASTERISM_TEST_ROUTER"]
 
-  # Two clients at once (emoji at mahjong1, mpsz at mahjong2), each from
+  # Three clients at once (emoji at mahjong1, mpsz at mahjong2, kanji at
+  # mahjong3), each from
   # scripted input: sit, CPUs, tonpuu, start, then an answer to every
   # screen (a letter, an MPSZ tile, a win, a call or a pass, the OKs) until
   # the game is over.
@@ -302,7 +387,7 @@ class TestPlay < Minitest::Test
     Dir.mktmpdir do |dir|
       node = "games-play-#{Process.pid}"
       cfg = { "router" => ROUTER, "node" => node, "state_dir" => dir,
-              "tables" => %w[mahjong1 mahjong2].map do |n|
+              "tables" => %w[mahjong1 mahjong2 mahjong3].map do |n|
                 { "name" => n, "game" => "mahjong", "cpu_ms" => 0, "deal_pause_seconds" => 1 }
               end }
       File.write(File.join(dir, "host.yml"), cfg.to_yaml)
@@ -315,7 +400,7 @@ class TestPlay < Minitest::Test
           break if File.exist?(log) && File.read(log).include?(" up ")
           sleep 0.1
         end
-        results = { "emoji" => "mahjong1", "mpsz" => "mahjong2" }.map do |style, table|
+        results = { "emoji" => "mahjong1", "mpsz" => "mahjong2", "kanji" => "mahjong3" }.map do |style, table|
           Thread.new { [style, play_scripted("#{node}/games/#{table}", style)] }
         end.map(&:value)
         results.each do |style, (screens, sent)|
@@ -350,7 +435,8 @@ class TestPlay < Minitest::Test
     screens = []
     sent = []
     cmd = [RbConfig.ruby, BIN, "play", "mahjong", "--router", ROUTER, "--table", table, "--name", "Tester",
-           "--tiles", style, "--until-over", "--commands", "sit,cpu,tonpuu,start"]
+           "--until-over", "--commands", "sit,cpu,tonpuu,start"]
+    cmd += ["--tiles", style] unless style == "kanji" # kanji: the default
     Open3.popen2e(*cmd) do |stdin, out, wait|
       buf = []
       turn = 0
@@ -402,8 +488,24 @@ class TestPlay < Minitest::Test
     if (n % 3).zero?
       # The drawn (or last) tile typed as a tile: the last cell of the row
       # above the letters.
-      row = screen[screen.index(letters) - 1]
-      code = T.parse_tile(row.split.last)
+      at = screen.index(letters)
+      code = if style == "kanji"
+               # The two rows above the letters: the number, the suit
+               # under it unless an honour (the last glyph's column).
+               last_col = lambda do |l|
+                 col = 0
+                 l.each_char.reduce(nil) { |m, ch| (ch == " " ? m : col).tap { col += T.char_width(ch) } }
+               end
+               top = screen[at - 2]
+               bottom = screen[at - 1]
+               word = top.split.last
+               word += bottom.split.last if last_col.call(bottom) == last_col.call(top)
+               # Typed as the screen shows it (一萬, ４筒, 東).
+               return word if T.parse_tile(word)
+               nil
+             else
+               T.parse_tile(screen[at - 1].split.last)
+             end
       return code ? T.mpsz(code) : last
     end
     last

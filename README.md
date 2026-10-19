@@ -1196,7 +1196,8 @@ terminal, one screen after another in a pipe or a file).
 ```
 asterism-games play mahjong --router tcp/127.0.0.1:7447 --name Alice   # a home network
 asterism-games play mahjong --credentials alice.tar                    # a console's permanent tables
-asterism-games play mahjong --tiles mpsz                               # 1m 2m 3m instead of the emoji
+asterism-games play mahjong --tiles emoji                              # the tiles as emoji (🀇🀈🀉)
+asterism-games play mahjong --tiles mpsz                               # or as 1m 4p 3s
 asterism-games play othello --commands "sit,cpu,start"                 # "The othello table"
 asterism-games play --help
 ```
@@ -1211,7 +1212,7 @@ asterism-games play --help
 | `--node NODE` | the node ID (default `tty-<host>-<pid>`, or the `.tar`'s name) |
 | `--commands LIST` | commands run first, comma separated (`"sit,cpu,tonpuu,start"`) |
 | `--until-over` | quit when a game it saw played is over |
-| `--tiles emoji\|mpsz` | mahjong: the tiles as emoji (default) or as text |
+| `--tiles kanji\|emoji\|mpsz` | mahjong: the tiles in kanji (default), as emoji or as text |
 
 With neither `--router` nor `--credentials` it takes `ASTERISM_ROUTER` and
 `ASTERISM_CREDENTIALS` from the environment, as the asterism command line
@@ -1228,20 +1229,21 @@ The lobby (sit, stand, CPUs, the game's length, start), the rounds, the
 results and the end of the game, in the table app's words (東1局, 本場,
 供託, ドラ, リーチ, ポン ...). A member without a seat watches, with the
 four hands ("Spectators"). The screen is drawn again when the table
-changes, not every second, so a line being typed is not wiped; the time
-shown is the time at that moment.
+changes; on a terminal the time left counts down in place once a second
+(below), and a line being typed is never wiped by it.
 
 ```
-東4局 0本場  供託1  残り20  ドラ 🀆
-南 CPU1  30100  🀅 🀙 🀃 🀄🀁 🀜 🀔 🀝 🀃 🀀
-西 CPU2  42900  🀅 🀙 🀇 🀡 🀏 🀆 🀑 🀋 🀓 🀘 🀉 🀅 🀟
-   鳴き         🀗 🀕 🀖  🀊 🀈 🀉  🀒 🀓 🀔
-北 CPU3   6800* 🀀 🀁 🀇 🀂 🀑 🀆 🀃 🀗 [🀔 ] 🀘 🀝 🀄🀄
-東 自分  19200  🀗 🀖 🀡 🀊 🀖 🀋 🀜 🀂 🀊 🀀 🀚 🀑 🀆
-  北 CPU3: リーチ
+東2局 0本場  供託1  残り32  ドラ ２筒
+南 CPU2  25000* 南 白 中 ９索 ３筒 ９筒 ８筒 [六萬] 西
+西 CPU3  25000  白 １索 九萬 ２索 北 ８筒 ３筒 ３索 ５索 ３索
+   鳴き         發 發 發
+北 CPU1  25000  白 １索 中 九萬 東 東 三萬 二萬 南
+東 自分  24000  ３索 白 一萬 九萬 ２筒 東 ８索 發 四萬
+  南 CPU2: リーチ
 
-🀇 🀊 🀌 🀎 🀞 🀠 🀑 🀓 🀖 🀗 🀘 🀃 🀅   🀛
-a b c d e f g h i j k l m   n
+五 １ １ ４ ９ ９ １ ２ ２ ２ ７ ８ 西    ３
+萬 筒 筒 筒 筒 筒 索 索 索 索 索 索       索
+a  b  c  d  e  f  g  h  i  j  k  l  m     n
 自分の番: 打つ牌 (文字か 6s)  あと 5+20秒
 >
 ```
@@ -1250,47 +1252,71 @@ a b c d e f g h i j k l m   n
   (供託), the tiles left and the dora indicators. Then the four seats,
   the next one first and this one (自分) last: the seat wind, the name, the
   points (`*`: riichi), the river (the riichi tile in `[ ]`; a tile called
-  away is in the meld, not the river) and under it the melds (鳴き; a
-  closed kan with its ends face down). Then the hand, the drawn tile apart
-  at the end, and a letter under each tile; `赤:` names the letters of the
-  red fives (with the emoji a red five looks like a five; on a terminal it
-  is drawn in red too), `待ち:` the waits after each discard that declares
-  riichi. The last line says what can be done now, with the time left
-  (the move's and the bank's, "Time").
-- **`--tiles mpsz`**: the suits as `1m`..`9m`, `1p`.., `1s`.. (`0m` `0p`
-  `0s` the red fives) and the honours as 東 南 西 北 白 發 中, for a
-  terminal or a font that draws the emoji badly:
+  away is in the meld, not the river; a river longer than the line goes
+  on below, so a line stays within 80 columns) and under it the melds
+  (鳴き; a closed kan with its ends face down, 裏). Then the hand, the
+  drawn tile apart at the end, and a letter under each tile; `赤:` names
+  the letters of the red fives (on a terminal they are drawn in red too),
+  `待ち:` the waits after each discard that declares riichi. The last line
+  says what can be done now, with the time left (the move's and the
+  bank's, "Time").
+- **The tiles** (`--tiles`), three ways:
+  - `kanji` (the default): as the table app draws a tile. In the hand (and
+    a spectator's hands, a winning hand) two rows, the number on top and
+    the suit below: 一..九 over 萬, full-width １..９ over 筒 and 索 (not
+    ①②③, which many fonts draw small), an honour as its one character
+    (東 南 西 北 白 發 中). In the rivers, the melds and the dora one line
+    per tile: 一萬 ４筒 ３索 東. Every glyph is a CJK one, two columns
+    wide in any terminal, so this is the readable choice.
+  - `emoji`: Unicode's mahjong tiles (🀇🀈🀉 ...). How they look is up to
+    the terminal's fonts: 🀄 (the red dragon) is often drawn as a colour
+    emoji, hard to read next to the others, and some fonts draw the
+    tiles small or wider than their column.
+  - `mpsz`: the suits as `1m`..`9m`, `1p`.., `1s`.. (`0m` `0p` `0s` the
+    red fives), the honours as 東 南 西 北 白 發 中.
 
 ```
-東2局 0本場  供託1  残り0  ドラ 3s
-北 CPU1  24000* 3s 1m 9m 東 發 9s 4p 4p 5m 1s 8p 3p 白 [2s] 1s 5m 8m
-東 CPU2  26000  北 中 1m 9m 3s 中 南 9p 8p 2s 西 3m 2p 6s 3m 北 東 7s
-   鳴き         白 白 白
-南 CPU3  24000  西 1m 9m 2s 1s 中 8p 5s 1m 9s 2p 1p 2m 西 5p 7p 北
-西 自分  25000  3p 7p 7m 2p 南 2m 0s 7m 4m 3m 7p 6m 1s 北 7s 6p 2m
-   鳴き         發 發 發  8s 8s 8s
+北 CPU3   6800* 🀀 🀁 🀇 🀂 🀑 🀆 🀃 🀗 [🀔 ] 🀘 🀝 🀄🀄          (--tiles emoji)
+🀇 🀊 🀌 🀎 🀞 🀠 🀑 🀓 🀖 🀗 🀘 🀃 🀅   🀛
+a b c d e f g h i j k l m   n
 
-8m 8m 9m 2p 2s 7s 9s    9p
-a  b  c  d  e  f  g     h
-自分の番: 打つ牌 (文字か 6s)  あと 5+20秒
+東 CPU1  24000* 南 6s 6s 中 中 2m 8s 0p 9m [8p] 9s 2s 2s 1p 北      (--tiles mpsz)
+7m 8m 6p 7p 1s 1s 3s 8s 西 北    6s
+a  b  c  d  e  f  g  h  i  j     k
 ```
 
-- **The columns.** The mahjong emoji are one column wide by Unicode's
+- **The columns.** The kanji and the full-width digits are two columns
+  wide everywhere. The mahjong emoji are one column wide by Unicode's
   widths except 🀄, which is two (it is an emoji shown in colour by
   default), and fonts often draw them wider than the column they get.
-  Every tile has a slot of two columns (three in the text style): the
-  tile and room after it. On a terminal the client puts each tile, each
+  Every tile in the hand has a slot of two columns for an emoji, three
+  for the kanji or `1m` (the tile and room after it), the letters the
+  same slots. On a terminal the client puts each tile, each
   letter and the text after them at its column with the cursor (`ESC [ n
   G`), so a tile drawn wider never pushes the letters or the next tile
   along; in a pipe or a file it pads with spaces by the widths above (🀄
-  fills its slot). The letters stay under their tiles either way; a font
-  that draws a tile wider than two columns overlaps the next one, and
-  `--tiles mpsz` is the way out.
+  fills its slot). The letters stay under their tiles either way; with
+  the emoji a font that draws a tile wider than two columns overlaps the
+  next one (the kanji never do).
+- **The time** counts down on a terminal: about once a second the client
+  works the screen out again with the time gone since the view came,
+  and rewrites only the lines that changed (the last line's `あと 5+20秒`,
+  a result's `OK を待っています ... あと N 秒`) where they are: ESC 7 saves
+  the cursor where the player types, the line is cleared and written,
+  ESC 8 puts the cursor back. The line being typed is not touched. In a
+  pipe or a file nothing is rewritten.
+- **`--commands`** run in order, each when the table can take it: the
+  lobby commands (`sit`, `cpu`, `start`, `tonpuu` ...) wait for the lobby
+  (a game may still be going on, or its end shown, when the client
+  joins), the owner's for this member to be seated and the owner, `start`
+  for the four seats; the screen says what each waits for (`--commands:
+  cpu (卓の主を待っています)`). One the host answers "no" is not tried
+  again.
 
 | Typed | |
 |---|---|
 | `a` .. `n` | discard that tile of the hand (the drawn tile is the last letter) |
-| `6s`, `0p`, `東` (or `1z`..`7z`) | discard that tile (`0`: the red five; `5p` takes the red five when the hand has no other five) |
+| `6s`, `0p`, `東` (or `1z`..`7z`), `４筒`, `一萬` | discard that tile (`0`: the red five; `5p` takes the red five when the hand has no other five) |
 | `riichi` | riichi: alone with one choice, else the client lists the discards that declare it and the next line chooses (a letter or a tile); `riichi e` / `riichi 6s` at once |
 | `tsumo`, `ron` | win |
 | `pon`, `chi`, `kan` | call; with several ways the client lists them numbered and the next line chooses (`2`, or the tiles: `3m4m`, `34m`, letters); `chi 2`, `chi 3m4m` at once |
@@ -1695,17 +1721,24 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
 
 - `test_play.rb`: `asterism-games play` (in `rake test:gem` too): the
   options and `ASTERISM_ROUTER` / `ASTERISM_CREDENTIALS`, `--help` (the
-  host's too: it prints and starts nothing), the tiles as emoji and MPSZ
-  both ways, the widths (🀄 two columns), rows that keep their columns
+  host's too: it prints and starts nothing), the tiles in kanji (the
+  default), as emoji and MPSZ both ways, the widths (🀄 two columns), rows that keep their columns
   (padded by width, or each part put at its column on a terminal) with the
   letters under their tiles, reading discards (letters, `6s`, `0p`, the red
   five as `5p`), declarations and calls (choosing by number, tile or
-  letter), and the screens (a round, emoji and MPSZ; the lobby, a result,
+  letter), the countdown rewritten in place on a terminal (only the time
+  line, between ESC 7 and ESC 8), and the screens (a round in kanji with
+  its two-row hand and a river that goes on below, emoji and MPSZ; the lobby, a result,
   the end, a call, a spectator). With `ASTERISM_TEST_ROUTER`, a host in a
-  process of its own and two clients at once (emoji, MPSZ) that play a
+  process of its own and three clients at once (kanji by default, emoji,
+  MPSZ) that play a
   tonpuu game against three CPUs each to the end from scripted input
   (letters, tiles, calls, passes, OKs; `PLAY_TRANSCRIPT_DIR` keeps what
   they showed).
+- `test_play_commands.rb`: `--commands "sit,cpu,start"` against a table
+  in this process: they wait for the lobby when a game is going on as
+  the client joins (and then sit, fill and start), the owner's wait for
+  the owner, and run at once in a fresh lobby.
 - `test_mahjong_games.rb`: MJ_GAMES hanchan by four CPUs in MJ_PROCS
   processes (default 8) and MJ_HUMAN_GAMES hanchan by four members playing
   through `act` (wins when offered, calls now and then, passes, timeouts,

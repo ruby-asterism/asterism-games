@@ -24,13 +24,64 @@ module AsterismGames
 
       attr_reader :style
 
-      # style: "emoji" or "mpsz"; cursor: a terminal (columns by CHA, the
+      # style: "kanji" (the default), "emoji" or "mpsz"; cursor: a terminal (columns by CHA, the
       # red fives in red).
-      def initialize(style: "emoji", cursor: false, path: "")
+      def initialize(style: "kanji", cursor: false, path: "")
         @style = style
         @cursor = cursor
         @path = path
+        # A tile's slot in a run with letters under it (the hand): two
+        # columns for an emoji, three for "1m" or the kanji style's
+        # two-row tile, the room after it included.
         @slot = style == "emoji" ? 2 : 3
+      end
+
+      # The width of a screen line the rivers and melds wrap at.
+      COLS = 80
+
+      # A run of tiles on one line, or in the kanji style on two (the number
+      # above, the suit below), with text before it; each tile in its slot.
+      class Strip
+        def initialize(screen, two)
+          @screen = screen
+          @top = screen.row
+          @bottom = two ? screen.row : nil
+        end
+
+        def col = @top.col
+
+        def text(s)
+          @top.text(s)
+          @bottom&.cell("", MahjongText.width(s))
+          self
+        end
+
+        def to(col)
+          @top.to(col)
+          @bottom&.to(col)
+          self
+        end
+
+        def blank(cols)
+          @top.cell("", cols)
+          @bottom&.cell("", cols)
+          self
+        end
+
+        def tile(code, cols)
+          if @bottom
+            up, down = MahjongText.kanji_rows(code)
+            @top.cell(@screen.paint(up, code), cols)
+            @bottom.cell(@screen.paint(down, code), cols)
+          else
+            @top.cell(@screen.paint(MahjongText.tile(code, @screen.style), code), cols)
+          end
+          self
+        end
+
+        def lines
+          [@top.to_s.rstrip, @bottom&.to_s&.rstrip].compact
+        end
       end
 
       # The screen: lines (Strings). note: the last answer or news; pending:
@@ -70,12 +121,23 @@ module AsterismGames
 
       def row = Row.new(cursor: @cursor)
 
-      # A tile in its slot (the red five in red on a terminal).
-      def tile_cell(r, code, cols = @slot)
-        t = tile(code, @style)
-        t = "\e[31m#{t}\e[0m" if @cursor && red?(code)
-        r.cell(t, cols)
+      # The red five in red on a terminal.
+      def paint(text, code)
+        @cursor && red?(code) && !text.empty? ? "\e[31m#{text}\e[0m" : text
       end
+
+      # A tile on one line, in cols columns (default: its own width and a
+      # space; the kanji style's 一萬 takes five, 東 three).
+      def tile_cell(r, code, cols = line_cols(code))
+        r.cell(paint(tile(code, @style), code), cols)
+      end
+
+      def line_cols(code)
+        @style == "kanji" ? width(tile(code, @style)) + 1 : @slot
+      end
+
+      # A run of tiles with letters or a hand: two rows in the kanji style.
+      def strip = Strip.new(self, @style == "kanji")
 
       def bytes(s) = s.to_s.b.unpack("C*")
 
@@ -132,10 +194,9 @@ module AsterismGames
         nw = [[names.map { |n| width(n) }.max.to_i, 4].max, 10].min
         river_col = 2 + 1 + nw + 1 + 6 + 2
         seat_order.each do |s|
-          out << seat_line(s, nw, river_col)
-          melds = meld_line(s, river_col)
-          out << melds if melds
-          out << hand_line(s, river_col) if @me.negative? && v["sh"]
+          out.concat(seat_lines(s, nw, river_col))
+          out.concat(meld_lines(s, river_col))
+          out.concat(hand_lines(s, river_col)) if @me.negative? && v["sh"]
         end
         if (cl = v["cl"]) && cl.size > 2 && CALL_NAMES[cl[0]]
           seats = cl[0] == SANCHAHOU ? cl[2..] : [cl[2]]
@@ -148,11 +209,14 @@ module AsterismGames
         out
       end
 
-      def seat_line(s, nw, river_col)
+      # A seat's line and its river (on more lines when it is longer than
+      # COLS: the kanji style's tiles take five columns).
+      def seat_lines(s, nw, river_col)
         v = @v
         sc = (v["sc"] || [])[s]
         mark = v["ri"].to_i[s] == 1 ? "*" : " "
         away = v["aw"].to_i[s] == 1 ? " (途切れ)" : ""
+        out = []
         r = row.text("#{wind_of(s)} ").text(fit(name_of(s), nw)).text(" #{sc.to_s.rjust(6)}#{mark}")
         r.to(river_col)
         riichi_next = false
@@ -164,16 +228,22 @@ module AsterismGames
             next
           end
           riichi_next = false
+          inner = @style == "kanji" ? width(tile(code, @style)) : 2
+          need = riichi ? inner + 3 : line_cols(code)
+          if r.col + need > COLS
+            out << r.to_s.rstrip
+            r = row.to(river_col)
+          end
           if riichi
             r.cell("[", 1)
-            tile_cell(r, code, 2)
+            tile_cell(r, code, inner)
             r.cell("]", 2)
           else
             tile_cell(r, code)
           end
         end
         r.text(away) unless away.empty?
-        r.to_s.rstrip
+        out << r.to_s.rstrip
       end
 
       # The melds of a seat: each meld's tiles (a closed kan with its ends
@@ -193,28 +263,34 @@ module AsterismGames
         out
       end
 
-      # The melds of a seat, under its river.
-      def meld_line(s, river_col)
+      # The melds of a seat, under its river (a meld kept on one line).
+      def meld_lines(s, river_col)
         melds = melds_of(s)
-        return nil if melds.empty?
+        return [] if melds.empty?
+        out = []
         r = row.text("   鳴き").to(river_col)
         melds.each do |tiles|
+          need = tiles.sum { |t| line_cols(t) } + 1
+          if r.col + need > COLS && r.col > river_col
+            out << r.to_s.rstrip
+            r = row.to(river_col)
+          end
           tiles.each { |t| tile_cell(r, t) }
           r.cell("", 1)
         end
-        r.to_s.rstrip
+        out << r.to_s.rstrip
       end
 
-      # A spectator's line of a seat's hand (sh, sd).
-      def hand_line(s, river_col)
-        r = row.text("   手牌").to(river_col)
-        bytes((@v["sh"] || [])[s]).each { |t| tile_cell(r, t) }
+      # A spectator's lines of a seat's hand (sh, sd).
+      def hand_lines(s, river_col)
+        r = strip.text("   手牌").to(river_col)
+        bytes((@v["sh"] || [])[s]).each { |t| r.tile(t, @slot) }
         d = (@v["sd"] || [])[s].to_i
         if d >= 0 && (@v["sd"] || [])[s]
-          r.cell("", @slot)
-          tile_cell(r, d)
+          r.blank(@slot)
+          r.tile(d, @slot)
         end
-        r.to_s.rstrip
+        r.lines
       end
 
       # The member's hand and drawn tile, the letters under them; the red
@@ -222,22 +298,22 @@ module AsterismGames
       def my_hand
         h = bytes(@v["h"])
         dt = @v["dt"].to_i
-        tiles = row
+        tiles = strip
         letters = row
         h.each_with_index do |t, i|
-          tile_cell(tiles, t)
+          tiles.tile(t, @slot)
           letters.cell(LETTERS[i], @slot)
         end
         if dt >= 0 && @v.key?("dt")
-          tiles.cell("", @slot)
+          tiles.blank(@slot)
           letters.cell("", @slot)
-          tile_cell(tiles, dt)
+          tiles.tile(dt, @slot)
           letters.cell(LETTERS[h.size], @slot)
         end
-        out = [tiles.to_s.rstrip, letters.to_s.rstrip]
+        out = tiles.lines + [letters.to_s.rstrip]
         all = h + (dt >= 0 && @v.key?("dt") ? [dt] : [])
         reds = all.each_index.select { |i| red?(all[i]) }.map { |i| LETTERS[i] }
-        out << "赤: #{reds.join(' ')}" if !reds.empty? && @style == "emoji"
+        out << "赤: #{reds.join(' ')}" if !reds.empty? && @style != "mpsz"
         out.concat(waits_lines(all))
         out
       end
@@ -283,15 +359,15 @@ module AsterismGames
                    "#{wind_of(ws)} #{name_of(ws)} ロン#{" (#{wind_of(f)} #{name_of(f)} から)" if f}"
                  end
           out << "#{head}#{what}"
-          r = row.text("  ")
-          bytes(w["h"]).each { |t| tile_cell(r, t) }
-          r.cell("", @slot)
-          tile_cell(r, w["ag"].to_i)
+          r = strip.text("  ")
+          bytes(w["h"]).each { |t| r.tile(t, @slot) }
+          r.blank(@slot)
+          r.tile(w["ag"].to_i, @slot)
           melds_of(ws).each do |tiles|
-            r.cell("", @slot)
-            tiles.each { |t| tile_cell(r, t) }
+            r.blank(@slot)
+            tiles.each { |t| r.tile(t, @slot) }
           end
-          out << r.to_s.rstrip
+          out.concat(r.lines)
           ys = w["y"] || []
           ys.each_index { |i| out << "  #{yaku_label(w, i)}" }
           pao = (w["pa"] || []).map { |pa| "#{name_of(pa[0].to_i)} (#{pa[1]})" }
@@ -350,7 +426,7 @@ module AsterismGames
         end
         list = opts.each_with_index.map do |(t, ts), i|
           name = CALL_NAMES[t] || t.to_s
-          tiles = ts.empty? ? "" : " #{ts.map { |x| tile(x, @style) }.join(@style == 'emoji' ? ' ' : '')}"
+          tiles = ts.empty? ? "" : " #{ts.map { |x| tile(x, @style) }.join(@style == 'mpsz' ? '' : ' ')}"
           "#{i + 1}: #{name}#{tiles}"
         end
         ["どれにする (番号か牌): #{list.join('  ')}"]

@@ -44,7 +44,30 @@ module AsterismGames
       end
       EMOJI_CODE = EMOJI.each_with_index.reject { |_, i| [9, 19, 29].include?(i) }.to_h.freeze
 
+      # The kanji style (as the table app draws a tile): two rows, the
+      # number on top (一..九 for the characters, full-width １..９ for the
+      # circles and the bamboos; not ①②③, which many fonts draw small) and
+      # the suit below (萬 筒 索); an honour is its one character on top.
+      # Every glyph is two columns wide in any terminal.
+      KANJI_NUM = %w[一 二 三 四 五 六 七 八 九].freeze
+      WIDE_NUM = %w[１ ２ ３ ４ ５ ６ ７ ８ ９].freeze
+      SUITS = %w[萬 筒 索].freeze
+      BACK_KANJI = "裏"
+      STYLES = %w[emoji kanji mpsz].freeze
+
       module_function
+
+      # The two rows of a tile in the kanji style: [top, bottom] ("" below
+      # an honour or a back).
+      def kanji_rows(code)
+        return ["  ", ""] if code.nil? || code.negative?
+        return [BACK_KANJI, ""] if code >= BACK
+        return [HONORS[code - 30], ""] if code >= 30
+        suit = code / 10
+        n = code % 10
+        n = 4 if n == 9
+        [suit.zero? ? KANJI_NUM[n] : WIDE_NUM[n], SUITS[suit]]
+      end
 
       def red?(code) = [9, 19, 29].include?(code)
 
@@ -63,12 +86,14 @@ module AsterismGames
       def tile(code, style)
         return (style == "mpsz" ? "--" : " ") if code.nil? || code.negative?
         return EMOJI.fetch(code) if style == "emoji"
+        return kanji_rows(code).join if style == "kanji"
         return "##" if code >= BACK
         return HONORS[code - 30] if code >= 30
         mpsz(code)
       end
 
-      # A tile typed: 6s, 0p (the red five), 1z..7z, 東 ... 中, or an emoji.
+      # A tile typed: 6s, 0p (the red five), 1z..7z, 東 ... 中, an emoji, or
+      # the kanji style's 一萬 / ４筒 / 3索 (the five is the plain one).
       # Returns the tile number or nil.
       def parse_tile(text)
         t = text.to_s.strip
@@ -80,6 +105,10 @@ module AsterismGames
         return 29 + Regexp.last_match(1).to_i if t =~ /\A([1-7])z\z/i
         return 30 + HONORS.index(t) if HONORS.include?(t)
         return HONOR_ALIASES[t] if HONOR_ALIASES.key?(t)
+        if t.size == 2 && (suit = SUITS.index(t[1]))
+          n = KANJI_NUM.index(t[0]) || WIDE_NUM.index(t[0]) || ("1".."9").to_a.index(t[0])
+          return suit * 10 + n if n
+        end
         EMOJI_CODE[t]
       end
 
@@ -91,6 +120,9 @@ module AsterismGames
           if (m = t.match(/\A([0-9]+)([mpsz])/i))
             m[1].each_char { |d| out << parse_tile("#{d}#{m[2]}") }
             t = m.post_match
+          elsif t.size >= 2 && SUITS.include?(t[1])
+            out << parse_tile(t[0, 2])
+            t = t[2..]
           else
             out << parse_tile(t[0])
             t = t[1..]
