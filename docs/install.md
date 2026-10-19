@@ -270,6 +270,13 @@ on from the same turn after a few seconds, and the players' screens come
 back to it by themselves. To go back, run it with the old version (it
 prints it); the old image stays (`docker image ls ghcr.io/ruby-asterism/asterism-games`).
 
+### From 0.16.3 to 0.17.0 (asterism-games play)
+
+`./update.sh 0.17.0` (or `--when-idle 0.17.0`). Nothing in `.env`. The
+host and the tables do not change; the version adds the terminal clients
+(`asterism-games play othello`, `play mahjong`; README "Playing in a
+terminal"), which players run on their own machines.
+
 ### From 0.16.2 to 0.16.3 (asterism 0.8.0)
 
 `./update.sh 0.16.3` (or `--when-idle 0.16.3`). Nothing in `.env`. The

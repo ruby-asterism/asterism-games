@@ -3,6 +3,31 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
+## 0.17.0
+
+- **`asterism-games play <game>`** (README "Playing in a terminal"): the
+  tables from a terminal, CRuby and the asterism gem only. `play othello`
+  is what `bin/othello-tty` was (the script stays and runs it, with the
+  same options). `play mahjong` is new: the table list, the lobby (sit,
+  stand, CPUs, tonpuu or hanchan, start), the rounds with the tiles as
+  emoji (🀇🀈🀉; `--tiles mpsz` for 1m 2m 3m and 東 ... 中), the result
+  with its yaku and points and the OKs it waits for, the end of the game,
+  and watching. Discard by the letter under a tile or by the tile (`6s`,
+  `0p`); `riichi`, `tsumo`, `ron`, `pon`, `chi`, `kan`, `pass`, `ok`, with
+  a choice when there are several ways; the last line says what can be
+  done now. Tiles and letters keep their columns however wide a terminal
+  or a font makes an emoji (each put at its column with the cursor). Both
+  take `--router`, `--credentials`, `--namespace`, `--table`, `--name`,
+  and with neither of the first two `ASTERISM_ROUTER` /
+  `ASTERISM_CREDENTIALS`, as the asterism command line; both wait for a
+  host that left the network and go on when it is back.
+- The gem holds the mahjong client (`lib/asterism_games/play/`), not the
+  table: it needs neither riichi_engine nor the framework.
+- `asterism-games --help` (and `help`, `-h`) prints the usage; it used to
+  start the host.
+- Updating: `./update.sh 0.17.0` (docs/install.md); nothing in `.env`. The
+  host and the tables do not change.
+
 ## 0.16.3
 
 - **asterism 0.8.0** (the Gemfile's pin, from 0.7.1): the host now takes

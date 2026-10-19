@@ -11,7 +11,40 @@
 #   bin/asterism-games status [--idle] [URL]    # the rooms' host: what GET /status says
 #                                               # (the rooms and the permanent tables);
 #                                               # --idle: exit 0 when nobody sits at a table
+#   bin/asterism-games play <game> [options]    # play at a table in this terminal (othello,
+#                                               # mahjong; README "Playing in a terminal")
+#   bin/asterism-games help                     # this text (also --help, -h)
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+
+USAGE = <<~TEXT
+  Usage:
+    asterism-games [--config PATH] [--require FILE]...   the game host (its tables, or the rooms' tables);
+                                                         settings: a YAML file (--config or
+                                                         ASTERISM_GAMES_CONFIG) and the environment;
+                                                         --require: a game of your own, loaded after the others
+    asterism-games status [--idle] [URL]                 what a rooms' host says on GET /status
+                                                         (--idle: exit 0 when nobody sits at a table)
+    asterism-games play <game> [options]                 play at a table in this terminal
+                                                         (othello, mahjong; play --help for the options)
+    asterism-games help                                  this text (also --help, -h)
+TEXT
+
+case ARGV.first
+when "help", "--help", "-h"
+  puts USAGE
+  exit 0
+when "play"
+  require "asterism_games/play"
+  exit AsterismGames::Play.main(ARGV.drop(1))
+when "status"
+  nil
+else
+  # The host's own options: a --help among them is a question, not a start.
+  if ARGV.include?("--help") || ARGV.include?("-h")
+    puts USAGE
+    exit 0
+  end
+end
 
 if ARGV.first == "status"
   require "json"

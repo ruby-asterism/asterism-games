@@ -32,13 +32,21 @@ class TestFramework < Minitest::Test
         assert_includes FRAMEWORK, path, "#{f} requires #{path}, outside the framework"
       end
     end
-    assert_equal FRAMEWORK.sort, (Dir.glob("asterism_games{.rb,/*.rb}", base: LIB) - ["asterism_games/othello.rb", "asterism_games/board.rb"]).sort,
+    assert_equal FRAMEWORK.sort, (Dir.glob("asterism_games{.rb,/*.rb}", base: LIB) -
+                                  ["asterism_games/othello.rb", "asterism_games/board.rb", "asterism_games/play.rb"]).sort,
                  "every framework file is listed"
     # The gem's games need nothing but the framework either.
     Dir.glob("asterism_games/{othello,board}{.rb,/*.rb}", base: LIB).each do |f|
       refute_match(/riichi|mahjong|anthropic/i, File.read(File.join(LIB, f)).lines.grep(/^\s*require/).join, "#{f} requires more than the framework")
     end
-    assert_empty Dir.glob("**/*mahjong*", base: LIB), "mahjong is the image's (app/), not the gem's"
+    # The terminal clients (asterism-games play): the mahjong one too, but
+    # neither the table nor riichi_engine nor the framework.
+    Dir.glob("asterism_games/play{.rb,/*.rb}", base: LIB).each do |f|
+      reqs = File.read(File.join(LIB, f)).lines.grep(/^\s*require/).join
+      refute_match(/riichi|anthropic|"asterism_games"|mahjong\/(table|engine)/i, reqs, "#{f} requires more than asterism")
+    end
+    assert_empty Dir.glob("**/*mahjong*", base: LIB).grep_v(%r{\Aasterism_games/play/}),
+                 "the mahjong table is the image's (app/), not the gem's"
   end
 
   def test_loading_the_framework_loads_no_game

@@ -33,8 +33,9 @@ and the image"): the framework with the two sample games is the gem
   play back, "The drawing board"). The table screens are Family mruby apps
   (fmruby-core's `flash/app/game/mahjong/`, `flash/app/game/othello/` and
   `flash/app/game/board/`), on the boards and in the browser build;
-  `bin/othello-tty` is an othello table in a terminal, with CRuby and the
-  asterism gem only.
+  `asterism-games play othello` and `asterism-games play mahjong` are the
+  tables in a terminal, with CRuby and the asterism gem only ("Playing in a
+  terminal").
 
 ```
  bin/asterism-games  ──requires──>  asterism_games/mahjong (app/, when there)  ──>  riichi_engine
@@ -45,7 +46,7 @@ and the image"): the framework with the two sample games is the gem
         └──requires──>  asterism_games  <───┘
                         (Host, Rooms, Config, Store, Game, Remote)  ──>  asterism
 
- the gem asterism-games:  lib/ (framework, othello, board), bin/asterism-games, bin/othello-tty
+ the gem asterism-games:  lib/ (framework, othello, board, the terminal clients), bin/asterism-games, bin/othello-tty
  the image:               all of the above, app/ (mahjong), config/, the Gemfile's gems
 ```
 
@@ -59,9 +60,10 @@ the console ("Permanent tables"; the server's setup: docs/install.md).
 | Path | What |
 |---|---|
 | `asterism-games.gemspec` | the gem: what it holds and needs ("The gem and the image") |
-| `bin/asterism-games` | the host (loads the framework and the games) |
+| `bin/asterism-games` | the host (loads the framework and the games); `status`; `play <game>`, a table in this terminal ("Playing in a terminal"); `help` |
 | `bin/mahjong-bots` | players without screens, for trying a mahjong table (one process each; not in the gem) |
-| `bin/othello-tty` | an othello table in a terminal: the board as text, watch or play by typing squares ("The othello table") |
+| `bin/othello-tty` | `asterism-games play othello`, under its old name |
+| `lib/asterism_games/play.rb`, `lib/asterism_games/play/` | the terminal clients ("Playing in a terminal"): the options, `othello.rb`, `mahjong.rb` with `mahjong_text.rb` (tiles as text, widths, reading the input) and `mahjong_screen.rb` (the screen); they need neither the framework nor riichi_engine |
 | `lib/asterism_games.rb` | the framework, without any game |
 | `lib/asterism_games/game.rb` | the base of a game: the registry, the members and tokens, who joins in a room, the views, the time, saving ("Writing a game") |
 | `lib/asterism_games/remote.rb` | the base of the exposed object: the methods and their numbers of arguments, the caller (`from:`), `join` / `mine` / `leave` |
@@ -86,8 +88,10 @@ the console ("Permanent tables"; the server's setup: docs/install.md).
 
 **The gem** `asterism-games` (`require "asterism_games"`) is for writing a
 game host of your own: the framework, the two sample games that need
-nothing else (othello, the drawing board), `bin/asterism-games` and
-`bin/othello-tty`. It depends on the asterism gem only (0.7.1 or later in
+nothing else (othello, the drawing board), `bin/asterism-games` (with
+`play`, the terminal clients of othello and mahjong: a mahjong table needs
+riichi_engine, its client does not) and `bin/othello-tty`. It depends on
+the asterism gem only (0.7.1 or later in
 0.x; what came after 0.7.1, such as `@status` and `on_app_join`, is used
 when there). Not in it: mahjong (`app/`, it needs the riichi_engine fork
 from git), `bin/mahjong-bots`, `deploy/`, `config/` and the tests. The AI
@@ -114,7 +118,7 @@ tables:
 
 ```
 asterism-games --config games.yml       # games/games/othello1, games/games/board1
-othello-tty --commands "sit,cpu,start"  # in another terminal: play against the CPU
+asterism-games play othello --commands "sit,cpu,start"  # in another terminal: play against the CPU
 ```
 
 Without a settings file the host serves the first game's tables: with the
@@ -1182,6 +1186,127 @@ asterism mcp --router tcp/192.0.2.2:7447 --allow 'games/mahjong1.stats'
 The counts are made once per game at its end (the seats' rows of the
 database), so a stats call reads no record: 1000 games take 20-50 ms.
 
+## Playing in a terminal
+
+(games 0.17.0) `asterism-games play <game>` sits at a table from a
+terminal: CRuby and the asterism gem only (no curses: the screen is drawn
+again as text whenever the table changes, cleared with ANSI escapes on a
+terminal, one screen after another in a pipe or a file).
+
+```
+asterism-games play mahjong --router tcp/127.0.0.1:7447 --name Alice   # a home network
+asterism-games play mahjong --credentials alice.tar                    # a console's permanent tables
+asterism-games play mahjong --tiles mpsz                               # 1m 2m 3m instead of the emoji
+asterism-games play othello --commands "sit,cpu,start"                 # "The othello table"
+asterism-games play --help
+```
+
+| Option | |
+|---|---|
+| `--router LOCATOR` | the Zenoh router |
+| `--credentials FILE` | a console's `.tar` (a router over mutual TLS; the router and the node ID come from it) |
+| `--namespace PREFIX` | inside a room's key space (`room/01`) |
+| `--table PATH` | the table (`<host>/games/<table>`); without it the first one found (mahjong: several are listed to choose from on a terminal) |
+| `--name NAME` | the name at the table (default: the node ID) |
+| `--node NODE` | the node ID (default `tty-<host>-<pid>`, or the `.tar`'s name) |
+| `--commands LIST` | commands run first, comma separated (`"sit,cpu,tonpuu,start"`) |
+| `--until-over` | quit when a game it saw played is over |
+| `--tiles emoji\|mpsz` | mahjong: the tiles as emoji (default) or as text |
+
+With neither `--router` nor `--credentials` it takes `ASTERISM_ROUTER` and
+`ASTERISM_CREDENTIALS` from the environment, as the asterism command line
+does (all or nothing: a router on the line never meets a `.tar` from the
+environment); with nothing at all, a zenohd on this machine
+(`tcp/127.0.0.1:7447`). When the table's host leaves the network
+(Asterism's `on_leave`) the screen says the connection is lost and the
+client waits; when the host is back (`on_join`) it asks again (and joins
+again when the host forgot it).
+
+### Mahjong
+
+The lobby (sit, stand, CPUs, the game's length, start), the rounds, the
+results and the end of the game, in the table app's words (東1局, 本場,
+供託, ドラ, リーチ, ポン ...). A member without a seat watches, with the
+four hands ("Spectators"). The screen is drawn again when the table
+changes, not every second, so a line being typed is not wiped; the time
+shown is the time at that moment.
+
+```
+東4局 0本場  供託1  残り20  ドラ 🀆
+南 CPU1  30100  🀅 🀙 🀃 🀄🀁 🀜 🀔 🀝 🀃 🀀
+西 CPU2  42900  🀅 🀙 🀇 🀡 🀏 🀆 🀑 🀋 🀓 🀘 🀉 🀅 🀟
+   鳴き         🀗 🀕 🀖  🀊 🀈 🀉  🀒 🀓 🀔
+北 CPU3   6800* 🀀 🀁 🀇 🀂 🀑 🀆 🀃 🀗 [🀔 ] 🀘 🀝 🀄🀄
+東 自分  19200  🀗 🀖 🀡 🀊 🀖 🀋 🀜 🀂 🀊 🀀 🀚 🀑 🀆
+  北 CPU3: リーチ
+
+🀇 🀊 🀌 🀎 🀞 🀠 🀑 🀓 🀖 🀗 🀘 🀃 🀅   🀛
+a b c d e f g h i j k l m   n
+自分の番: 打つ牌 (文字か 6s)  あと 5+20秒
+>
+```
+
+- The first line: the round, the honba, the riichi sticks on the table
+  (供託), the tiles left and the dora indicators. Then the four seats,
+  the next one first and this one (自分) last: the seat wind, the name, the
+  points (`*`: riichi), the river (the riichi tile in `[ ]`; a tile called
+  away is in the meld, not the river) and under it the melds (鳴き; a
+  closed kan with its ends face down). Then the hand, the drawn tile apart
+  at the end, and a letter under each tile; `赤:` names the letters of the
+  red fives (with the emoji a red five looks like a five; on a terminal it
+  is drawn in red too), `待ち:` the waits after each discard that declares
+  riichi. The last line says what can be done now, with the time left
+  (the move's and the bank's, "Time").
+- **`--tiles mpsz`**: the suits as `1m`..`9m`, `1p`.., `1s`.. (`0m` `0p`
+  `0s` the red fives) and the honours as 東 南 西 北 白 發 中, for a
+  terminal or a font that draws the emoji badly:
+
+```
+東2局 0本場  供託1  残り0  ドラ 3s
+北 CPU1  24000* 3s 1m 9m 東 發 9s 4p 4p 5m 1s 8p 3p 白 [2s] 1s 5m 8m
+東 CPU2  26000  北 中 1m 9m 3s 中 南 9p 8p 2s 西 3m 2p 6s 3m 北 東 7s
+   鳴き         白 白 白
+南 CPU3  24000  西 1m 9m 2s 1s 中 8p 5s 1m 9s 2p 1p 2m 西 5p 7p 北
+西 自分  25000  3p 7p 7m 2p 南 2m 0s 7m 4m 3m 7p 6m 1s 北 7s 6p 2m
+   鳴き         發 發 發  8s 8s 8s
+
+8m 8m 9m 2p 2s 7s 9s    9p
+a  b  c  d  e  f  g     h
+自分の番: 打つ牌 (文字か 6s)  あと 5+20秒
+```
+
+- **The columns.** The mahjong emoji are one column wide by Unicode's
+  widths except 🀄, which is two (it is an emoji shown in colour by
+  default), and fonts often draw them wider than the column they get.
+  Every tile has a slot of two columns (three in the text style): the
+  tile and room after it. On a terminal the client puts each tile, each
+  letter and the text after them at its column with the cursor (`ESC [ n
+  G`), so a tile drawn wider never pushes the letters or the next tile
+  along; in a pipe or a file it pads with spaces by the widths above (🀄
+  fills its slot). The letters stay under their tiles either way; a font
+  that draws a tile wider than two columns overlaps the next one, and
+  `--tiles mpsz` is the way out.
+
+| Typed | |
+|---|---|
+| `a` .. `n` | discard that tile of the hand (the drawn tile is the last letter) |
+| `6s`, `0p`, `東` (or `1z`..`7z`) | discard that tile (`0`: the red five; `5p` takes the red five when the hand has no other five) |
+| `riichi` | riichi: alone with one choice, else the client lists the discards that declare it and the next line chooses (a letter or a tile); `riichi e` / `riichi 6s` at once |
+| `tsumo`, `ron` | win |
+| `pon`, `chi`, `kan` | call; with several ways the client lists them numbered and the next line chooses (`2`, or the tiles: `3m4m`, `34m`, letters); `chi 2`, `chi 3m4m` at once |
+| `pass` | do not call |
+| `kyuushu` | nine kinds (an abortive draw) |
+| `ok` (or an empty line) | the result's OK ("Result": the screen says `OK を待っています (n/m)`); at the end of the game, the owner: back to the lobby |
+| `sit [1-4]`, `stand` | take a seat (a CPU's too), leave it (the lobby) |
+| `cpu [1-4]`, `nocpu 1-4`, `ai 1-4 KIND` | the owner: CPUs into the empty seats (or one), a CPU out, an AI player in when the lobby offers one ("AI players") |
+| `tonpuu`, `hanchan`, `rule ITEM VALUE` | the owner: the game's length, any local rule ("Local rules") |
+| `start` | the owner: start |
+| `auto` | the client plays for you: wins when offered, passes calls, discards the drawn tile, OKs the results (again to stop) |
+| `tables`, `view`, `help`, `quit` | |
+
+The host's answers are shown in the table app's words (`今はできない`,
+`卓の主だけができる` ...).
+
 ## Playing from a program
 
 The mahjong table also speaks to programs (games 0.10.0): an AI assistant
@@ -1304,7 +1429,8 @@ The smallest game on the framework (`lib/asterism_games/othello/`): the
 rules and the CPU (`board.rb`), the table (`table.rb`) and its object
 (`remote.rb`), about 600 lines. The screens: fmruby-core's
 `flash/app/game/othello/othello.app.rb` ("Othello (table)", a window; the
-boards, the browser build and the sim) and `bin/othello-tty` (CRuby). The
+boards, the browser build and the sim) and `asterism-games play othello`
+(CRuby, "Playing in a terminal"). The
 game between two machines without a host is fmruby-core's
 `flash/app/test/othello.app.rb` ("Othello (direct)").
 
@@ -1359,9 +1485,11 @@ players about 330 B.
 The CPU is small: the square with the best weight (corners first, the
 squares next to a corner last), then the most discs turned.
 
-### In a terminal: `bin/othello-tty`
+### In a terminal: `asterism-games play othello`
 
-CRuby and the asterism gem only (no Family mruby). It joins the table,
+(`bin/othello-tty` until games 0.17.0; it is still there and runs this,
+with the same options.) CRuby and the asterism gem only (no Family
+mruby). The options are every client's ("Playing in a terminal"). It joins the table,
 draws the board as text at every change (it takes the state the host puts
 and asks its view; X black, O white, `*` the squares it may play) and reads
 commands: `sit`, `stand`, `cpu`, `start`, a square (`d3`), `resign`,
@@ -1373,11 +1501,11 @@ table when a node joins.
 
 ```
 # a home network (a plain zenohd)
-bundle exec bin/othello-tty --router tcp/127.0.0.1:7447 --name Alice
+asterism-games play othello --router tcp/127.0.0.1:7447 --name Alice
 # the permanent tables of a console (a row's .tar with the role games; the node is its name)
-bundle exec bin/othello-tty --credentials alice.tar --table games/games/othello1
+asterism-games play othello --credentials alice.tar --table games/games/othello1
 # start a game against the CPU at once
-bundle exec bin/othello-tty --name Alice --commands "sit,cpu,start"
+asterism-games play othello --name Alice --commands "sit,cpu,start"
 ```
 
 ```
@@ -1565,6 +1693,19 @@ gem build asterism-games.gemspec                        # the gem (its files: te
 ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a router
 ```
 
+- `test_play.rb`: `asterism-games play` (in `rake test:gem` too): the
+  options and `ASTERISM_ROUTER` / `ASTERISM_CREDENTIALS`, `--help` (the
+  host's too: it prints and starts nothing), the tiles as emoji and MPSZ
+  both ways, the widths (🀄 two columns), rows that keep their columns
+  (padded by width, or each part put at its column on a terminal) with the
+  letters under their tiles, reading discards (letters, `6s`, `0p`, the red
+  five as `5p`), declarations and calls (choosing by number, tile or
+  letter), and the screens (a round, emoji and MPSZ; the lobby, a result,
+  the end, a call, a spectator). With `ASTERISM_TEST_ROUTER`, a host in a
+  process of its own and two clients at once (emoji, MPSZ) that play a
+  tonpuu game against three CPUs each to the end from scripted input
+  (letters, tiles, calls, passes, OKs; `PLAY_TRANSCRIPT_DIR` keeps what
+  they showed).
 - `test_mahjong_games.rb`: MJ_GAMES hanchan by four CPUs in MJ_PROCS
   processes (default 8) and MJ_HUMAN_GAMES hanchan by four members playing
   through `act` (wins when offered, calls now and then, passes, timeouts,

@@ -4,8 +4,9 @@ require_relative "test_helper"
 
 # What the gem holds (asterism-games.gemspec; README "The gem and the
 # image"): the framework, othello and the drawing board, the host and the
-# terminal client; never mahjong (app/), the deployment, the settings of a
-# server, the tests or anything like a key.
+# terminal clients (the mahjong one too: it needs only the asterism gem);
+# never the mahjong table (app/, riichi_engine), the deployment, the
+# settings of a server, the tests or anything like a key.
 class TestGem < Minitest::Test
   ROOT = File.expand_path("..", __dir__)
 
@@ -16,6 +17,8 @@ class TestGem < Minitest::Test
   def test_the_files_are_the_framework_and_the_sample_games
     files = spec.files
     files.each do |f|
+      next assert_match(%r{\Alib/asterism_games/play/mahjong(_text|_screen)?\.rb\z}, f) if f.include?("/play/mahjong")
+
       refute_match(%r{mahjong|riichi|\Aapp/|\Adeploy/|\Aconfig/|\Atest/|\Avar/|\Avendor/|credentials}i, f, "#{f} is not the gem's")
       refute_match(/\.(tar|pem|key|crt|p12|env)\z|\.env\b|secret|token/i, f, "#{f} looks like a key")
       assert File.file?(File.join(ROOT, f)), "#{f} is missing"
@@ -39,7 +42,8 @@ class TestGem < Minitest::Test
   def test_the_gem_alone_has_the_sample_games_and_nothing_of_mahjong
     skip "mahjong is loaded in the whole suite (rake test:gem runs this)" unless GEM_ONLY
     assert_equal %w[othello board], AsterismGames.games.keys
-    assert_empty $LOADED_FEATURES.grep(/riichi|mahjong|anthropic/i)
+    assert_empty $LOADED_FEATURES.grep(/riichi|mahjong|anthropic/i).grep_v(%r{/asterism_games/play/mahjong}),
+                 "the mahjong client (play/) may be loaded, the table never"
     assert_equal "othello", AsterismGames::Config.default_game
   end
 end

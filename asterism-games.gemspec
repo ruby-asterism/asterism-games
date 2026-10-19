@@ -2,7 +2,8 @@ version = File.read(File.expand_path("VERSION", __dir__)).strip
 
 # The gem (README "The gem and the image"): the framework and the two
 # sample games that need nothing else (othello, the drawing board), with
-# the host and the terminal client. Not in it: mahjong (app/, which needs
+# the host and the terminal clients (asterism-games play: othello, and the
+# mahjong client, which needs nothing else). Not in it: the mahjong table (app/, which needs
 # the riichi_engine fork from git), bin/mahjong-bots, deploy/, config/,
 # the tests. The image (deploy/vps/Dockerfile) holds all of it, with the
 # gems of the Gemfile.
@@ -15,7 +16,7 @@ Gem::Specification.new do |s|
                   "the rooms of an Asterism console and the permanent tables next to them. " \
                   "A game subclasses AsterismGames::Game and AsterismGames::Remote and writes only its " \
                   "rules and the methods it exposes. Comes with othello and a shared drawing board as samples, " \
-                  "and an othello client for the terminal."
+                  "and terminal clients for othello and mahjong (asterism-games play)."
   s.authors = ["Katsuhiko Kageyama"]
   s.homepage = "https://github.com/ruby-asterism/asterism-games"
   s.metadata = {
