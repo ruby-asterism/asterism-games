@@ -14,7 +14,7 @@ GEM
       connection_pool (>= 2, < 4)
       opentelemetry-api (>= 1.2.4, < 2)
       standardwebhooks (~> 1.0)
-    asterism (0.7.1)
+    asterism (0.8.0)
       asterism-zenoh (~> 0.4, >= 0.4.1)
       msgpack (~> 1.7)
     asterism-zenoh (0.4.1)
@@ -41,7 +41,7 @@ PLATFORMS
 
 DEPENDENCIES
   anthropic (~> 1.80)
-  asterism (= 0.7.1)
+  asterism (= 0.8.0)
   minitest (~> 5.0)
   msgpack (~> 1.7)
   rake (~> 13.0)
@@ -50,7 +50,7 @@ DEPENDENCIES
 
 CHECKSUMS
   anthropic (1.80.0) sha256=d02c7d532726c195b83de4d7355aaa0462b127f74f74d0b9540b3113356d0ea1
-  asterism (0.7.1) sha256=e9ce706899463f50685e5711a80428fefd32c4c8495e865fb4a899776cebb415
+  asterism (0.8.0) sha256=2f001c95dcf011df1b59cd569a85bf91c361e01c5001462c55b2157a7e8cac06
   asterism-zenoh (0.4.1) sha256=8dd399f6f1c1d9b20f983163782b2791f8151e5c41d93b9daae1a636cced15b1
   base64 (0.3.0) sha256=27337aeabad6ffae05c265c450490628ef3ebd4b67be58257393227588f5a97b
   connection_pool (3.0.2) sha256=33fff5ba71a12d2aa26cb72b1db8bba2a1a01823559fb01d29eb74c286e62e0a

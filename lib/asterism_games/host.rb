@@ -381,11 +381,11 @@ module AsterismGames
       @games.each_value { |g| g.save(now, force: true) }
     end
 
-    # The host's status: Asterism's (net.status, asterism after 0.7.1),
-    # which puts it when it changes and answers who asks. The asterism gem
-    # this host is pinned to (0.7.1) has no status yet: then the same
-    # thing by hand on the connection's session (a queryable on the key
-    # and a put when the counts change).
+    # The host's status: Asterism's (net.status, asterism 0.8.0, the
+    # version the Gemfile pins), which puts it when it changes and answers
+    # who asks. An asterism 0.7.1 (the gem's lowest) has no status: then
+    # the same thing by hand on the connection's session (a queryable on
+    # the key and a put when the counts change).
     class TablesStatus
       def initialize(net, node, app)
         @net = net

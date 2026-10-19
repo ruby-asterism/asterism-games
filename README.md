@@ -158,7 +158,7 @@ application `games`, and exposes each table as an object:
 it goes on from the saved state (the same round, the same turn, the same
 seats and tokens). When the router goes away, it connects again every 3 s.
 
-asterism comes from rubygems at a fixed version (0.7.1); riichi_engine from
+asterism comes from rubygems at a fixed version (0.8.0); riichi_engine from
 the `fmrb` branch of the fork on GitHub (see "riichi_engine" below).
 
 ## Settings
@@ -502,10 +502,10 @@ the host offers: its money of the day (`usd`), the limit it stops at
   place, which `@status` is not part of, and the console only watches who
   is in a room).
 - **The asterism gem.** With an asterism that has `Asterism.status`
-  (after 0.7.1) the host uses it (`net.status`); with the 0.7.1 this
-  repository is pinned to, it does the same by hand on the connection's
-  session (`Host::TablesStatus`: a queryable on the key and a put when the
-  counts change).
+  (0.8.0, the version this repository is pinned to) the host uses it
+  (`net.status`); with an asterism 0.7.1 (the gem's lowest) it does the
+  same by hand on the connection's session (`Host::TablesStatus`: a
+  queryable on the key and a put when the counts change).
 - **Size.** Five tables take about 300 bytes (the largest put is in the
   log's `largest message` with the others).
 

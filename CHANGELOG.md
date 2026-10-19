@@ -3,6 +3,19 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
+## 0.16.3
+
+- **asterism 0.8.0** (the Gemfile's pin, from 0.7.1): the host now takes
+  from the gem what it did by hand before: the tables' counts on
+  `@status` (`net.status`; README "Status"), the players' table apps
+  coming and going (`net.on_app_join` / `on_app_leave`; README "Who is
+  there"), and the methods' argument names and texts in the meta
+  (`asterism objects`, `asterism mcp`). Nothing the players or the
+  tables see changes; the wire protocol is 1 as before. The gem's
+  dependency stays `~> 0.7, >= 0.7.1`: with an asterism 0.7.1 the host
+  still does these by hand.
+- Updating: `./update.sh 0.16.3` (docs/install.md); nothing in `.env`.
+
 ## 0.16.2
 
 - **The owner away hands the role on** (README "Players that drop out"):

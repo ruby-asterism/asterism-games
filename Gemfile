@@ -4,7 +4,7 @@ source "https://rubygems.org"
 
 # asterism: the released gem, pinned. riichi_engine: the fork with the
 # fixes (its fmrb branch; README "riichi_engine").
-gem "asterism", "0.7.1"
+gem "asterism", "0.8.0"
 gem "riichi_engine", git: "https://github.com/kishima/riichi_engine.git", branch: "fmrb"
 gem "msgpack", "~> 1.7"
 # The Claude AI players (README "AI players"); loaded only when

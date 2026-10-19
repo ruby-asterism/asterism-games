@@ -270,6 +270,13 @@ on from the same turn after a few seconds, and the players' screens come
 back to it by themselves. To go back, run it with the old version (it
 prints it); the old image stays (`docker image ls ghcr.io/ruby-asterism/asterism-games`).
 
+### From 0.16.2 to 0.16.3 (asterism 0.8.0)
+
+`./update.sh 0.16.3` (or `--when-idle 0.16.3`). Nothing in `.env`. The
+image has asterism 0.8.0, which the host uses for its `@status`, for
+who is there and for the methods' texts in the meta; nothing the players
+see changes.
+
 ### From 0.16.1 to 0.16.2 (the owner away, a table left alone)
 
 `./update.sh 0.16.2` (or `--when-idle 0.16.2`). Nothing in `.env`. A
