@@ -14,7 +14,10 @@ module AsterismGames
     # meanwhile, should the word not come).
     class OthelloTty
       HELP = <<~TEXT
-        Othello commands (one per line): d3 (play there), sit [0|1], stand, cpu (fill the
+        On a terminal it reads keys: the arrows move the cursor on the board, Enter (or
+        Space) plays there; in the lobby S sit or stand, C the CPU, Enter start; Q or
+        Ctrl+C quits; : (or /) opens a line for a command.
+        Othello commands (one per line, or after :): d3 (play there), sit [0|1], stand, cpu (fill the
         empty seat; the owner), start (the owner), resign, auto (let the client play your
         moves: the first legal square; again to stop), view, help, quit.
         Without --table it takes the first othello table it finds (looking again whenever
@@ -22,7 +25,7 @@ module AsterismGames
       TEXT
 
       # The whole run: connect, find the table, play until quit (or over).
-      def self.run(opts)
+      def self.run(opts, input: $stdin, out: $stdout)
         tty = nil
         joined = Queue.new
         on_join = lambda do |n|
@@ -32,11 +35,12 @@ module AsterismGames
         Play.connect(opts, on_join: on_join, on_leave: ->(n) { tty&.node_left(n) }, label: "play othello") do |net|
           path = opts[:table] || Play.find_tables(net, "othello", joined).first
           abort "play othello: no othello table found (--table <host>/games/<table>)" unless path
-          tty = new(net, path, opts[:name] || net.node_id)
+          kout = Play.key_out(input, out)
+          tty = new(net, path, opts[:name] || net.node_id, out: kout, keys: Play.keys?(input))
           tty.start
           trap("INT") { exit }
           begin
-            Play.read_loop(tty, opts)
+            Play.read_loop(tty, opts, input: input, out: kout)
           ensure
             tty.stop
           end
@@ -48,8 +52,13 @@ module AsterismGames
       # While the host is gone: a view now and then, should on_join not come.
       HOST_GONE_EVERY_S = 30.0
 
-      def initialize(net, path, name, out: $stdout)
+      def initialize(net, path, name, out: $stdout, keys: false)
         @net = net
+        # Keys (README "Keys"): the cursor on the board ([x, y], nil until
+        # a game shows), a line being typed after ":".
+        @keys = keys
+        @cursor = nil
+        @typing = false
         @path = path
         @name = name
         @out = out
@@ -131,6 +140,7 @@ module AsterismGames
         @lock.synchronize do
           @view = v
           @played = true if v.is_a?(Hash) && v["st"] == "play"
+          @cursor = self.class.place_cursor(v, @cursor)
           draw
         end
         play_auto
@@ -168,6 +178,82 @@ module AsterismGames
         true
       end
 
+      # ------------------------------------------------------------ keys
+
+      KEY_STEPS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }.freeze
+
+      # The cursor for a view: none outside a game or without a seat; at a
+      # legal square of this member's (the first) when it has none yet.
+      def self.place_cursor(v, cursor)
+        return nil unless v.is_a?(Hash) && v["st"] == "play" && v["me"].to_i >= 0
+        return cursor if cursor
+        sq = v["tn"] == v["me"] ? v["lg"].to_s[0, 2] : ""
+        sq.size == 2 ? square_xy(sq) : nil
+      end
+
+      def self.square_xy(sq) = ["abcdefgh".index(sq[0]), sq[1].to_i - 1]
+
+      def self.square(xy) = "#{'abcdefgh'[xy[0]]}#{xy[1] + 1}"
+
+      # The cursor moved by an arrow, stopping at the board's edge (from
+      # the middle when there is none yet).
+      def self.step(cursor, key)
+        x, y = cursor || [3, 3]
+        dx, dy = KEY_STEPS.fetch(key)
+        [(x + dx).clamp(0, 7), (y + dy).clamp(0, 7)]
+      end
+
+      # One key as a command. Returns [:cursor, [x, y]], [:cmd, line] (a
+      # square, sit, stand, cpu, start), [:note, text], [:line], [:quit] or
+      # [:none].
+      def self.key_command(key, view, cursor)
+        k = key.is_a?(String) ? key.downcase : key
+        return [:quit] if [:ctrl_c, :ctrl_q, "q"].include?(k)
+        return [:line] if [":", "/"].include?(k)
+        return [:none] unless view.is_a?(Hash) && !view["error"]
+        me = view["me"].to_i
+        if view["st"] == "play"
+          return [:none] if me.negative?
+          return [:cursor, step(cursor, k)] if KEY_STEPS.key?(k)
+          return [:none] unless %i[enter space].include?(k)
+          return [:note, "not your move"] unless view["tn"] == me
+          return [:note, "move the cursor to a square first"] unless cursor
+          sq = square(cursor)
+          return view["lg"].to_s.scan(/../).include?(sq) ? [:cmd, sq] : [:note, "#{sq}: not a legal square"]
+        end
+        case k
+        when "s" then [:cmd, me >= 0 ? "stand" : "sit"]
+        when "c" then view["ow"] == me && me >= 0 ? [:cmd, "cpu"] : [:note, "the owner puts the CPU in"]
+        when :enter then view["ow"] == me && me >= 0 ? [:cmd, "start"] : [:none]
+        else [:none]
+        end
+      end
+
+      # One key (Play.key_loop); false to quit, :line for a line to type.
+      def key(k)
+        r = self.class.key_command(k, @view, @cursor)
+        case r[0]
+        when :quit then return false
+        when :line then return :line
+        when :cursor
+          @lock.synchronize do
+            @cursor = r[1]
+            draw
+          end
+        when :cmd then return command(r[1])
+        when :note then say(r[1])
+        end
+        true
+      end
+
+      # A line is being typed after ":" (a prompt at the bottom).
+      def typing(on)
+        @lock.synchronize do
+          @typing = on
+          draw
+        end
+      end
+
       def move(square)
         v = @view or return "no view yet"
         @table.move(@token, v["n"].to_i, square)
@@ -196,6 +282,7 @@ module AsterismGames
         lines << "#{@path}  #{status_text(v)}"
         bd = v["bd"]
         hints = me >= 0 && v["tn"] == me ? v["lg"].to_s.scan(/../) : []
+        cur = keys_on? && v["st"] == "play" ? @cursor : nil
         lines << "    a b c d e f g h"
         8.times do |y|
           row = (0...8).map do |x|
@@ -203,7 +290,7 @@ module AsterismGames
             code = "#{'abcdefgh'[x]}#{y + 1}"
             c == "B" ? "X" : (c == "W" ? "O" : (hints.include?(code) ? "*" : "."))
           end
-          lines << "  #{y + 1} #{row.join(' ')}"
+          lines << "  #{y + 1}#{self.class.board_row(row, cur && cur[1] == y ? cur[0] : nil)}"
         end
         cnt = v["cnt"] || [0, 0]
         2.times do |i|
@@ -221,10 +308,42 @@ module AsterismGames
         watchers = (v["mb"] || []).select { |m| m[1] == -1 }.map(&:first)
         lines << "  watching: #{watchers.join(', ')}" unless watchers.empty?
         lines << "  #{@note}" unless @note.empty?
-        lines << "  #{prompt(v, me)}"
+        lines << "  #{keys_on? ? key_prompt(v, me) : prompt(v, me)}"
         @out.print("\e[H\e[2J") if @out.tty?
         @out.puts(lines)
+        @out.print("> ") if @keys && @typing
         @out.flush
+      end
+
+      def keys_on? = @keys && !@typing
+
+      # A row of the board: each cell after a space, the cursor's cell
+      # between [ ] (in the spaces around it, so the columns stay).
+      def self.board_row(cells, cx)
+        out = +""
+        cells.each_with_index do |c, x|
+          out << (x == cx ? "[" : (cx && x == cx + 1 ? "]" : " "))
+          out << c
+        end
+        out << (cx == 7 ? "]" : "")
+        out
+      end
+
+      # The last line with keys: each key in [ ] before what it does.
+      def key_prompt(v, me)
+        common = "[:] type a command  [Q] quit"
+        if v["st"] == "play"
+          return "watching  #{common}" if me.negative?
+          return "your move: [arrows] move [Enter] play (* marks the squares)  #{common}" if v["tn"] == me
+          return "waiting for the other player  [arrows] move  #{common}"
+        end
+        words = [me >= 0 ? "[S] stand" : "[S] sit"]
+        if me >= 0 && v["ow"] == me
+          sk = v["sk"] || [0, 0]
+          words << "[C] CPU" if sk.any?(&:zero?)
+          words << "[Enter] start" unless sk.any?(&:zero?)
+        end
+        "#{words.join(' ')}  #{common}"
       end
 
       def status_text(v)

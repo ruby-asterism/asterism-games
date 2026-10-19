@@ -339,6 +339,118 @@ module AsterismGames
         exact ||= options.find { |_, ts| tiles.size == 1 && norm.call(ts).include?(norm.call(tiles)[0]) }
         exact && [exact[0], exact[1]]
       end
+
+      # ------------------------------------------------------------ keys
+
+      # The keys of the table app (fmruby-core flash/app/game/mahjong):
+      # C V B the first, second and third chi offered, K L J the kans.
+      CHI_KEYS = %w[c v b].freeze
+      KAN_KEYS = %w[k l j].freeze
+      QUIT_KEYS = [:ctrl_c, :ctrl_q, "q"].freeze
+      LINE_KEYS = [":", "/"].freeze
+
+      # The hand tile a key would discard: sel when it is on the hand, else
+      # the last (the drawn tile).
+      def chosen(view, sel)
+        n = hand_tiles(view).size
+        sel.is_a?(Integer) && sel.between?(0, n - 1) ? sel : n - 1
+      end
+
+      # Whether the hand's tiles are being chosen (a discard or a riichi
+      # offered): the cursor under the hand shows then.
+      def choosing?(view)
+        (view["a"] || []).any? { |t, _| t == DAHAI || t == RIICHI }
+      end
+
+      # The n-th offer (0: the first) of the types, in the view's order.
+      def nth_offer(opts, types, n)
+        opts.select { |t, _| types.include?(t) }[n]
+      end
+
+      # One key (Keys' names) as the table app reads it. sel: the chosen
+      # hand tile (-1: the drawn one), pick: riichi, choosing the tile to
+      # discard with it. Returns one of
+      #   [:act, type, tiles]       send it
+      #   [:select, i]              choose hand tile i
+      #   [:pick, on]               riichi's choosing on or off
+      #   [:cmd, word, args]        a command of the client (sit, start ...)
+      #   [:line]                   open the line to type a command in
+      #   [:quit]
+      #   [:error, text]            why not (Japanese, for the screen)
+      #   [:none]                   nothing
+      def key_command(key, view, sel: -1, pick: false)
+        k = key.is_a?(String) ? key.downcase : key
+        return [:quit] if QUIT_KEYS.include?(k)
+        return [:line] if LINE_KEYS.include?(k)
+        return [:none] unless view.is_a?(Hash) && !view["error"]
+        me = view["me"].to_i
+        return lobby_key(k, view, me) if view["st"] == "wait"
+        return [:none] if me.negative? || !%w[play result over].include?(view["st"])
+        table_key(k, view, sel, pick)
+      end
+
+      # The lobby: 1-4 sit there, S stand, C CPUs into the empty seats and
+      # Enter start (the owner's).
+      def lobby_key(k, view, me)
+        owner = me >= 0 && view["ow"] == me
+        case k
+        when "1", "2", "3", "4" then [:cmd, "sit", [k]]
+        when "s" then me >= 0 ? [:cmd, "stand", []] : [:none]
+        when "c" then owner ? [:cmd, "cpu", []] : [:error, "卓の主だけができる"]
+        when :enter then owner ? [:cmd, "start", []] : [:none]
+        else [:none]
+        end
+      end
+
+      def table_key(k, view, sel, pick)
+        opts = options(view)
+        has = ->(type) { opts.any? { |t, _| t == type } }
+        hand = hand_tiles(view)
+        case k
+        when :left, :right
+          return [:none] if hand.empty? || !choosing?(view)
+          cur = chosen(view, sel)
+          [:select, (cur + (k == :left ? -1 : 1)) % hand.size]
+        when :enter, :space
+          return [:act, NEXT, []] if has.call(NEXT)
+          return [:none] if hand.empty?
+          t = hand[chosen(view, sel)]
+          if pick
+            o = opts.find { |ty, ts| ty == RIICHI && ts == [t] } || opts.find { |ty, _| ty == RIICHI }
+            return o ? [:act, *o] : [:pick, false]
+          end
+          return [:none] unless has.call(DAHAI)
+          o = opts.find { |ty, ts| ty == DAHAI && ts == [t] }
+          o ? [:act, *o] : [:error, "その牌は打てない"]
+        when :esc
+          return [:pick, false] if pick
+          has.call(SKIP) ? [:act, SKIP, []] : [:none]
+        when "r" then has.call(RIICHI) ? [:pick, !pick] : [:error, "今はできない"]
+        when "t" then offer_key(opts, [TSUMO, RON], 0)
+        when "p" then offer_key(opts, [PON], 0)
+        when "n" then offer_key(opts, [KYUUSHU], 0)
+        when *CHI_KEYS then offer_key(opts, [CHI], CHI_KEYS.index(k))
+        when *KAN_KEYS then offer_key(opts, KANS, KAN_KEYS.index(k))
+        else [:none]
+        end
+      end
+
+      def offer_key(opts, types, n)
+        o = nth_offer(opts, types, n)
+        o ? [:act, *o] : [:error, "今はできない"]
+      end
+
+      # The key of an offer, as the screen shows it ("C" for the first chi,
+      # "L" for the second kan ...).
+      def offer_key_name(opts, type, tiles)
+        group, keys = if type == CHI then [[CHI], CHI_KEYS]
+                      elsif KANS.include?(type) then [KANS, KAN_KEYS]
+                      end
+        return { RIICHI => "R", TSUMO => "T", RON => "T", PON => "P", KYUUSHU => "N", SKIP => "Esc",
+                 NEXT => "Enter" }[type] unless group
+        i = opts.select { |t, _| group.include?(t) }.index([type, tiles])
+        i && i < keys.size ? keys[i].upcase : nil
+      end
     end
   end
 end

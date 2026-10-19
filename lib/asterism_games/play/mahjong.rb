@@ -18,7 +18,11 @@ module AsterismGames
       include MahjongText
 
       HELP = <<~TEXT
-        Mahjong commands (one per line):
+        On a terminal it reads keys, as the table app does: Left/Right choose a tile,
+        Enter or Space discards it; R riichi, T tsumo/ron, P pon, C V B chi, K L J kan,
+        N nine kinds, Esc pass, Enter the result's OK; in the lobby 1-4 sit, S stand,
+        C CPUs, Enter start; Q or Ctrl+C quits; : (or /) opens a line for a command.
+        Mahjong commands (one per line, or after :):
           a .. n         discard that tile of the hand (the drawn tile is the last letter)
           6s, 0p, 東     discard that tile (0: the red five; 1z..7z for the honours too)
           riichi [e|6s]  riichi, discarding that tile (alone: one choice, or the choices)
@@ -70,11 +74,13 @@ module AsterismGames
         Play.connect(opts, on_join: on_join, on_leave: ->(n) { client&.node_left(n) }, label: "play mahjong") do |net|
           path = opts[:table] || pick_table(net, joined, input, out)
           abort "play mahjong: no mahjong table found (--table <host>/games/<table>)" unless path
-          client = new(net, path, opts[:name] || net.node_id, style: opts[:tiles], out: out)
+          keys = Play.keys?(input)
+          kout = Play.key_out(input, out)
+          client = new(net, path, opts[:name] || net.node_id, style: opts[:tiles], out: kout, keys: keys)
           client.start
           trap("INT") { exit }
           begin
-            Play.read_loop(client, opts, input: input)
+            Play.read_loop(client, opts, input: input, out: kout)
           ensure
             client.stop
           end
@@ -107,8 +113,14 @@ module AsterismGames
 
       attr_reader :view
 
-      def initialize(net, path, name, style: "kanji", out: $stdout)
+      def initialize(net, path, name, style: "kanji", out: $stdout, keys: false)
         @net = net
+        # Keys (README "Keys"): the chosen hand tile (-1: the drawn one),
+        # riichi's choosing, a line being typed after ":".
+        @keys = keys
+        @sel = -1
+        @pick = false
+        @typing = false
         @path = path
         @name = name
         @out = out
@@ -203,10 +215,62 @@ module AsterismGames
           @played = true if v.is_a?(Hash) && %w[play result].include?(v["st"])
           # A choice belongs to the state it was offered in.
           @pending = nil if @pending && (!v.is_a?(Hash) || !old.is_a?(Hash) || v["sv"] != old["sv"])
+          took_keys(v, old)
           draw if signature(v) != @drawn
         end
         play_auto
         run_queue
+      end
+
+      # Keys: riichi's choosing ends when riichi is no longer offered; a hand
+      # that changed (a tile drawn, a call) has the drawn tile chosen again.
+      def took_keys(v, old)
+        return unless v.is_a?(Hash)
+        @pick = false unless MahjongText.options(v).any? { |t, _| t == RIICHI }
+        @sel = -1 if !old.is_a?(Hash) || MahjongText.hand_tiles(v) != MahjongText.hand_tiles(old)
+      end
+
+      # One key (Play.key_loop); false to quit, :line for a line to type.
+      def key(k)
+        v = @view.is_a?(Hash) ? @view : nil
+        r = MahjongText.key_command(k, v, sel: @sel, pick: @pick)
+        case r[0]
+        when :quit then return false
+        when :line then return :line
+        when :select
+          @lock.synchronize do
+            @sel = r[1]
+            draw
+          end
+        when :pick
+          @lock.synchronize do
+            @pick = r[1]
+            @note = ""
+            draw
+          end
+        when :act
+          answer = act(r[1], r[2])
+          say(answer == "ok" ? "" : answer)
+          refresh
+        when :cmd
+          answer = client_command(r[1], r[2])
+          say(answer == "ok" ? "" : "#{r[1]}: #{answer}")
+          refresh
+        when :error then say(r[1])
+        end
+        true
+      rescue Asterism::Error => e
+        say("#{e.class}: #{e.message}")
+        true
+      end
+
+      # A line is being typed after ":" (the screen shows the commands and
+      # the letters then, and a prompt).
+      def typing(on)
+        @lock.synchronize do
+          @typing = on
+          draw
+        end
       end
 
       # --commands: run in order, each when the table can take it. A lobby
@@ -369,21 +433,27 @@ module AsterismGames
         v = @view
         return unless v.is_a?(Hash)
         @drawn = signature(v)
-        lines = @screen.lines(v, note: @note, pending: @pending)
+        args = { note: @note, pending: @pending, keys: key_state }
+        lines = @screen.lines(v, **args)
         @drawn_lines = lines
         @drawn_view = v
-        @drawn_args = { note: @note, pending: @pending }
+        @drawn_args = args
         @drawn_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         if @out.tty?
           @out.print("\e[H\e[2J")
           @out.puts(lines)
-          @out.print("> ")
+          @out.print("> ") unless @keys && !@typing
         else
           # A pipe or a file: one screen after another, each ending in "> ".
           @out.puts(lines)
           @out.puts("> ")
         end
         @out.flush
+      end
+
+      # What the screen needs of the keys (nil: commands are typed).
+      def key_state
+        @keys && !@typing ? { sel: @sel, pick: @pick } : nil
       end
 
       # The countdown on a terminal (the move's time and the bank, the

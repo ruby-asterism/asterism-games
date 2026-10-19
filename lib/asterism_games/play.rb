@@ -10,8 +10,8 @@ module AsterismGames
   # it is played (neither needs the framework or riichi_engine).
   module Play
     GAMES = {
-      "othello" => ["othello", "an othello table: the board as text, play by typing squares (d3)"],
-      "mahjong" => ["mahjong", "a mahjong table: the tiles as kanji, emoji or 123m text, play by letters or 6s"]
+      "othello" => ["othello", "an othello table: the board as text, play by the arrows and Enter (or d3)"],
+      "mahjong" => ["mahjong", "a mahjong table: the tiles as kanji, emoji or 123m text, play by one key (or 6s)"]
     }.freeze
 
     USAGE = <<~TEXT
@@ -36,6 +36,10 @@ module AsterismGames
                               how tiles show: kanji (default: 一萬 ４筒 ３索 東, the hand in
                               two rows like the table app), emoji (🀇🀈🀉; the font draws
                               them, 🀄 often in colour) or text (1m 4p 3s 東)
+
+      On a terminal the clients read keys (the table apps' keys; the last line
+      says which work now, Q quits, : opens a line for a command); in a pipe
+      or a file, a command per line.
 
       With neither --router nor --credentials, ASTERISM_ROUTER and
       ASTERISM_CREDENTIALS from the environment are used (as the asterism
@@ -168,13 +172,14 @@ module AsterismGames
     # waits; returns when the client quits, stdin ends on a terminal, or
     # (until_over) the game it saw is over. The end of a pipe or a file
     # keeps it running (auto plays on) until Ctrl-C.
-    def read_loop(client, opts, input: $stdin)
+    def read_loop(client, opts, input: $stdin, out: $stdout)
       # A client that can wait for the right moment takes them as a queue.
       if client.respond_to?(:queue_commands)
         client.queue_commands(opts[:commands])
       else
         opts[:commands].each { |c| client.command(c) }
       end
+      return key_loop(client, opts, input, out) if keys?(input) && client.respond_to?(:key)
       reader = Thread.new do
         quit = false
         while (line = input.gets)
@@ -185,6 +190,65 @@ module AsterismGames
       sleep 0.2 while reader.alive? && !(opts[:until_over] && client.finished?)
     ensure
       reader&.kill
+    end
+
+    # Keys one at a time (README "Keys") when the input is a terminal; a
+    # pipe, a file and the tests read lines.
+    def keys?(input)
+      require_relative "play/keys"
+      input.respond_to?(:tty?) && input.tty? && input.respond_to?(:raw)
+    end
+
+    # The output for a client that reads keys: in raw mode a "\n" must be
+    # written as "\r\n" (Keys::CrlfOut); elsewhere the output as it is.
+    def key_out(input, out)
+      require_relative "play/keys"
+      keys?(input) && out.tty? ? Keys::CrlfOut.new(out) : out
+    end
+
+    # The key loop: the terminal in raw mode, each key to client.key (false:
+    # quit; :line: a line is typed, the terminal back in cooked mode for it,
+    # and the line goes to client.command as before). The terminal is put
+    # back however it ends (an exception, Ctrl-C, the game over), and the
+    # cursor shown again.
+    def key_loop(client, opts, input, out)
+      require_relative "play/keys"
+      reader = Keys::Reader.new(input)
+      err = $stderr
+      $stderr = Keys::CrlfOut.new(err) if err.tty? && !err.is_a?(Keys::CrlfOut)
+      input.raw(intr: false) do
+        out.print("\e[?25l")
+        out.flush
+        thread = Thread.new do
+          loop do
+            k = reader.read(0.5)
+            next unless k
+            break if k == :eof
+            r = client.key(k)
+            break unless r
+            next unless r == :line
+            line = input.cooked do
+              out.print("\e[?25h")
+              client.typing(true)
+              input.gets
+            end
+            out.print("\e[?25l")
+            client.typing(false)
+            break if line.nil?
+            break if !line.strip.empty? && !client.command(line)
+          end
+        end
+        sleep 0.2 while thread.alive? && !(opts[:until_over] && client.finished?)
+      ensure
+        # Ended before the raw mode is undone: a thread still in cooked
+        # mode would put raw mode back after it.
+        thread&.kill
+        thread&.join(1)
+      end
+    ensure
+      $stderr = err if err
+      out.print("\e[?25h")
+      out.flush
     end
   end
 end

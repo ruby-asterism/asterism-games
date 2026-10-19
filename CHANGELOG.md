@@ -28,6 +28,18 @@ described ("games 0.10.0" and the like).
   and with neither of the first two `ASTERISM_ROUTER` /
   `ASTERISM_CREDENTIALS`, as the asterism command line; both wait for a
   host that left the network and go on when it is back.
+- **Keys on a terminal** (README "Keys"): when the input is a terminal,
+  both clients read one key at a time, the table apps' keys. Mahjong:
+  Left / Right choose a tile (`^^` under it), Enter or Space discards it,
+  `R` riichi, `T` tsumo or ron, `P` pon, `C` `V` `B` the chi offered,
+  `K` `L` `J` the kans, `N` nine kinds, Esc pass, Enter the result's OK;
+  the lobby `1`-`4` sit, `S` stand, `C` CPUs, Enter start. Othello: the
+  arrows move a cursor on the board (it stops at the edges), Enter plays
+  there; `S` sit or stand, `C` the CPU, Enter start. `Q`, Ctrl+Q or Ctrl+C
+  quits, and `:` (or `/`) opens a line for any command as typed before.
+  The last line names the keys that work now (`[R]リーチ [T]ツモ`). The
+  terminal is in raw mode only while keys are read and is put back however
+  the client ends. A pipe, a file and `--commands` work as before.
 - The gem holds the mahjong client (`lib/asterism_games/play/`), not the
   table: it needs neither riichi_engine nor the framework.
 - `asterism-games --help` (and `help`, `-h`) prints the usage; it used to

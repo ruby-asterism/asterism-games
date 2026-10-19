@@ -1223,6 +1223,51 @@ environment); with nothing at all, a zenohd on this machine
 client waits; when the host is back (`on_join`) it asks again (and joins
 again when the host forgot it).
 
+### Keys
+
+On a terminal (the input is a tty) both clients read one key at a time,
+the keys of the table apps (fmruby-core's `flash/app/game/mahjong/` and
+`flash/app/game/othello/`); the last line of the screen says which keys
+work now, each in `[ ]` before what it does (`[R]リーチ [T]ツモ`). In a
+pipe or a file (and the tests) they read lines as before, and
+`--commands` runs first either way.
+
+| Mahjong | |
+|---|---|
+| Left, Right | choose a tile of the hand (`^^` under it; the drawn tile is chosen whenever the hand changes) |
+| Enter, Space | discard the chosen tile; the result's OK; at the end of the game, the owner: back to the lobby |
+| `R` | riichi: then Left / Right and Enter discard with it (a tile that does not declare it: the first that does), Esc gives it up |
+| `T` | tsumo or ron |
+| `P` | pon |
+| `C` `V` `B` | the first, second and third chi offered (the last line names each one's tiles: `[C]チー 3m4m [V]チー 4m6m`) |
+| `K` `L` `J` | the first, second and third kan offered |
+| `N` | nine kinds (an abortive draw) |
+| Esc | pass (do not call) |
+| `1`..`4` | the lobby: sit there (an empty seat or a CPU's) |
+| `S` | the lobby: stand |
+| `C` | the lobby, the owner: CPUs into the empty seats |
+| Enter | the lobby, the owner: start (four seats taken) |
+
+| Othello | |
+|---|---|
+| the arrows | move the cursor on the board (`[ ]` around the square; it stops at the edges; it starts on a legal square) |
+| Enter, Space | play there (a square that is not legal: a short note, nothing sent) |
+| `S` | the lobby (or after a game): sit, or stand |
+| `C` | the owner: the CPU into the empty seat |
+| Enter | the lobby (or after a game), the owner: start |
+
+| Both | |
+|---|---|
+| `Q`, Ctrl+Q, Ctrl+C | quit |
+| `:` or `/` | a line to type a command in, as in a pipe (`tonpuu`, `rule 3 1`, `chi 2`, `6s`, `resign`, `auto` ...): the terminal is back in its line mode for it, the screen shows the letters and the words again, Enter sends it (an empty line sends nothing) |
+
+The terminal is put in raw mode while the client reads keys (`io/console`;
+ESC alone is told from an arrow by waiting 50 ms for the rest of the
+sequence) and the cursor is hidden; however the client ends (`Q`, Ctrl+C,
+an exception, a signal) the terminal is put back as it was and the cursor
+shown again. In raw mode the terminal does not turn `\n` into a new line,
+so the client writes `\r\n`.
+
 ### Mahjong
 
 The lobby (sit, stand, CPUs, the game's length, start), the rounds, the
@@ -1312,6 +1357,8 @@ a  b  c  d  e  f  g  h  i  j     k
   for the four seats; the screen says what each waits for (`--commands:
   cpu (卓の主を待っています)`). One the host answers "no" is not tried
   again.
+
+Typed (in a pipe or a file each line; on a terminal after `:`):
 
 | Typed | |
 |---|---|
@@ -1517,7 +1564,8 @@ squares next to a corner last), then the most discs turned.
 with the same options.) CRuby and the asterism gem only (no Family
 mruby). The options are every client's ("Playing in a terminal"). It joins the table,
 draws the board as text at every change (it takes the state the host puts
-and asks its view; X black, O white, `*` the squares it may play) and reads
+and asks its view; X black, O white, `*` the squares it may play) and on a
+terminal reads keys ("Keys": the arrows move a cursor, Enter plays), else
 commands: `sit`, `stand`, `cpu`, `start`, a square (`d3`), `resign`,
 `auto` (play the first legal square for you), `quit`. When the table's
 host leaves the network (Asterism's `on_leave`) it says the connection is
@@ -1548,6 +1596,14 @@ games/games/othello1  move 2, last d3
   X black CPU (CPU)                 4
   O white Alice (you, owner)        1 <
   your move: a square (* marks them), or resign
+```
+
+On a terminal, with keys:
+
+```
+  3 . .[*]X * . . .
+  ...
+  your move: [arrows] move [Enter] play (* marks the squares)  [:] type a command  [Q] quit
 ```
 
 ## The drawing board

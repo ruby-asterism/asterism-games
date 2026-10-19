@@ -85,10 +85,14 @@ module AsterismGames
       end
 
       # The screen: lines (Strings). note: the last answer or news; pending:
-      # a choice being made ([type, options]).
-      def lines(v, note: "", pending: nil)
+      # a choice being made ([type, options]); keys: the client reads keys
+      # (README "Keys"): {sel: the chosen hand tile, pick: riichi's choosing},
+      # the cursor under the hand instead of the letters and the keys at the
+      # bottom (nil: the commands typed).
+      def lines(v, note: "", pending: nil, keys: nil)
         return ["卓: #{v['error']}"] if v["error"]
         @v = v
+        @keys = keys
         @me = v["me"].to_i
         out = case v["st"]
               when "wait" then lobby
@@ -98,6 +102,7 @@ module AsterismGames
               else ["#{@path}: #{v['st']}"]
               end
         out += choice_lines(pending) if pending
+        out << pick_line if keys && keys[:pick] && v["st"] == "play"
         out << "  #{note}" unless note.to_s.empty?
         out << hint
         out
@@ -300,20 +305,25 @@ module AsterismGames
         dt = @v["dt"].to_i
         tiles = strip
         letters = row
+        # Keys: "^^" under the chosen tile while a discard is offered, in
+        # place of the letters.
+        cur = @keys && MahjongText.choosing?(@v) ? MahjongText.chosen(@v, @keys[:sel]) : nil
+        mark = ->(i) { @keys ? (i == cur ? "^^" : "") : LETTERS[i] }
         h.each_with_index do |t, i|
           tiles.tile(t, @slot)
-          letters.cell(LETTERS[i], @slot)
+          letters.cell(mark.call(i), @slot)
         end
         if dt >= 0 && @v.key?("dt")
           tiles.blank(@slot)
           letters.cell("", @slot)
           tiles.tile(dt, @slot)
-          letters.cell(LETTERS[h.size], @slot)
+          letters.cell(mark.call(h.size), @slot)
         end
         out = tiles.lines + [letters.to_s.rstrip]
         all = h + (dt >= 0 && @v.key?("dt") ? [dt] : [])
         reds = all.each_index.select { |i| red?(all[i]) }.map { |i| LETTERS[i] }
-        out << "赤: #{reds.join(' ')}" if !reds.empty? && @style != "mpsz"
+        # (With keys there are no letters to name; the red fives are red.)
+        out << "赤: #{reds.join(' ')}" if !reds.empty? && @style != "mpsz" && !@keys
         out.concat(waits_lines(all))
         out
       end
@@ -329,7 +339,11 @@ module AsterismGames
           n = b[i + 1]
           pairs = b[i + 2, n * 2].each_slice(2).map { |w, left| "#{mpsz(w)}(#{left})" }
           letter = all.index(t)
-          parts << "#{letter ? LETTERS[letter] : mpsz(t)}→ #{pairs.join(' ')}"
+          what = if @keys then tile(t, @style)
+                 elsif letter then LETTERS[letter]
+                 else mpsz(t)
+                 end
+          parts << "#{what}→ #{pairs.join(' ')}"
           i += 2 + n * 2
         end
         ["待ち: #{parts.join('  ')}"]
@@ -432,8 +446,18 @@ module AsterismGames
         ["どれにする (番号か牌): #{list.join('  ')}"]
       end
 
+      # Riichi with keys: the tiles that may be discarded with it.
+      def pick_line
+        ts = MahjongText.options(@v).select { |t, _| t == RIICHI }.map { |_, x| tile(x[0], @style) }
+        "リーチ: 切る牌を選ぶ (#{ts.join(' ')})"
+      end
+
+      # The keys that work everywhere, at the end of the last line.
+      COMMON_KEYS = "[:]打ち込む [Q]閉じる"
+
       # What can be done now (the last line before the prompt).
       def hint
+        return key_hint if @keys
         v = @v
         opts = MahjongText.options(v)
         types = opts.map(&:first).uniq
@@ -476,6 +500,91 @@ module AsterismGames
         dl = v["dl"]
         return "ほかの人の答えを待っています" if r[7] == 2 && dl && dl[0].to_i & (1 << @me) == 0 && dl[0].to_i.positive?
         turn_text(r).strip
+      end
+
+      # The last line with keys (README "Keys"): each key in [ ] before what
+      # it does, as the table app labels its buttons.
+      def key_hint
+        v = @v
+        opts = MahjongText.options(v)
+        types = opts.map(&:first).uniq
+        case v["st"]
+        when "wait" then return lobby_keys
+        when "over"
+          return "[Enter]待ち合わせに戻す  #{COMMON_KEYS}" if types.include?(NEXT)
+          return "次へ: 卓の主が待ち合わせに戻す  #{COMMON_KEYS}"
+        when "result"
+          return "[Enter]OK  #{COMMON_KEYS}" if types.include?(NEXT)
+          return "#{@me.negative? ? '観戦中' : '次の局を待っています'}  #{COMMON_KEYS}"
+        end
+        r = v["r"] || []
+        return "#{round_name(r)} が始まります  #{COMMON_KEYS}" if v["in"]
+        return "観戦中#{turn_text(r)}  #{COMMON_KEYS}" if @me.negative?
+        if @keys[:pick] && types.include?(RIICHI)
+          return "リーチ: [←][→]選ぶ [Enter]切ってリーチ [Esc]やめる#{time_text}  #{COMMON_KEYS}"
+        end
+        if types.include?(DAHAI)
+          words = ["[←][→]選ぶ", "[Enter]打つ"]
+          words.concat(offer_words(opts, [RIICHI, TSUMO, *KANS, KYUUSHU]))
+          return "自分の番: #{words.join(' ')}#{time_text}  #{COMMON_KEYS}"
+        end
+        unless types.empty?
+          words = offer_words(opts, [RON, PON, CHI, *KANS, TSUMO, SKIP])
+          ls = v["ls"]
+          what = ls ? " (#{wind_of(ls[0])} #{name_of(ls[0])} の #{tile(ls[1], @style)})" : ""
+          return "鳴ける#{what}: #{words.join(' ')}#{time_text}  #{COMMON_KEYS}"
+        end
+        dl = v["dl"]
+        if r[7] == 2 && dl && dl[0].to_i & (1 << @me) == 0 && dl[0].to_i.positive?
+          return "ほかの人の答えを待っています  #{COMMON_KEYS}"
+        end
+        "#{turn_text(r).strip}  #{COMMON_KEYS}".strip
+      end
+
+      # "[T]ツモ", "[C]チー 3m4m", "[K]カン 東": the offers of the types in
+      # that order (each chi and kan with its key and tiles; one riichi
+      # however many discards declare it).
+      def offer_words(opts, order)
+        seen = {}
+        out = []
+        order.each do |type|
+          opts.each do |t, ts|
+            next unless t == type
+            key = MahjongText.offer_key_name(opts, t, ts)
+            next unless key
+            next if [RIICHI, PON].include?(t) && seen[t]
+            seen[t] = true
+            name = CALL_NAMES[t] || { SKIP => "パス" }[t] || t.to_s
+            tiles = case t
+                    when CHI then " #{ts.map { |x| tile(x, @style) }.join(@style == 'mpsz' ? '' : ' ')}"
+                    when ANKAN, KAKAN then " #{tile(ts[0], @style)}"
+                    else ""
+                    end
+            out << "[#{key}]#{name}#{tiles}"
+          end
+        end
+        out
+      end
+
+      # The lobby's keys: 1-4 for the seats that may be taken (empty or a
+      # CPU's), S stand, C CPUs and Enter start (the owner).
+      def lobby_keys
+        v = @v
+        sk = v["sk"] || [0, 0, 0, 0]
+        free = (0..3).select { |s| sk[s] != 1 && s != @me }.map { |s| "[#{s + 1}]" }
+        words = []
+        words << "#{free.join}座る" unless free.empty?
+        if @me >= 0
+          words << "[S]立つ"
+          if v["ow"] == @me
+            words << "[C]CPU で埋める" if sk.any?(&:zero?)
+            words << "[Enter]始める" unless sk.any?(&:zero?)
+          else
+            words << "(卓の主が始める)"
+          end
+        end
+        words << COMMON_KEYS
+        "#{@me.negative? ? '観戦中: ' : ''}#{words.join(' ')}"
       end
 
       def turn_text(r)
