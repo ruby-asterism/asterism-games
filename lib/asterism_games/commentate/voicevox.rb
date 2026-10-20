@@ -16,6 +16,8 @@ module AsterismGames
     #   wav = vv.synthesize("リーチなのだ！", id)    # the WAV's bytes
     class Voicevox
       DEFAULT_URL = "http://127.0.0.1:50021"
+      # Where people get the VOICEVOX app (it is not in this gem).
+      HOME = "https://voicevox.hiroshiba.jp/"
 
       # The engine is not there, or said no.
       class Error < StandardError; end

@@ -44,7 +44,9 @@ module AsterismGames
         --no-open             do not open the browser
         --json                every commentary line as a JSON line on standard output
         --voicevox URL        the VOICEVOX engine (default VOICEVOX_URL, else
-                              http://127.0.0.1:50021); not there: the browser's voice
+                              http://127.0.0.1:50021); not there: the browser's voice.
+                              VOICEVOX is a free app you install and start yourself
+                              (not in this gem)
         --speaker NAME        the VOICEVOX character (default %<speaker>s)
         --style NAME          its style (default %<style>s)
         --ai on|off           the AI's one-liners (default on; they need

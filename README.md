@@ -1580,13 +1580,18 @@ when it is taken), prints the address and opens it in the browser (macOS
 a free Japanese speech synthesiser, when its engine runs on this machine;
 the default character is ずんだもん (style ノーマル). Nothing of its voice is
 in this gem: the gem holds the words (`commentate/mahjong_voice.yml`) and
-the code that has your VOICEVOX say them.
+the code that has your VOICEVOX say them. **VOICEVOX is a separate app
+you install and start yourself** (https://voicevox.hiroshiba.jp/, free);
+without it the commentary still runs, with the browser's voice. When it
+finds no engine, the command says so on the terminal, with where to get
+VOICEVOX, and so does the page's bar.
 
 - **Finding the engine.** At its start the command asks
   `GET /version` of `--voicevox URL` (default `VOICEVOX_URL`, else
   `http://127.0.0.1:50021`). When nothing answers, the browser's voice
-  reads, as before, and the page's bar says
-  「VOICEVOX が見つからない: ブラウザの声で読む」.
+  reads, as before, the terminal says where to get VOICEVOX, and the
+  page's bar says 「VOICEVOX が見つからない (無料のアプリ VOICEVOX を入れて
+  起動すると、ずんだもんの声になる): ブラウザの声で読む」.
 - **The fixed phrases** (リーチ, チー, ポン, カン, ロン, ツモ, the rounds'
   names, 流局, 途中流局, 満貫 to 役満, オーラス, 逆転, 終局, 対局開始, and
   「実況を始めます」 when the page is clicked) are WAV files, played at

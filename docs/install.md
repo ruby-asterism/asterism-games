@@ -272,6 +272,10 @@ on from the same turn after a few seconds, and the players' screens come
 back to it by themselves. To go back, run it with the old version (it
 prints it); the old image stays (`docker image ls ghcr.io/ruby-asterism/asterism-games`).
 
+### From 0.19.0 to 0.19.1 (where to get VOICEVOX)
+
+Nothing to do on a server: only the commentary's messages change.
+
 ### From 0.18.0 to 0.19.0 (the commentary in the browser)
 
 Nothing to do on a server: the host and the tables are the same as

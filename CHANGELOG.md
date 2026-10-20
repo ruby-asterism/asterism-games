@@ -3,6 +3,13 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
+## 0.19.1
+
+- The commentary tells where to get VOICEVOX when it finds no engine:
+  the terminal says it is a free app installed and started apart from the
+  gem (with its home page), the page's bar says the same in Japanese, and
+  `commentate --help` and the README's "The voice" say it up front.
+
 ## 0.19.0
 
 - **Commentary** (README "Commentary"): `asterism-games commentate

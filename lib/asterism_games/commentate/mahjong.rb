@@ -318,6 +318,8 @@ module AsterismGames
                               root: root, log: log)
         unless voice
           info.puts "commentate: no VOICEVOX at #{url}: the browser's voice reads (README \"Commentary\", \"The voice\")"
+          info.puts "commentate: VOICEVOX is a free app you install yourself (it is not in this gem): " \
+                    "#{Voicevox::HOME}; start it and run this again for #{opts[:speaker] || DEFAULT_SPEAKER}'s voice"
           return [nil, "missing"]
         end
         info.puts "commentate: VOICEVOX #{voice.engine_version} at #{url}: #{voice.speaker} (#{voice.style}, #{voice.id}), " \

@@ -140,6 +140,7 @@ class TestCommentateVoice < Minitest::Test
     assert_nil voice
     assert_equal "missing", note
     assert_match(/no VOICEVOX at #{Regexp.escape(url)}: the browser's voice reads/, info.string)
+    assert_match(%r{VOICEVOX is a free app you install yourself .*https://voicevox\.hiroshiba\.jp/}, info.string)
     hub = C::MahjongHub.new(voice: nil, voice_note: note)
     assert_equal({ "engine" => "browser", "note" => "missing" }, hub.status["voice"])
     line = hub.update("games", "mahjong1", recorded[0]).first
