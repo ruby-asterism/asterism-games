@@ -264,6 +264,7 @@ module AsterismGames
     # "Rooms", "Who joins"); trust: trust_for's; app: what the room's link
     # opens (its game's tables; nil: every table of rooms.tables); group:
     # its invite link's group (nil: none), kept with its games' records.
+    # spectate_label / spectate_outside: README "Spectate".
     def child_config(slot, tar, dir, room_id = nil, trust = { "own" => false, "seats" => [], "prefix" => nil }, app = nil,
                      group = nil)
       tables = app ? Config.tables_for_app(@rooms["tables"], app) : @rooms["tables"]
@@ -273,7 +274,12 @@ module AsterismGames
         "status_file" => File.join(dir, "host.json"), "tables" => tables, "room_id" => room_id,
         "trusted_nodes" => trust["seats"], "trusted_prefix" => trust["prefix"],
         "seat_reuse_ms" => @rooms["seat_reuse_seconds"].to_i * 1000, "ai_usage_file" => ai_usage_file,
-        "records_db" => records_db, "records_place" => "room", "records_group" => group }
+        "records_db" => records_db, "records_place" => "room", "records_group" => group,
+        # README "Spectate": the tables' spectate keys, outside the room
+        # (asterism/<node>/spectate/room<slot>-<table>/state), put on a
+        # connection without the namespace, with the host's own certificate
+        # only (the slot's certificate of a console before 0.3.0 is the room's).
+        "spectate_label" => "room#{slot}", "spectate_outside" => trust["own"] ? true : false }
     end
 
     # What the AI players cost, shared by every host process (README "AI

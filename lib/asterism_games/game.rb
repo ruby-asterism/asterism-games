@@ -38,7 +38,9 @@ module AsterismGames
   #                          (the board's strokes) holds its writes
   #
   # and writes the rules: tick(now), public_view(now) (and spectator_view,
-  # summary when they differ), to_saved(now) / restore(data, now) and the
+  # summary when they differ; spectate_view and spectate_delay_ms for what
+  # the host puts outside the players' keys, README "Spectate"),
+  # to_saved(now) / restore(data, now) and the
   # methods its Remote calls. A game that hands out more than its state
   # (the board's strokes) tells it with tell(sub, value): the host puts
   # value on asterism/<node>/<app>/<table>/<sub>, in the order told, on its
@@ -151,6 +153,22 @@ module AsterismGames
     # What the host puts on asterism/<node>/<app>/<table>/state.
     def state_view(now)
       spectator_view(now)
+    end
+
+    # What those who watch from outside the table see (README "Spectate"):
+    # the host puts it on asterism/<node>/spectate/<table>/state (a room's
+    # table: room<slot>-<table>), a key no player's role reads and outside
+    # every room, after spectate_delay_ms. It may hold what the players do
+    # not see of each other (the mahjong hands), never what nobody knows
+    # yet (a wall) nor a token. nil (the default): nothing is put.
+    def spectate_view(_now)
+      nil
+    end
+
+    # How old what spectate_view gives is when the host puts it (ms; 0: at
+    # once). A game with a spectator delay gives it here.
+    def spectate_delay_ms
+      0
     end
 
     # Counts for the host's status (GET /status of the rooms' host, README

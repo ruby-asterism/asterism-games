@@ -3,6 +3,33 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
+## 0.18.0
+
+- **Spectate** (README "Spectate"): the host puts a table's spectate view
+  on `asterism/<node>/spectate/<table>/state` (a room's table as
+  `room<slot>-<table>`), a key outside the players' role
+  (`asterism/*/games/**`) and outside every room, for a console's
+  spectators and viewers and for the asterism gem's command line and MCP
+  bridge. The framework's `Game#spectate_view` (nil by default: nothing
+  is put) and `Game#spectate_delay_ms`; the host takes the view when it
+  puts the state, keeps it for the delay and puts each one in order, and
+  puts the last one again every 5 s. A room's host puts its tables' views
+  on a second connection of its own (the host's own certificate, no
+  namespace), never into the room; with a slot's certificate (a console
+  before 0.3.0) nothing. The application `spectate` is on the network (a
+  liveliness token) while the host puts.
+- The mahjong table's spectate view: the table in words as `look` gives
+  it, with every seat's hand and drawn tile (the hands a spectator member
+  sees); never the wall, the ura dora, an indicator not turned yet, a node
+  or a token. Held for the table's spectator delay (none by default).
+  Othello and the drawing board put nothing.
+- The console's role `games-host` needs two more lines for it (Read and
+  write `asterism/${node}/spectate`, `asterism/${node}/spectate/**`); the
+  console's docs/rooms.md has them and the `spectator` role. Without them
+  the router drops the puts and nothing else changes.
+- The host's last log line counts the spectate puts and their largest
+  size apart from the players' messages.
+
 ## 0.17.1
 
 - `bin/othello-tty` is gone: `asterism-games play othello` is the same

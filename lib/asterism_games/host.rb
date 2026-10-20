@@ -52,6 +52,7 @@ module AsterismGames
       @methods = {}
       @docs = {}
       @put_at = {}
+      @spec = {} # table => {"q" => [[ms, bytes], ...], "bytes", "last", "out", "at"} (README "Spectate")
       @stats = Hash.new(0)
       config["tables"].each do |t|
         klass = AsterismGames.game(t["game"]) or raise ArgumentError, "unknown game #{t['game'].inspect}"
@@ -132,7 +133,8 @@ module AsterismGames
       end
       save_all
       @ai&.stop
-      @log.call("games: largest message #{@stats['max_bytes']} B (#{@stats['max_what']})")
+      @log.call("games: largest message #{@stats['max_bytes']} B (#{@stats['max_what']})" \
+                "#{"; spectate #{@stats['spectate']} puts, at most #{@stats['spectate_max_bytes']} B" if @stats['spectate'].positive?}")
       if @ai&.any?
         n, avg, max = @ai.times
         @log.call("games: AI players: #{@ai.stats.to_h.inspect}; #{n} decisions, #{avg} ms on average, #{max} ms at most; " \
@@ -195,6 +197,7 @@ module AsterismGames
           @log.call("games: connection lost: #{net.lost_reason}")
           return
         end
+        open_spectate
         ::Asterism::LOCK.synchronize { step }
         sleep LOOP_S
       end
@@ -234,6 +237,7 @@ module AsterismGames
     end
 
     def down
+      close_spectate
       @net = nil
       @tables_status = nil
       @connected = false
@@ -277,12 +281,15 @@ module AsterismGames
           changed = true
           g.save(now)
           put_state(name, g, now)
+          take_spectate(name, g, now)
         elsif g.unsaved?
           # A change only one member's own view shows: saved, not put.
           g.save(now)
         elsif now - @put_at.fetch(name, 0) >= PUT_EVERY_MS
           put_state(name, g, now)
+          take_spectate(name, g, now)
         end
+        put_spectate(name, g, now)
       end
       write_status(now) if @config["status_file"] && now - @status_at.to_i >= STATUS_EVERY_MS
       tell_tables(now, changed: changed)
@@ -366,6 +373,138 @@ module AsterismGames
       @net.session.put(key, payload)
     rescue ::Asterism::Error => e
       @log.call("games: put #{name}/#{sub}: #{e.message}")
+    end
+
+    # ------------------------------------------------------------ spectate
+    #
+    # What a game gives for those who watch from outside the table
+    # (Game#spectate_view, README "Spectate"): taken when the state is put
+    # (a change, and every PUT_EVERY_MS), kept in order and put once it is
+    # Game#spectate_delay_ms old, each in turn, on spectate_key. Nothing is
+    # put sooner than the delay asks, whatever happens between (a round
+    # ends, the delay is chosen again); a host started again starts with
+    # nothing kept. The last one put is put again every PUT_EVERY_MS, so a
+    # new subscriber has it within that.
+
+    # The application chunk of the spectate keys: not the host's app (the
+    # players' role reads asterism/*/<app>/**), and outside every room.
+    SPECTATE_APP = "spectate"
+    # What one table keeps for its delay at most (bytes); the oldest goes
+    # first (it is then never shown, rather than shown early).
+    SPECTATE_KEEP_BYTES = 8 * 1024 * 1024
+    # How often a room's host tries again to open its connection outside
+    # the room (ms).
+    SPECTATE_RETRY_MS = 30_000
+
+    # asterism/<node>/spectate/<table>/state; a room's table is
+    # room<slot>-<table> there, so the rooms' tables and the permanent ones
+    # never meet.
+    def spectate_key(name)
+      table = @config["namespace"] ? "#{spectate_label}-#{name}" : name
+      "asterism/#{node}/#{SPECTATE_APP}/#{table}/state"
+    end
+
+    # A room's part of its tables' spectate names: the setting (Rooms gives
+    # room<slot>), else the namespace without its slashes.
+    def spectate_label
+      @config["spectate_label"] || @config["namespace"].to_s.delete("/")
+    end
+
+    # Takes what the game gives now (nothing when it gives nil, or the same
+    # as last time).
+    def take_spectate(name, game, now)
+      v = game.spectate_view(now)
+      return if v.nil?
+      bytes = ::Asterism::Codec.pack(v)
+      s = (@spec[name] ||= { "q" => [], "bytes" => 0 })
+      return if bytes == s["last"]
+      s["last"] = bytes
+      s["q"] << [now, bytes]
+      s["bytes"] += bytes.bytesize
+      while s["bytes"] > SPECTATE_KEEP_BYTES && s["q"].size > 1
+        s["bytes"] -= s["q"].shift[1].bytesize
+        @stats["spectate_dropped"] += 1
+      end
+    end
+
+    # Puts what is old enough now, in order; or the last one again.
+    def put_spectate(name, game, now)
+      s = @spec[name] or return
+      q = s["q"]
+      unless q.empty?
+        delay = game.spectate_delay_ms.to_i
+        while q.first && q.first[0] <= now - delay
+          bytes = q.shift[1]
+          s["bytes"] -= bytes.bytesize
+          s["out"] = bytes
+          send_spectate(name, bytes, now)
+          @stats["spectate"] += 1
+        end
+      end
+      send_spectate(name, s["out"], now) if s["out"] && now - s["at"].to_i >= PUT_EVERY_MS
+    end
+
+    def send_spectate(name, bytes, now)
+      @spec[name]["at"] = now
+      sess = spectate_session or return
+      spectate_token(sess)
+      key = spectate_key(name)
+      # Counted apart from the players' messages (the hands make it larger).
+      @stats["spectate_max_bytes"] = [@stats["spectate_max_bytes"], key.bytesize + bytes.bytesize].max
+      sess.put(key, bytes)
+    rescue ::Asterism::Error => e
+      @log.call("games: put spectate #{name}: #{e.message}")
+    end
+
+    # The application asterism/<node>/spectate on the network (a liveliness
+    # token on the connection that puts), so that the command line and the
+    # MCP bridge take its keys for the values of an application that is
+    # there. Once per connection.
+    def spectate_token(sess)
+      return if @spectate_token_on.equal?(sess) || !sess.respond_to?(:liveliness)
+      @spectate_token_on = sess
+      @spectate_token = sess.liveliness("asterism/#{node}/#{SPECTATE_APP}")
+    rescue ::Asterism::Error => e
+      @log.call("games: spectate: token: #{e.message}")
+    end
+
+    # Where the spectate keys are put: the host's own connection outside
+    # the rooms; in a room a connection of its own without the room's
+    # namespace (open_spectate), when the host joins with its own
+    # certificate (spectate_outside), else nowhere.
+    def spectate_session
+      return nil unless @net && !::Asterism.reconnecting?
+      return @net.session unless @config["namespace"]
+      c = @spectate_conn
+      c && !c.reconnecting? ? c : nil
+    end
+
+    # A room's host opens its connection outside the room (the host's own
+    # certificate, no namespace) once connected, and again after a failure
+    # every SPECTATE_RETRY_MS. Outside the lock: opening waits for the router.
+    def open_spectate(now = @clock.call)
+      return unless @config["namespace"] && @config["spectate_outside"] && @config["credentials"]
+      return if @spectate_conn || now < @spectate_retry_at.to_i
+      return unless @games.values.any? { |g| g.respond_to?(:spectate_view) && g.method(:spectate_view).owner != Game }
+      @spectate_retry_at = now + SPECTATE_RETRY_MS
+      @spectate_conn = ::Asterism::Zenoh.open(locator, credentials: @config["credentials"])
+      @log.call("games: spectate: #{node}/#{SPECTATE_APP} outside #{@config['namespace']} " \
+                "(#{@games.keys.map { |n| spectate_key(n).split('/')[3] }.join(', ')})")
+    rescue ::Asterism::Error, SystemCallError => e
+      @spectate_conn = nil
+      @log.call("games: spectate: cannot connect outside #{@config['namespace']}: #{e.message}; " \
+                "again in #{SPECTATE_RETRY_MS / 1000} s")
+    end
+
+    def close_spectate
+      @spectate_token = nil # withdrawn with its connection
+      @spectate_token_on = nil
+      @spectate_retry_at = nil # a new connection tries at once
+      c = @spectate_conn
+      @spectate_conn = nil
+      c&.close
+    rescue ::Asterism::Error
+      nil
     end
 
     # The largest message seen so far, key and payload together.

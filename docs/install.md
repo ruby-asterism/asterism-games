@@ -166,7 +166,9 @@ of its own, a row of the console's registry.
    console 0.2.3 shows the tables on the rooms' page):
    - Roles > New role `games-host`: Read and write `asterism/${node}`,
      `asterism/${node}/games/**`, `asterism/${node}/@profile`,
-     `asterism/${node}/*/@status` (the tables' counts, README "Status"); Read
+     `asterism/${node}/*/@status` (the tables' counts, README "Status"),
+     `asterism/${node}/spectate`, `asterism/${node}/spectate/**` (the
+     tables watched from outside, README "Spectate"); Read
      `asterism/*/game` (the players' table apps: the host sees them leave
      at once, README "Who is there"); Watch `asterism/**`; not for browsers.
    - Roles > New role `games`: Read `asterism/*/games/**`; Ask
@@ -269,6 +271,20 @@ is at once: the tables are saved on every change, so a game in progress goes
 on from the same turn after a few seconds, and the players' screens come
 back to it by themselves. To go back, run it with the old version (it
 prints it); the old image stays (`docker image ls ghcr.io/ruby-asterism/asterism-games`).
+
+### From 0.17.1 to 0.18.0 (the tables watched from outside)
+
+`./update.sh 0.18.0` (or `--when-idle 0.18.0`). Nothing in `.env`. The
+host puts the mahjong tables' spectate view (README "Spectate") on
+`asterism/<node>/spectate/<table>/state`. For the router to let it
+through, add two lines to the role `games-host` in the console (Admin >
+Members > Roles, "Read and write"): `asterism/${node}/spectate` and
+`asterism/${node}/spectate/**`, then Apply. Who may read it is a role of
+its own (`spectator`, or the `viewer` role): the console's docs/rooms.md,
+"Watching the tables from outside". Until the role has the lines the
+router drops the puts; the tables, the rooms and the players' screens are
+as before either way. A room's host opens one more connection to the
+router for it (the same certificate).
 
 ### From 0.17.0 to 0.17.1 (the gem without othello-tty)
 

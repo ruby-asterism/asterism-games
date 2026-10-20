@@ -512,6 +512,84 @@ the host offers: its money of the day (`usd`), the limit it stops at
 - **Size.** Five tables take about 300 bytes (the largest put is in the
   log's `largest message` with the others).
 
+## Spectate
+
+A table can also be watched from outside it, with what the players do not
+see of each other (games 0.18.0): the host puts a game's spectate view on
+a key no player's role reads and no room reaches, for an admin, a
+spectator's row of the console, or an AI assistant that only looks (the
+asterism gem's command line and MCP bridge). The mahjong table puts the
+four hands there; othello and the drawing board put nothing (they hide
+nothing: their state is the whole game).
+
+- **The key.** `asterism/<node>/spectate/<table>/state`: the host's node,
+  the application `spectate` (not the host's `games`, so the players' role
+  `asterism/*/games/**` does not match it), and the table. A room's table
+  is `room<slot>-<table>` there (`asterism/games/spectate/room01-mahjong1/state`),
+  so the rooms' tables and the permanent ones never meet. The value is
+  MessagePack, like the state.
+- **Outside the rooms.** Every key a room's host writes on its own
+  connection gets the room's namespace (`room/<slot>/...`), which every
+  seat of the room reads whole. So a room's host opens a second connection
+  of its own for the spectate keys, with its own certificate and without
+  the namespace: the key is then on the registered side, where the seats'
+  rules do not reach. It does so only with the host's own certificate (a
+  console from 0.3.0 lists the host in `rooms.json`'s `"hosts"`); with the
+  slot's certificate of an older console it puts nothing (that
+  certificate is the room's). The permanent tables' host and a host of its
+  own put on their one connection.
+- **What the mahjong table puts.** The table in words, as `look` gives it
+  ("Playing from a program") to a member without a seat, with each seat's
+  `hand` and `drawn` tile, the same four hands a spectator member's view
+  has (`sh`, `sd`): the seats (name, kind, wind, score, riichi, river,
+  melds, hand count, hand, drawn), the round (wind, number, honba, riichi
+  sticks, dealer, wall left, turn, phase), the dora indicators turned so
+  far, the last discard, the result and the final ranks, the rules, and
+  `delay_s`. Never the wall, the ura dora, an indicator not turned yet, a
+  member's node or token (`test/test_spectate.rb` looks for them):
+
+  ```
+  games/spectate/mahjong1/state
+  {"table":"mahjong1","status":"play","sv":212,
+   "seats":[{"seat":0,"name":"CPU1","kind":"cpu","score":21000,"wind":"north","riichi":false,
+             "river":["2z","4z","5z","1m",...],"melds":[{"type":"pon","tiles":["7z","7z","7z"],"from":1}],
+             "hand_count":10,"hand":["7m","7m","2p","3p","3p","4p","4p","5s","6s","7s"],"drawn":null}, ...],
+   "round":{"wind":"east","number":2,"honba":0,"riichi_sticks":1,"dealer":1,"wall_left":19,"turn":3,"phase":"discard"},
+   "dora_indicators":["9p"],"last_discard":{...},"rules":{...},"delay_s":0}
+  ```
+- **The delay.** The table's spectator delay ("Spectators": the setting
+  `spectator_delay_minutes`, or the owner's choice in the lobby; none by
+  default). The host takes the view when it puts the state (after a change,
+  and every 5 s), keeps each one in order and puts it once it is the delay
+  old, each in turn: what is put is what the table was the delay ago,
+  never sooner, also across a round's end or when the delay is chosen
+  again (a shorter delay lets out what is old enough at once). A host
+  started again starts with nothing kept (nothing is put for the delay).
+  At most 8 MB is kept per table; past that the oldest is dropped (never
+  shown rather than shown early). The last one put is put again every
+  5 s, so a new subscriber has it within that.
+- **Who reads it.** The console's docs/rooms.md, "Watching the tables
+  from outside": the host's role `games-host` needs
+  `asterism/${node}/spectate` and `asterism/${node}/spectate/**` in "Read
+  and write" (without them the router drops the puts, and nothing else
+  changes); a role `spectator` (Read `asterism/*/spectate` and
+  `asterism/*/spectate/**`, Watch `asterism/**`) reads them with the
+  command line, and the `viewer` role (Read `asterism/**`) with the
+  command line and the MCP bridge. The players' role `games` and the
+  rooms' seats do not reach them.
+- **Looking.** With the asterism gem's command line (asterism 0.10.0's
+  `object` commands): `asterism object echo 'games/spectate/*' --credentials
+  spectator.tar` (each put as it comes; `-o json` a line each), `asterism
+  object get games/spectate/mahjong1 --credentials viewer.tar` (the next
+  one). The MCP bridge (`asterism mcp --credentials viewer.tar`):
+  `asterism_values` with the pattern `games/spectate/*/state`. The bridge
+  subscribes to `asterism/**`, which a `spectator` row may not, so it
+  needs the viewer role. The host's application `spectate` is on the
+  network (a liveliness token) while it puts, so the values show as an
+  application that is there.
+- **Writing a game.** `spectate_view(now)` (nil, the default: nothing) and
+  `spectate_delay_ms` (0) of `AsterismGames::Game`.
+
 ## Writing a game
 
 A game is two classes on the framework: the table (`AsterismGames::Game`:
@@ -591,6 +669,7 @@ What the framework gives a game:
 | `changed`, `dirty?`, `unsaved?` | a change to save and put; a change only one member's view shows (`@unsaved = true`) is saved, not put |
 | `to_saved` / `restore` / `resume_clock`, `SAVE_FORMAT` | the saved form (one JSON file per table, `state_dir/<table>.json`, written to a temporary file and renamed); a state of another format is not read. Times are saved as the time left and resumed with the host's clock |
 | `tell(sub, value)`, `SAVE_HOLD_MS` | more than the state: the host puts `value` on `asterism/<node>/<app>/<table>/<sub>` on its next step, in the order told, before the state (the board's strokes). A game that changes many times a second writes its saved state at most once per `SAVE_HOLD_MS` (the host writes what is held when it stops) |
+| `spectate_view(now)`, `spectate_delay_ms` | what the host puts on `asterism/<node>/spectate/<table>/state` for those who watch from outside the table ("Spectate"), held for the delay; nil (the default): nothing. It may hold what the players do not see of each other, never what nobody knows yet |
 | `summary(now)` | the counts the status shows (`st`, `members`, `humans`, `cpus`, `away`, and the game's own): no names, no nodes, no tokens. `busy` (`bin/asterism-games status --idle`) is `humans - away` |
 | `settings`, `tables`, `screens`, `DEFAULTS` | the table keys of the settings file and the environment, the tables a host serves by default, the table apps that get the tables in a room, the table's options |
 
@@ -758,6 +837,10 @@ hand.
   CPU) or every 20 s (a person) does not change how far behind the
   spectators are. A host started again starts the delay over (the past is
   not saved).
+- **From outside the table.** The same four hands, in words and as old
+  as the spectators' view, go on `asterism/<node>/spectate/<table>/state`
+  for a console's spectators and viewers ("Spectate"), a key the players
+  cannot read.
 - **The default is no delay.** The spectators see the hands as they are:
   good for watching a game, and for an audience in the same room. A seated
   player who joins the same table from a second screen sees the others'
@@ -1818,6 +1901,13 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   tonpuu game against three CPUs each to the end from scripted input
   (letters, tiles, calls, passes, OKs; `PLAY_TRANSCRIPT_DIR` keeps what
   they showed).
+- `test_spectate.rb`: the spectate view (README "Spectate"; its
+  framework part in `rake test:gem` too): nothing by default (othello, the
+  board), the keys of the permanent tables and of a room, what the rooms
+  give their hosts, the mahjong view (the four hands, no token, node, wall
+  or ura dora), a CPU game on the host, the delay (0, and 3 s across a
+  round's end, in order, never sooner), a room's table on the connection
+  outside the room only, and the last put again after 5 s.
 - `test_play_commands.rb`: `--commands "sit,cpu,start"` against a table
   in this process: they wait for the lobby when a game is going on as
   the client joins (and then sit, fill and start), the owner's wait for

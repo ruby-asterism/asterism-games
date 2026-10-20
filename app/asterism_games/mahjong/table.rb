@@ -840,6 +840,33 @@ module AsterismGames
         v
       end
 
+      # What the host puts outside the players' keys (README "Spectate"):
+      # the table in words as look gives it to a member without a seat,
+      # with every seat's hand and drawn tile, as a spectator member's view
+      # shows them ("sh", "sd"); never the wall, the ura dora, a dora
+      # indicator not turned yet, a member's node or token. Taken as it is
+      # now; the host holds it for spectate_delay_ms.
+      def spectate_view(now)
+        v = look_view(-1, now)
+        v.delete("you")
+        v.delete("moves")
+        if @state && @status != "wait"
+          v["seats"].each_with_index do |s, i|
+            h, d = hand_of(i)
+            s["hand"] = Tiles.unpack(h)
+            s["drawn"] = d >= 0 ? Tiles.name(d) : nil
+          end
+        end
+        v["delay_s"] = spectator_delay_ms / 1000
+        v
+      end
+
+      # The table's spectator delay (README "Spectators"): the spectate
+      # key is as old as what the spectators at the table see.
+      def spectate_delay_ms
+        spectator_delay_ms
+      end
+
       def step(now)
         case @status
         when "result"
