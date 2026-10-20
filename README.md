@@ -1685,11 +1685,17 @@ asterism-games commentate mahjong --ai off   # the fixed commentary alone
   Without a key the page's bar says 「AI: off (キーなし)」; with a key and
   no gem, 「AI: off (anthropic の gem なし)」 and the command says to
   `gem install anthropic`. `--ai off` turns them off.
-- **The model.** `claude-haiku-5-5` by default (`--ai-model`), asked at
-  low effort, one try with no retries, 8 s at most.
+- **The model.** `claude-haiku-5-5` by default (`--ai-model`), asked with
+  thinking off at effort `low` and `max_tokens` 200 (two short sentences
+  with room; an answer cut there is dropped and the log says its stop
+  reason), one try with no retries, 8 s at most. Every call's line in the
+  log has its seconds, stop reason, tokens and money.
 - **When.** A riichi, a win (a mangan or more counts as bigger), a draw or
   an abortive draw, the lead changing hands, the last round (オーラス),
-  the end; and a quiet minute in the middle of a round. One call at a
+  the end; and a quiet minute in the middle of a round, about one topic
+  the command picks in turn (the leader's lead, a seat in tenpai without
+  riichi when the hands are shown, the dora, the wall left, the last
+  discard; never the same twice running). One call at a
   time and **at most one every 20 s**, or every 8 s for a scene bigger
   than the last one asked about (a win after a riichi, the end after a
   win; the ranks: the end, a big win and the lead changing hands, a win

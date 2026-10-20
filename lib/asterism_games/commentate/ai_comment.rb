@@ -260,6 +260,11 @@ module AsterismGames
           end
           return unless best
           id, t, sc = best
+          if sc["kind"] == "quiet"
+            sc = sc.merge("topic" => Topics.pick(t["view"], hands: hands, last: t["topic"], n: t["quiets"].to_i))
+            t["topic"] = sc["topic"] && sc["topic"]["key"]
+            t["quiets"] = t["quiets"].to_i + 1
+          end
           # A scene bigger than the last one asked about (a win after a
           # riichi) waits OUTRANK_INTERVAL_S, any other MIN_INTERVAL_S.
           gap = @last_rank && sc["rank"] > @last_rank ? OUTRANK_INTERVAL_S : MIN_INTERVAL_S
@@ -271,6 +276,7 @@ module AsterismGames
           @last_rank = sc["rank"]
           @calls += 1
           job = { "table" => id, "kind" => sc["kind"], "rank" => sc["rank"], "asked_at" => now, "hands" => hands,
+                  "topic" => sc["topic"] && sc["topic"]["key"],
                   "round" => sc["round"], "status" => sc["status"], "sv" => sc["sv"],
                   "system" => Prompt.system(tone: @tone, hands: hands),
                   "user" => Prompt.user(t["view"], sc, hands: hands, recent: t["recent"].dup, tone: @tone) }
@@ -304,7 +310,8 @@ module AsterismGames
         said = @commenter.say(system: job["system"], user: job["user"], timeout: TIMEOUT_S)
         usd = @budget.record(KIND, said.tokens)
         tk = said.tokens
-        log("#{job['kind']}#{job['hands'] ? '' : ' (hands hidden)'}: #{format('%.1f', said.ms.to_i / 1000.0)} s, " \
+        log("#{job['kind']}#{job['topic'] ? " (#{job['topic']})" : ''}#{job['hands'] ? '' : ' (hands hidden)'}: " \
+            "#{format('%.1f', said.ms.to_i / 1000.0)} s, stop #{said.stop || '-'}, " \
             "tokens in #{tk['in'].to_i} " \
             "cache_write #{tk['cache_write'].to_i} cache_read #{tk['cache_read'].to_i} out #{tk['out'].to_i}, " \
             "$#{format('%.5f', usd)} (today $#{format('%.4f', @budget.usd_today)})")
@@ -370,6 +377,65 @@ module AsterismGames
         end
       end
 
+      # What a quiet minute is about, chosen here so that the AI does not
+      # wander (with an open question Haiku spent seconds and hundreds of
+      # tokens): one of the leader's lead, a seat in tenpai without riichi
+      # (only with the hands shown), the dora, the wall left, the last
+      # discard; in turn, never the one of the last quiet minute.
+      module Topics
+        P = MahjongPhrases
+        ORDER = %w[lead dama dora wall last_discard].freeze
+
+        module_function
+
+        # {"key", "text"}, or nil when the view has nothing to talk about.
+        def pick(view, hands: false, last: nil, n: 0)
+          all = candidates(view, hands: hands)
+          return nil if all.empty?
+          keys = ORDER.select { |k| all.key?(k) }
+          keys -= [last] if keys.size > 1
+          k = keys[n % keys.size]
+          { "key" => k, "text" => all[k] }
+        end
+
+        def candidates(view, hands: false)
+          return {} unless view.is_a?(Hash)
+          seats = Array(view["seats"])
+          name = ->(i) { P.seat_name(seats, i) }
+          out = {}
+          sc = seats.map { |x| x["score"].to_i }
+          if sc.size >= 2
+            order = sc.each_index.sort_by { |i| [-sc[i], i] }
+            a, b = order
+            out["lead"] = "トップは#{name.call(a)} (#{sc[a]}点)、2位の#{name.call(b)}との差は#{sc[a] - sc[b]}点。"
+          end
+          if hands
+            seats.each_with_index do |x, i|
+              next if x["riichi"]
+              w = MahjongEvents.waits_of(x)
+              next unless w && !w.empty?
+              out["dama"] = "#{name.call(i)}はリーチをかけずにテンパイしている (待ち #{w.map { |t| P.tile_words(t)[0] }.join('・')})。"
+              break
+            end
+          end
+          dora = Array(view["dora_indicators"]).map { |t| MahjongEvents.dora_of(t) }.compact
+          unless dora.empty?
+            seen = seats.sum do |x|
+              (Array(x["river"]) + Array(x["melds"]).flat_map { |m| Array(m["tiles"]) })
+                .count { |t| dora.include?(MahjongEvents.plain(t)) }
+            end
+            out["dora"] = "ドラは#{dora.map { |t| P.tile_words(t)[0] }.join('・')}。河と鳴きに見えているのは#{seen}枚。"
+          end
+          left = view.dig("round", "wall_left")
+          out["wall"] = "山の残りは#{left}枚。" if left.is_a?(Integer)
+          ld = view["last_discard"]
+          if ld.is_a?(Hash) && ld["tile"]
+            out["last_discard"] = "直前に#{name.call(ld['seat'])}が#{P.tile_words(ld['tile'])[0]}を切った。"
+          end
+          out
+        end
+      end
+
       # The words of the ask. The system part is fixed for a tone and
       # whether the hands may be told (four texts in all, each the same to
       # the byte every time, so the cache holds); the user part is the
@@ -411,7 +477,7 @@ module AsterismGames
           - 1 局の流れ: 局の始まり、打牌の繰り返し (途中にリーチや鳴き)、和了か流局、次の局。
 
           ## 様子の読み方
-          ユーザの文は、その時点の卓の様子の要約 (局、本場、供託、残り枚数、ドラ、各席の名前・家・点数・リーチ・鳴き・河の最後の数枚%<hand_note>s、和了や終局の結果) と、場面 (リーチ、和了、流局、逆転、オーラス、終局、静かな時間)、直前の出来事 (決まりの実況が言った文)、最近のひとことです。その場面ならではのひとことを言ってください。最近のひとことと同じ言い回しは避けてください。
+          ユーザの文は、その時点の卓の様子の要約 (局、本場、供託、残り枚数、ドラ、各席の名前・家・点数・リーチ・鳴き・河の最後の数枚%<hand_note>s、和了や終局の結果) と、場面 (リーチ、和了、流局、逆転、オーラス、終局、静かな時間)、直前の出来事 (決まりの実況が言った文)、最近のひとことです。その場面ならではのひとことを言ってください。場面が静かな時間のときは、ユーザの文の「話題」の 1 つだけについて言ってください (ほかの話を広げない)。最近のひとことと同じ言い回しは避けてください。
         TEXT
 
         @cache = {}
@@ -458,6 +524,7 @@ module AsterismGames
           said = Array(sc["lines"]).map { |l| hands ? l["text"] : (l.key?("ptext") ? l["ptext"] : l["text"]) }.compact
           if said.empty?
             out << "- しばらく動きがない (#{sc['quiet_s'] || QUIET_S} 秒)。"
+            out << "話題: #{sc['topic']['text']}" if sc["topic"]
           else
             said.each { |t| out << "- #{t}" }
           end
@@ -528,7 +595,10 @@ module AsterismGames
       class Fake
         attr_reader :requests
 
-        def initialize(delay_ms: 0, fail_every: 0, slow_every: 0, text: nil)
+        # stop: a stop reason to fail with as a cut answer would
+        # ("max_tokens"), counting its tokens.
+        def initialize(delay_ms: 0, fail_every: 0, slow_every: 0, text: nil, stop: nil)
+          @stop = stop
           @delay_ms = delay_ms
           @fail_every = fail_every
           @slow_every = slow_every
@@ -547,9 +617,13 @@ module AsterismGames
           end
           sleep(@delay_ms / 1000.0) if @delay_ms.positive?
           raise AI::Error, "fake: failing on purpose (#{i})" if @fail_every.positive? && (i % @fail_every).zero?
+          if @stop
+            raise AI::TokenError.new("fake: cut (stop_reason #{@stop}, out 200)",
+                                     { "in" => 300, "out" => 200, "cache_write" => 0, "cache_read" => 1500 })
+          end
           scene = user[/^場面: (.+)$/, 1] || "この"
           text = @text ? @text.call(system, user, i) : "偽のひとこと#{i}、#{scene}の場面なのだ！"
-          AI::Said.new(text: text, ms: @delay_ms,
+          AI::Said.new(text: text, ms: @delay_ms, stop: "end_turn",
                        tokens: { "in" => 300, "out" => 25, "cache_write" => i == 1 ? 1500 : 0,
                                  "cache_read" => i == 1 ? 0 : 1500 })
         end

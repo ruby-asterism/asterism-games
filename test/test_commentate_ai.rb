@@ -426,6 +426,80 @@ class TestCommentateAI < Minitest::Test
     assert_match(/not a line, dropped/, @logs.last)
   end
 
+  def test_a_cut_answer_is_logged_with_its_stop_reason
+    fake = A::Fake.new(stop: "max_tokens")
+    b = budget
+    ai, out = ai_with(fake, b: b)
+    ai.observe("h/t", view, [line("riichi", 2)])
+    assert_empty out
+    assert_equal ["AI: riichi: dropped (fake: cut (stop_reason max_tokens, out 200))"], @logs
+    assert_equal 200, b.day["commentary"]["out"]
+    # A line said: its stop reason in the log's line.
+    @logs.clear
+    ai, = ai_with(A::Fake.new)
+    ai.observe("h/t", view, [line("riichi", 2)])
+    assert_match(/\AAI: riichi: 0\.0 s, stop end_turn, tokens in 300 /, @logs.first)
+  end
+
+  # ------------------------------------------------------------ the quiet minute's topic
+
+  def topic_view
+    v = view
+    v["seats"][0]["score"] = 33_000
+    v["seats"][2]["score"] = 27_000
+    v["seats"][1]["riichi"] = true
+    v["seats"][3]["river"] = %w[4p 4p 1z]
+    v["last_discard"] = { "seat" => 3, "tile" => "1z" }
+    v
+  end
+
+  def test_the_topics_of_a_quiet_minute
+    all = A::Topics.candidates(topic_view, hands: true)
+    assert_equal "トップはCPU1 (33000点)、2位のCPU3との差は6000点。", all["lead"]
+    assert_equal "CPU1はリーチをかけずにテンパイしている (待ち 4索・7索)。", all["dama"], "riichi seats are left out"
+    assert_equal "ドラは4筒。河と鳴きに見えているのは2枚。", all["dora"]
+    assert_equal "山の残りは40枚。", all["wall"]
+    assert_equal "直前にCPU4が東を切った。", all["last_discard"]
+    refute A::Topics.candidates(topic_view, hands: false).key?("dama"), "no hand when the hands are hidden"
+    assert_equal({}, A::Topics.candidates(nil))
+    # In turn, never the last one twice.
+    keys = 6.times.map { |n| A::Topics.pick(topic_view, hands: true, n: n)["key"] }
+    assert_equal %w[lead dama dora wall last_discard lead], keys
+    refute_equal "lead", A::Topics.pick(topic_view, hands: true, last: "lead", n: 0)["key"]
+    hidden = 5.times.map { |n| A::Topics.pick(topic_view, hands: false, n: n)["key"] }
+    refute_includes hidden, "dama"
+  end
+
+  def test_a_quiet_minute_asks_about_one_topic
+    fake = A::Fake.new
+    ai, out = ai_with(fake)
+    ai.observe("h/t", topic_view, [line("call", 1)])
+    topics = []
+    4.times do
+      @now += 61
+      ai.tick
+      topics << out.last[2]["topic"]
+    end
+    assert_equal 4, fake.count
+    assert_equal 4, topics.uniq.size, "a different topic each time: #{topics}"
+    fake.requests.each_with_index do |r, i|
+      t = A::Topics.candidates(topic_view, hands: true)[topics[i]]
+      assert_includes r["user"], "- しばらく動きがない (61 秒)。\n話題: #{t}"
+    end
+    assert_includes fake.requests[0]["system"], "「話題」の 1 つだけについて言ってください"
+    assert_match(/\(lead\)/, @logs.find { |m| m.include?("quiet") })
+    # The hands hidden: the dama topic never comes.
+    fake = A::Fake.new
+    ai, out = ai_with(fake, hands: false)
+    ai.observe("h/t", topic_view, [line("call", 1)])
+    6.times do
+      @now += 61
+      ai.tick
+    end
+    refute fake.requests.any? { |r| r["user"].include?("テンパイ") }
+    refute out.any? { |o| o[2]["topic"] == "dama" }
+  end
+
   def test_async_calls_do_not_hold_the_hub
     fake = A::Fake.new(delay_ms: 300)
     out = Queue.new
@@ -633,7 +707,10 @@ class TestCommentateAI < Minitest::Test
       assert_equal [{ "type" => "text", "text" => sys, "cache_control" => { "type" => "ephemeral" } }], b["system"]
       assert_equal({ "effort" => "low" }, b["output_config"])
       assert_equal [{ "role" => "user", "content" => "卓の様子" }], b["messages"]
-      refute b.key?("thinking")
+      assert_equal({ "type" => "disabled" }, b["thinking"], "no thinking for a line of 40 characters")
+      assert_equal 200, b["max_tokens"], "two short sentences, with room"
+      refute b.key?("temperature")
+      assert_equal "end_turn", said.stop
       assert_match(%r{^POST /v1/messages }, got[:head])
       assert_match(/^x-api-key: sk-ant-test\r?$/i, got[:head])
     end
@@ -641,6 +718,12 @@ class TestCommentateAI < Minitest::Test
     fake_api(200, JSON.generate(answer.merge("stop_reason" => "refusal"))) do |base, _|
       e = assert_raises(AI::TokenError) { AI::Commentator.new("sk-ant-test", model: "m", base_url: base).say(system: "s", user: "u") }
       assert_equal 310, e.tokens["in"]
+    end
+    # Cut at max_tokens: dropped, the stop reason in the message (the log's line).
+    fake_api(200, JSON.generate(answer.merge("stop_reason" => "max_tokens", "usage" => answer["usage"].merge("output_tokens" => 200)))) do |base, _|
+      e = assert_raises(AI::TokenError) { AI::Commentator.new("sk-ant-test", model: "m", base_url: base).say(system: "s", user: "u") }
+      assert_equal "claude: cut (stop_reason max_tokens, out 200)", e.message
+      assert_equal 200, e.tokens["out"], "what was spent is counted"
     end
     fake_api(429, JSON.generate({ "type" => "error", "error" => { "type" => "rate_limit_error", "message" => "x" } })) do |base, _|
       e = assert_raises(AI::Error) { AI::Commentator.new("sk-ant-test", model: "m", base_url: base).say(system: "s", user: "u") }

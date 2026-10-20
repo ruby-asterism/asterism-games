@@ -47,7 +47,11 @@ described ("games 0.10.0" and the like).
   `--ai-model`) adds a short line after the fixed commentary, in the
   voice's tone, marked AI on the page. At most one call every 20 s (8 s
   for a scene bigger than the last one asked about: a win after a riichi),
-  one at a time, only while a page is open. The fixed part of the ask (the role,
+  one at a time, only while a page is open. A quiet minute is about one
+  topic the command picks (the lead, a dama tenpai with the hands shown,
+  the dora, the wall, the last discard). Thinking off, effort low,
+  `max_tokens` 200; a cut answer is dropped with its stop reason in the
+  log. The fixed part of the ask (the role,
   the rules in short, the tone, the length, whether the hands may be
   told) is cached; the table now and the lines that just came follow.
   With `--public` or a page's H the AI gets no hand. An answer whose round

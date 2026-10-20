@@ -382,8 +382,9 @@ module AsterismGames
 
     # A line an AI said (the commentary's one-liners, README "Commentary",
     # "The AI's one-liners"): its text, the tokens as the API counted them
-    # ({"in", "out", "cache_write", "cache_read"}) and how long it took.
-    Said = Struct.new(:text, :tokens, :ms, keyword_init: true)
+    # ({"in", "out", "cache_write", "cache_read"}), how long it took and
+    # why it stopped (the API's stop_reason, e.g. "end_turn").
+    Said = Struct.new(:text, :tokens, :ms, :stop, keyword_init: true)
 
     # Claude asked for a short line of free text (the commentary's
     # one-liners): the fixed part as the system prompt (cached, so the
@@ -391,8 +392,17 @@ module AsterismGames
     # the user's message, the answer the text itself. One try, no retries:
     # a line that comes late is worth nothing. The anthropic gem is
     # loaded here, only when there is a key (it is not a dependency).
+    #
+    # Thinking is off and effort low: the answer is one or two sentences
+    # of 40 characters, and with adaptive thinking Haiku 5.5 spent up to
+    # 600 output tokens and 7 s thinking on an open question (the quiet
+    # scene). Off is accepted at effort low to high; the request has no
+    # tools and no structured output, so none of its limits applies.
+    # MAX_TOKENS fits two sentences of 60 characters (about 100 tokens)
+    # twice over; an answer cut there is dropped, its stop reason logged.
     class Commentator
-      MAX_TOKENS = 1024
+      MAX_TOKENS = 200
+      THINKING = { type: :disabled }.freeze
 
       attr_reader :model
 
@@ -411,6 +421,7 @@ module AsterismGames
           model: @model.to_sym,
           max_tokens: MAX_TOKENS,
           system_: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+          thinking: THINKING,
           output_config: { effort: @effort.to_sym },
           messages: [{ role: "user", content: user }],
           request_options: { timeout: timeout }
@@ -418,10 +429,14 @@ module AsterismGames
         u = msg.usage
         tokens = { "in" => u.input_tokens.to_i, "out" => u.output_tokens.to_i,
                    "cache_write" => u.cache_creation_input_tokens.to_i, "cache_read" => u.cache_read_input_tokens.to_i }
-        raise TokenError.new("claude: refused", tokens) if msg.stop_reason == :refusal
-        raise TokenError.new("claude: cut at max_tokens", tokens) if msg.stop_reason == :max_tokens
+        stop = msg.stop_reason.to_s
+        raise TokenError.new("claude: refused (stop_reason refusal)", tokens) if stop == "refusal"
+        unless %w[end_turn stop_sequence].include?(stop)
+          raise TokenError.new("claude: cut (stop_reason #{stop}, out #{tokens['out']})", tokens)
+        end
         text = msg.content.select { |b| b.type == :text }.map(&:text).join
-        Said.new(text: text, tokens: tokens, ms: ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).round)
+        Said.new(text: text, tokens: tokens, stop: stop,
+                 ms: ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).round)
       rescue ::Anthropic::Errors::APIStatusError => e
         raise Error, "claude: HTTP #{e.status} #{e.class.name.split('::').last}"
       rescue ::Anthropic::Errors::APIConnectionError => e
