@@ -6,6 +6,7 @@ require_relative "mahjong_events"
 require_relative "mahjong_phrases"
 require_relative "server"
 require_relative "voice"
+require_relative "ai_comment"
 
 module AsterismGames
   module Commentate
@@ -23,9 +24,10 @@ module AsterismGames
       # IO for a JSON line per commentary line (--json), or nil. voice: a
       # Voice (VOICEVOX: the lines in its character's tone, each with the
       # URLs of its sound), or nil (the browser's voice; voice_note says
-      # why, for the page).
+      # why, for the page). ai: an AIComment (the AI's one-liners), or nil
+      # (ai_status says why, for the page).
       def initialize(public: false, table: nil, json: nil, rng: Random.new, clock: -> { Time.now }, version: nil,
-                     voice: nil, voice_note: nil)
+                     voice: nil, voice_note: nil, ai: nil, ai_status: nil)
         @public = public
         @want = table
         @json = json
@@ -39,7 +41,14 @@ module AsterismGames
         @tables = {} # id => {"host", "name", "view", "memo", "lines", "at", "gone"}
         @clients = []
         @seq = 0
+        @ai = ai
+        @ai_status = ai_status || { "state" => "off", "note" => "off" }
+        @ai&.attach(deliver: ->(id, text, job) { ai_line(id, text, hands: job["hands"]) },
+                    changed: -> { @lock.synchronize { broadcast_status } },
+                    targets: -> { ai_targets }, hands: -> { hands_for_ai? }, tone: @tone)
       end
+
+      attr_reader :ai
 
       def public? = @public
 
@@ -81,7 +90,59 @@ module AsterismGames
         end
         lines.each { |l| @json.puts(JSON.generate(json_line(l))) } if @json
         @json&.flush
+        @ai&.observe(id, view, lines)
         lines
+      end
+
+      # An AI's one-liner for a table (AIComment, after its fixed lines):
+      # the caption as it came, the speech read as the fixed lines are
+      # (SPEECH_READ, the tiles' names), marked "ai" for the page (said
+      # after the fixed lines, dropped first). hands: whether the AI saw
+      # the hands (then a page that hides them does not show it).
+      def ai_line(id, text, hands: false)
+        speech = MahjongPhrases.reading(text.delete("！").gsub(/\s+/, " ").strip)
+        l = { "type" => "ai", "prio" => 0, "ai" => true, "text" => text, "speech" => speech,
+              "ptext" => hands ? nil : text, "pspeech" => hands ? nil : speech, "clips" => [] }
+        frames = []
+        @lock.synchronize do
+          t = @tables[id] or return nil
+          l["voice"] = @voice.plan(l) if @voice
+          @seq += 1
+          l["id"] = @seq
+          l["at"] = @clock.call.strftime("%H:%M:%S")
+          l["table"] = id
+          t["lines"] << l
+          t["lines"].shift while t["lines"].size > KEEP_LINES
+          frames << Server.frame("line", l)
+          frames.each { |f| each_client(id) { |c| c.push(f) } }
+        end
+        if @json
+          @json.puts(JSON.generate(json_line(l)))
+          @json.flush
+        end
+        l
+      end
+
+      # Every few seconds (the runner): a quiet table may get a one-liner.
+      def tick
+        @ai&.tick
+      end
+
+      # The tables the AI comments on: those a page watches (and with
+      # --json the first one): nobody watching, nothing is spent.
+      def ai_targets
+        @lock.synchronize do
+          ids = @clients.map(&:table).compact
+          ids << default_table if @json && default_table
+          ids.uniq
+        end
+      end
+
+      # Whether the AI may see the hands: not with --public, nor while a
+      # page hides them (H).
+      def hands_for_ai?
+        return false if @public
+        @lock.synchronize { @clients.none? { |c| c.respond_to?(:hide) && c.hide } }
       end
 
       # The host of a table left the network (Asterism's on_leave): the pages
@@ -130,6 +191,7 @@ module AsterismGames
 
       def status
         { "public" => @public, "version" => @version, "want" => @want, "voice" => voice_status,
+          "ai" => @ai ? @ai.status : @ai_status,
           "tables" => @tables.sort.map { |id, t| { "id" => id, "name" => t["name"], "host" => t["host"], "gone" => t["gone"] ? true : false } } }
       end
 
@@ -191,7 +253,9 @@ module AsterismGames
       end
 
       def json_line(l)
-        { "at" => l["at"], "table" => l["table"], "type" => l["type"], "prio" => l["prio"], "text" => l["text"] }
+        out = { "at" => l["at"], "table" => l["table"], "type" => l["type"], "prio" => l["prio"], "text" => l["text"] }
+        out["ai"] = true if l["ai"]
+        out
       end
     end
 
@@ -209,8 +273,10 @@ module AsterismGames
         out.sync = true if out.respond_to?(:sync=)
         info = opts[:json] ? err : out
         voice, note = start_voice(opts, info)
+        ai, ai_status = AIComment.from_options(opts, log: ->(m) { info.puts "commentate: #{m}" })
         hub = MahjongHub.new(public: opts[:public], table: table_filter(opts), json: opts[:json] ? out : nil,
-                             version: AsterismGames::VERSION, voice: voice, voice_note: note)
+                             version: AsterismGames::VERSION, voice: voice, voice_note: note, ai: ai,
+                             ai_status: ai_status)
         server = Server.new(hub, port: opts[:port], log: ->(m) { err.puts("commentate: #{m}") }).start
         info.puts "commentate: #{server.url} (127.0.0.1 only; Ctrl-C quits)"
         info.puts "commentate: hands hidden (--public)" if opts[:public]
@@ -231,11 +297,15 @@ module AsterismGames
           end
           stop = Thread::Queue.new
           %w[INT TERM].each { |s| trap(s) { stop << true } }
-          hub.check_stale(STALE_S) until stop.pop(timeout: 2)
+          until stop.pop(timeout: 2)
+            hub.check_stale(STALE_S)
+            hub.tick
+          end
         end
       ensure
         server&.stop
         voice&.stop
+        ai&.stop
       end
 
       # The VOICEVOX voice ([voice, nil]), or [nil, note] when the engine is

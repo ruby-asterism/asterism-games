@@ -41,6 +41,23 @@ described ("games 0.10.0" and the like).
   only (サンマン, 30フ 2ハン), with the words it misreads written out
   (流局, 起家, 跳満: `MahjongPhrases::SPEECH_READ`). No sound is in the gem;
   `net/http` only, no new gem.
+- **The AI's one-liners** (README "Commentary", "The AI's one-liners"):
+  at a riichi, a win, a draw, the lead changing hands, the oorasu, the end
+  and after a quiet minute, Claude (`claude-haiku-5-5` by default,
+  `--ai-model`) adds a short line after the fixed commentary, in the
+  voice's tone, marked AI on the page. At most one call every 20 s, one at
+  a time, only while a page is open. The fixed part of the ask (the role,
+  the rules in short, the tone, the length, whether the hands may be
+  told) is cached; the table now and the lines that just came follow.
+  With `--public` or a page's H the AI gets no hand. An answer whose round
+  or phase is over, or that comes after 15 s, is dropped; on the page an
+  AI's line comes after the fixed ones and goes first when the voice
+  falls behind. The money is counted from the tokens (cache writes and
+  reads too) in `$XDG_STATE_HOME/asterism-games/commentary_ai_usage.json`
+  (`AI::Budget`), shown in the bar, and capped at `--ai-daily-usd`
+  (default 3 USD a day). `ANTHROPIC_API_KEY`; the anthropic gem stays
+  outside the gem's dependencies (loaded only with a key);
+  `ASTERISM_GAMES_AI_FAKE=1` tries it without one. `--ai off` turns it off.
 - The gem holds the page (HTML, JS, CSS) and the two tile sheets
   `tiles_hand.bmp` and `tiles_river.bmp`, copied byte for byte from
   fmruby-core; in the gem they are MIT (`TILES_LICENSE.txt`). The gem's

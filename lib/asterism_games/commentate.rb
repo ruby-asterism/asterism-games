@@ -4,6 +4,7 @@ require_relative "version"
 require_relative "play"
 require_relative "commentate/voicevox"
 require_relative "commentate/voice"
+require_relative "commentate/ai_comment"
 
 module AsterismGames
   # `asterism-games commentate <game>` (README "Commentary"): watches a
@@ -46,6 +47,11 @@ module AsterismGames
                               http://127.0.0.1:50021); not there: the browser's voice
         --speaker NAME        the VOICEVOX character (default %<speaker>s)
         --style NAME          its style (default %<style>s)
+        --ai on|off           the AI's one-liners (default on; they need
+                              ANTHROPIC_API_KEY and the anthropic gem)
+        --ai-model MODEL      the model (default %<ai_model>s)
+        --ai-daily-usd USD    what they may cost a day (default %<ai_usd>.2f); then the
+                              fixed commentary alone
         -h, --help            this text
 
       The page: Space pauses, M turns the voice off and on, H hides the hands.
@@ -55,6 +61,14 @@ module AsterismGames
       ロン, the rounds ...) from WAV files made on this machine at the first
       start, and the rest of each line as it comes. The page shows the credit
       (VOICEVOX:<character>); put it in a stream's description too.
+
+      The AI's one-liners: at the big moments (a riichi, a win, a draw, the
+      lead changing hands, the last round, the end) and after a quiet
+      minute, Claude says a short line after the fixed commentary (at most
+      one call every 20 s, only while a page is open). With the hands hidden
+      (--public, H) it is not told the hands. What it costs is counted in
+      $XDG_STATE_HOME/asterism-games/commentary_ai_usage.json
+      (~/.local/state/... by default); the page shows today's money.
 
       Usage: asterism-games commentate voices --list [--voicevox URL]
              asterism-games commentate voices --make [--voicevox URL] [--speaker NAME] [--style NAME]
@@ -72,7 +86,8 @@ module AsterismGames
 
     def usage
       format(USAGE, games: GAMES.map { |n, text| format("  %-9s %s", n, text) }.join("\n"), port: DEFAULT_PORT,
-                    speaker: DEFAULT_SPEAKER, style: DEFAULT_STYLE)
+                    speaker: DEFAULT_SPEAKER, style: DEFAULT_STYLE, ai_model: AIComment::DEFAULT_MODEL,
+                    ai_usd: AIComment::DEFAULT_DAILY_USD)
     end
 
     def main(argv, out: $stdout, err: $stderr)
@@ -106,7 +121,8 @@ module AsterismGames
       opts = { router: nil, credentials: nil, namespace: nil, table: nil, node: nil, port: DEFAULT_PORT,
                public: false, open: true, json: false, help: false,
                voicevox: env["VOICEVOX_URL"].to_s.empty? ? Voicevox::DEFAULT_URL : env["VOICEVOX_URL"],
-               speaker: DEFAULT_SPEAKER, style: DEFAULT_STYLE }
+               speaker: DEFAULT_SPEAKER, style: DEFAULT_STYLE,
+               ai: true, ai_model: AIComment::DEFAULT_MODEL, ai_daily_usd: AIComment::DEFAULT_DAILY_USD }
       args = args.dup
       until args.empty?
         k = args.shift
@@ -116,6 +132,15 @@ module AsterismGames
           v
         end
         case k
+        when "--ai"
+          v = need.call
+          raise ArgumentError, "--ai takes on or off" unless %w[on off].include?(v)
+          opts[:ai] = v == "on"
+        when "--ai-model" then opts[:ai_model] = need.call
+        when "--ai-daily-usd"
+          v = Float(need.call, exception: false)
+          raise ArgumentError, "--ai-daily-usd takes a number of dollars (0 or more)" unless v&.finite? && v >= 0
+          opts[:ai_daily_usd] = v
         when "--router" then opts[:router] = need.call
         when "--credentials" then opts[:credentials] = need.call
         when "--namespace" then opts[:namespace] = need.call

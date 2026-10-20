@@ -163,7 +163,7 @@ module AsterismGames
       def events(sock, params)
         sock.write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\n" \
                    "Cache-Control: no-cache\r\nConnection: keep-alive\r\nX-Content-Type-Options: nosniff\r\n\r\n")
-        client = Client.new(params["table"])
+        client = Client.new(params["table"], hide: params["hide"] == "1")
         @hub.subscribe(client)
         @hub.hello(client).each { |ev, data| sock.write(Server.frame(ev, data)) }
         loop do
@@ -180,14 +180,16 @@ module AsterismGames
         "event: #{event}\ndata: #{JSON.generate(data)}\n\n"
       end
 
-      # An open page: the table it watches (nil: the hub's choice) and the
-      # frames waiting for it.
+      # An open page: the table it watches (nil: the hub's choice), whether
+      # it hides the hands (H: the AI then gets none), and the frames
+      # waiting for it.
       class Client
-        attr_accessor :table
+        attr_accessor :table, :hide
         attr_reader :queue
 
-        def initialize(table)
+        def initialize(table, hide: false)
           @table = table.to_s.empty? ? nil : table
+          @hide = hide
           @queue = Thread::Queue.new
         end
 

@@ -424,10 +424,13 @@ module AsterismGames
       end
 
       # The speech as a synthesiser should read it: SPEECH_READ, and a tile
-      # name that slipped through (5萬, 赤5筒) read as a player says it.
+      # name that slipped through (5萬, 赤5筒, or an AI's 三萬 / 五筒) read
+      # as a player says it.
+      KANJI_NUM = "一二三四五六七八九"
       def reading(speech)
-        s = speech.to_s.gsub(/(赤)?([0-9])(萬|筒|索)/) do
+        s = speech.to_s.gsub(/(赤)?([0-9#{KANJI_NUM}])(萬|筒|索)/o) do
           red, d, suit = Regexp.last_match.captures
+          d = (KANJI_NUM.index(d) + 1).to_s if KANJI_NUM.include?(d)
           red ||= d == "0"
           d = "5" if d == "0"
           "#{'アカ' if red}#{NUM_READ[d.to_i - 1]}#{SUIT_READ[SUIT_TEXT.key(suit)]}"

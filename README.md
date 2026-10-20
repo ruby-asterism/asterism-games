@@ -1499,9 +1499,12 @@ when it is taken), prints the address and opens it in the browser (macOS
 | `--port N` | the page's port (default 7470) |
 | `--public` | hide the hands: the views sent to the page lose `hand` and `drawn`, and no line tells a hand |
 | `--no-open` | do not open the browser |
-| `--json` | each line of commentary as a JSON line on standard output (`at`, `table`, `type`, `prio`, `text`) |
+| `--json` | each line of commentary as a JSON line on standard output (`at`, `table`, `type`, `prio`, `text`; an AI's line has `type` `ai` and `ai: true`) |
 | `--voicevox URL` | the VOICEVOX engine (default `VOICEVOX_URL`, else `http://127.0.0.1:50021`) |
 | `--speaker NAME`, `--style NAME` | the VOICEVOX character and its style (default `ずんだもん`, `ノーマル`) |
+| `--ai on\|off` | the AI's one-liners (default `on`; they need `ANTHROPIC_API_KEY` and the anthropic gem; "The AI's one-liners") |
+| `--ai-model MODEL` | the model they ask (default `claude-haiku-5-5`) |
+| `--ai-daily-usd USD` | what they may cost a day (default 3); then the fixed commentary alone |
 
 - **The role.** The spectate keys are `asterism/<host>/spectate/<table>/state`.
   On a console's network a `viewer` (Read `asterism/**`) or a `spectator`
@@ -1519,6 +1522,9 @@ when it is taken), prints the address and opens it in the browser (macOS
   **H** hides the hands on that page (backs instead of the tiles, and the
   lines that tell a hand left out). A table that several hosts put is
   chosen in the bar.
+- **The AI's one-liners.** Claude's short lines at the big moments,
+  marked AI, after the fixed ones; the bar shows the model and today's
+  money. "The AI's one-liners" below.
 - **The voice.** One queue on the page says the lines in turn, each
   caption coming up as its voice starts; when the voice falls behind, the
   old small lines are dropped (their captions still come up) and a win or
@@ -1656,6 +1662,79 @@ your character before you publish anything; they can change):
   they cannot be mixed into an MIT package. That is why this gem ships no
   sound: each user makes the files with their own VOICEVOX, and they stay
   on that machine.
+
+### The AI's one-liners
+
+(games 0.19.0) At the big moments of a table Claude adds a short line of
+its own after the fixed commentary, in the same voice and tone (ずんだもん's
+〜なのだ with her voice), marked **AI** in the captions:
+「この待ち、山にまだ残ってるのだ。勝負はここからなのだ！」. It is also a
+small demonstration of an AI watching a table on the network and telling
+what it sees.
+
+```
+export ANTHROPIC_API_KEY=sk-ant-...          # your own key
+gem install anthropic                        # not a dependency of this gem
+asterism-games commentate mahjong            # Claude Haiku, at most 3 USD a day
+asterism-games commentate mahjong --ai-model claude-sonnet-5-5 --ai-daily-usd 1
+asterism-games commentate mahjong --ai off   # the fixed commentary alone
+```
+
+- **The key and the gem.** The key is `ANTHROPIC_API_KEY`; the anthropic
+  gem is loaded only when it is set, and is not a dependency of this gem.
+  Without a key the page's bar says 「AI: off (キーなし)」; with a key and
+  no gem, 「AI: off (anthropic の gem なし)」 and the command says to
+  `gem install anthropic`. `--ai off` turns them off.
+- **The model.** `claude-haiku-5-5` by default (`--ai-model`), asked at
+  low effort, one try with no retries, 8 s at most.
+- **When.** A riichi, a win (a mangan or more counts as bigger), a draw or
+  an abortive draw, the lead changing hands, the last round (オーラス),
+  the end; and a quiet minute in the middle of a round. One call at a
+  time and **at most one every 20 s**: a scene that comes sooner waits
+  (the biggest of those waiting, for 15 s at most) and is let go when its
+  round or phase is over. Calls are made only while a page is open (or
+  with `--json`): nobody watching, nothing is spent. A tonpuu of four CPUs
+  gets one or two a round.
+- **What it is told.** A fixed part, the same to the byte every time and
+  cached (prompt caching: the calls after the first read it at a tenth of
+  the price): the commentator's role, mahjong's rules in short, the tone,
+  the length (40 characters, one or two sentences, the line only: no
+  preamble, quotes or emoji) and whether it may speak of the hands. Then
+  the table now (the round, honba, riichi sticks, the wall, the dora; each
+  seat's name, wind, points, riichi, melds and last discards; with the
+  hands shown, each hand and its waits; a win's yaku and points, the
+  ranks at the end), the scene, the fixed lines that just came, and its
+  own last lines (not to repeat itself).
+- **The hands hidden.** With `--public`, and while a page has **H** on,
+  the AI is not told the hands (nor the waits, nor who is tenpai): it
+  speaks from what everyone can see. A line made while the hands were
+  shown is not shown on a page that hides them.
+- **Late lines are dropped.** An answer that comes when its round or
+  phase is over, or more than 15 s after it was asked, is not said. On
+  the page an AI's line waits behind the fixed lines (its scene's own come
+  first; a round's start waits behind it), and is dropped when a new scene
+  comes before it is said (a riichi, a win, a draw), first when the voice
+  falls behind, and after 40 s in the queue.
+- **The voice.** The caption is the line as it came; the voice reads it
+  through the same readings as the fixed lines (`SPEECH_READ` and the
+  tiles: 三萬 サンマン, 流局 リューキョク).
+- **What it costs.** Counted from the tokens the API reports (input,
+  output, the cache's writes and reads) at the model's published price
+  (Haiku 5.5: 0.10 USD a million input tokens, 0.50 output, 0.125 a cache
+  write, 0.01 a cache read), in
+  `$XDG_STATE_HOME/asterism-games/commentary_ai_usage.json`
+  (`~/.local/state/...` by default; counts and money only, no words). The
+  bar shows today's money and the limit; when today's money reaches
+  `--ai-daily-usd` (default 3 USD) no call is made and the fixed
+  commentary goes on alone; the next day (local date) starts at 0. A
+  call costs about a hundredth of a cent with Haiku (some 1,000 cached
+  tokens, a few hundred new ones, a line out), so a tonpuu costs well
+  under a cent.
+- **Failures** (no answer in time, an error, a refusal) are one line in
+  the command's output and nothing is said; the key and the words are
+  never written out. `ASTERISM_GAMES_AI_FAKE=1` puts a fake in Claude's
+  place (no API is called; its money is counted apart, in
+  `commentary_ai_usage.fake.json`), to try the page without a key.
 
 ## Playing from a program
 

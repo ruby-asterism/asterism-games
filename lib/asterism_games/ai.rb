@@ -380,6 +380,55 @@ module AsterismGames
       end
     end
 
+    # A line an AI said (the commentary's one-liners, README "Commentary",
+    # "The AI's one-liners"): its text, the tokens as the API counted them
+    # ({"in", "out", "cache_write", "cache_read"}) and how long it took.
+    Said = Struct.new(:text, :tokens, :ms, keyword_init: true)
+
+    # Claude asked for a short line of free text (the commentary's
+    # one-liners): the fixed part as the system prompt (cached, so the
+    # calls after the first read it from the cache), the changing part as
+    # the user's message, the answer the text itself. One try, no retries:
+    # a line that comes late is worth nothing. The anthropic gem is
+    # loaded here, only when there is a key (it is not a dependency).
+    class Commentator
+      MAX_TOKENS = 1024
+
+      attr_reader :model
+
+      def initialize(key, model:, effort: "low", base_url: nil)
+        require "anthropic"
+        kw = { api_key: key, max_retries: 0 }
+        kw[:base_url] = base_url if base_url
+        @client = ::Anthropic::Client.new(**kw)
+        @model = model
+        @effort = effort
+      end
+
+      def say(system:, user:, timeout: 8)
+        t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        msg = @client.messages.create(
+          model: @model.to_sym,
+          max_tokens: MAX_TOKENS,
+          system_: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+          output_config: { effort: @effort.to_sym },
+          messages: [{ role: "user", content: user }],
+          request_options: { timeout: timeout }
+        )
+        u = msg.usage
+        tokens = { "in" => u.input_tokens.to_i, "out" => u.output_tokens.to_i,
+                   "cache_write" => u.cache_creation_input_tokens.to_i, "cache_read" => u.cache_read_input_tokens.to_i }
+        raise TokenError.new("claude: refused", tokens) if msg.stop_reason == :refusal
+        raise TokenError.new("claude: cut at max_tokens", tokens) if msg.stop_reason == :max_tokens
+        text = msg.content.select { |b| b.type == :text }.map(&:text).join
+        Said.new(text: text, tokens: tokens, ms: ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).round)
+      rescue ::Anthropic::Errors::APIStatusError => e
+        raise Error, "claude: HTTP #{e.status} #{e.class.name.split('::').last}"
+      rescue ::Anthropic::Errors::APIConnectionError => e
+        raise Error, "claude: #{e.class.name.split('::').last}"
+      end
+    end
+
     # A failure after the API counted tokens (they still cost).
     class TokenError < Error
       attr_reader :tokens
