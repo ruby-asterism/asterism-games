@@ -161,7 +161,9 @@ class TestMahjongWatch < Minitest::Test
 
   def test_everybody_leaving_stops_it_unrecorded
     lines = []
-    t = table
+    # CPUs that take a second a move: with none, a tonpuu can end (and be
+    # recorded) within the test's few ticks of 200 steps each.
+    t = table(cpu_ms: 1000)
     t.instance_variable_set(:@log, ->(m) { lines << m })
     a = member(t, "a")
     b = member(t, "b")

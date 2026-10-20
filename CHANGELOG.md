@@ -3,6 +3,13 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
+## 0.20.1
+
+- `play mahjong`: an owner's command queued with `--commands` (`watch`,
+  `start`, `cpu` ...) while someone else holds the owner's role now says
+  so (「卓の主ではありません。卓の主の役が回ってくるのを待っています」)
+  instead of asking for a seat: since 0.20.0 an owner may be unseated.
+
 ## 0.20.0
 
 - **Watch games** (README "Watch games"): the owner of a mahjong table

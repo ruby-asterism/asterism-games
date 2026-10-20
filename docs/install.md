@@ -272,6 +272,10 @@ on from the same turn after a few seconds, and the players' screens come
 back to it by themselves. To go back, run it with the old version (it
 prints it); the old image stays (`docker image ls ghcr.io/ruby-asterism/asterism-games`).
 
+### From 0.20.0 to 0.20.1 (a message of play)
+
+Nothing to do on a server: only `asterism-games play`'s message changes.
+
 ### From 0.19.1 to 0.20.0 (watch games)
 
 `./update.sh 0.20.0` (or `--when-idle 0.20.0`). Nothing in `.env`. The

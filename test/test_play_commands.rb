@@ -115,10 +115,26 @@ class TestPlayCommands < Minitest::Test
     c.queue_commands(%w[sit cpu start])
     assert c.view["me"] >= 0, "seated"
     assert_equal "wait", c.view["st"]
-    assert_match(/--commands: cpu \(卓の主を待っています\)/, out.string)
+    assert_match(/--commands: cpu \(卓の主ではありません。卓の主の役が回ってくるのを待っています\)/, out.string)
     bob.stand(btok) # the role passes to Alice
     c.refresh
     assert_equal "play", c.view["st"]
+  ensure
+    c&.stop
+  end
+
+  # Unseated and not the owner (games 0.20.0): watch waits for the role,
+  # and the message does not ask for a seat.
+  def test_watch_waits_for_the_role_without_asking_for_a_seat
+    t = human_table
+    bob = Remote.new(t, "wasm-bbbbbb")
+    bob.join("Bob")
+    alice = Remote.new(t, "wasm-aaaaaa")
+    out = StringIO.new
+    c = client(alice, out)
+    c.queue_commands(%w[watch])
+    assert_match(/--commands: watch \(卓の主ではありません。/, out.string)
+    refute_match(/席に着く/, out.string)
   ensure
     c&.stop
   end

@@ -327,7 +327,9 @@ module AsterismGames
         return "待ち合わせを待っています" unless v["st"] == "wait"
         return nil unless OWNER_WORDS.include?(w)
         unless MahjongText.owner?(v)
-          return v["me"].to_i >= 0 ? "卓の主を待っています" : "席に着くのを待っています"
+          # Seated or not, the role is someone else's (since games 0.20.0
+          # an owner may be unseated): wait for it to come here.
+          return "卓の主ではありません。卓の主の役が回ってくるのを待っています"
         end
         return "4 席がそろうのを待っています" if %w[start watch].include?(w) && (v["sk"] || [0]).any?(&:zero?)
         nil
