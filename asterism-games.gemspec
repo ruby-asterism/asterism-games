@@ -33,8 +33,10 @@ Gem::Specification.new do |s|
   # checkout (app/, deploy/, credentials, var/) can slip in.
   # The commentary page's files (README "Commentary"): its HTML, script
   # and style, and the two tile sheets of Family mruby's mahjong app with
-  # their note (MIT here, TILES_LICENSE.txt).
+  # their note (MIT here, TILES_LICENSE.txt); the list of the fixed
+  # phrases of the voice (mahjong_voice.yml: words only, no sound).
   s.files = Dir["lib/asterism_games.rb", "lib/asterism_games/**/*.rb"] +
+            Dir["lib/asterism_games/commentate/*.yml"] +
             Dir["lib/asterism_games/commentate/assets/*.{html,js,css,bmp,txt}"] +
             ["bin/asterism-games", "VERSION", "README.md", "CHANGELOG.md", "LICENSE"]
   s.require_paths = ["lib"]

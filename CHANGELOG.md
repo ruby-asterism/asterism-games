@@ -21,6 +21,26 @@ described ("games 0.10.0" and the like).
   standard output; `--table`, `--namespace` (a room's tables), `--port`,
   `--no-open`. It only reads (never joins or calls a table) and goes on
   when the host leaves and comes back.
+- **The voice** (README "Commentary", "The voice"): the commentary speaks
+  with VOICEVOX on this machine (`--voicevox URL`, `VOICEVOX_URL`, default
+  `http://127.0.0.1:50021`), by default as ずんだもん (`--speaker`,
+  `--style`; the numbers looked up by name in `/speakers`). The fixed
+  phrases (riichi, the calls, ron and tsumo, the rounds, 満貫 to 役満, ...)
+  are WAV files made by the user's own engine from the gem's list
+  (`commentate/mahjong_voice.yml`) into
+  `$XDG_CACHE_HOME/asterism-games/voices/<speaker>-<style>/`, named by the
+  phrasing's digest (`asterism-games commentate voices --make`, and the
+  missing ones at the start; `voices --list` lists the characters). The
+  rest of each line is synthesised as it comes and served from the
+  command's web server, kept in a bounded cache. The page says it all in
+  one queue (the fixed phrase, then the line; captions as the voice
+  starts; the old small lines dropped first) and shows the credit
+  `VOICEVOX:ずんだもん`. ずんだもん's lines are in her tone (〜なのだ),
+  kept as a tone of the phrasings (`MahjongPhrases::TONES`). Without an
+  engine the browser's voice reads as before. The engine gets the speech
+  only (サンマン, 30フ 2ハン), with the words it misreads written out
+  (流局, 起家, 跳満: `MahjongPhrases::SPEECH_READ`). No sound is in the gem;
+  `net/http` only, no new gem.
 - The gem holds the page (HTML, JS, CSS) and the two tile sheets
   `tiles_hand.bmp` and `tiles_river.bmp`, copied byte for byte from
   fmruby-core; in the gem they are MIT (`TILES_LICENSE.txt`). The gem's

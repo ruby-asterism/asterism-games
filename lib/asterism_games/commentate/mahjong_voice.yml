@@ -1,0 +1,93 @@
+# The fixed phrases of the mahjong commentary (README "Commentary", "The
+# voice"): played at once as WAV files while the rest of a line is being
+# synthesised. No sound is in the gem: `asterism-games commentate voices
+# --make` (and the commentary at its start) has this machine's VOICEVOX
+# say each phrase into ~/.cache/asterism-games/voices/<speaker>-<style>/.
+#
+#   <key>:
+#     word: the word as the line's own speech begins with it; the line
+#           leaves it out when the phrase was played before it
+#     plain: [the phrasings in a plain tone]        (one is chosen at random)
+#     zundamon: [the same in ずんだもん's tone (〜なのだ)]
+#
+# A tone without phrasings of its own uses plain's. The phrasings are
+# written as they are read (トン1局, not 東1局). Change a phrasing and its
+# file is made again (the files are named by the phrasing's digest).
+start:
+  plain: [実況を始めます。]
+  zundamon: [実況を始めるのだ！]
+game_start:
+  word: 対局開始
+  plain: [対局開始！]
+  zundamon: [対局開始なのだ！]
+oorasu:
+  word: オーラス
+  plain: [オーラス！]
+  zundamon: [オーラスなのだ！]
+round_east1: { word: トン1局, plain: [トン1局。], zundamon: [トン1局なのだ。] }
+round_east2: { word: トン2局, plain: [トン2局。], zundamon: [トン2局なのだ。] }
+round_east3: { word: トン3局, plain: [トン3局。], zundamon: [トン3局なのだ。] }
+round_east4: { word: トン4局, plain: [トン4局。], zundamon: [トン4局なのだ。] }
+round_south1: { word: ナン1局, plain: [ナン1局。], zundamon: [ナン1局なのだ。] }
+round_south2: { word: ナン2局, plain: [ナン2局。], zundamon: [ナン2局なのだ。] }
+round_south3: { word: ナン3局, plain: [ナン3局。], zundamon: [ナン3局なのだ。] }
+round_south4: { word: ナン4局, plain: [ナン4局。], zundamon: [ナン4局なのだ。] }
+round_west1: { word: シャー1局, plain: [シャー1局。], zundamon: [シャー1局なのだ。] }
+round_west2: { word: シャー2局, plain: [シャー2局。], zundamon: [シャー2局なのだ。] }
+round_west3: { word: シャー3局, plain: [シャー3局。], zundamon: [シャー3局なのだ。] }
+round_west4: { word: シャー4局, plain: [シャー4局。], zundamon: [シャー4局なのだ。] }
+riichi:
+  word: リーチ
+  plain: [リーチ！]
+  zundamon: [リーチなのだ！, リーチしたのだ！]
+chi:
+  word: チー
+  plain: [チー！]
+  zundamon: [チーなのだ！]
+pon:
+  word: ポン
+  plain: [ポン！]
+  zundamon: [ポンなのだ！]
+kan:
+  word: カン
+  plain: [カン！]
+  zundamon: [カンなのだ！]
+ron:
+  word: ロン
+  plain: [ロン！]
+  zundamon: [ロンなのだ！]
+tsumo:
+  word: ツモ
+  plain: [ツモ！]
+  zundamon: [ツモなのだ！]
+mangan:
+  plain: [満貫！]
+  zundamon: [満貫なのだ！]
+haneman:
+  plain: [跳満！]
+  zundamon: [跳満なのだ！]
+baiman:
+  plain: [倍満！]
+  zundamon: [倍満なのだ！]
+sanbaiman:
+  plain: [三倍満！]
+  zundamon: [三倍満なのだ！]
+yakuman:
+  plain: [役満！]
+  zundamon: [役満なのだ！, 役満が出たのだ！]
+ryuukyoku:
+  word: 流局
+  plain: [流局。]
+  zundamon: [流局なのだ。]
+abort:
+  word: 途中流局
+  plain: [途中流局。]
+  zundamon: [途中流局なのだ。]
+lead_change:
+  word: 逆転
+  plain: [逆転！]
+  zundamon: [逆転なのだ！]
+game_over:
+  word: 終局
+  plain: [終局！]
+  zundamon: [終局なのだ！]

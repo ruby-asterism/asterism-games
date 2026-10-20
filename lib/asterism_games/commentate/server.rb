@@ -11,7 +11,11 @@ module AsterismGames
     # and /events, a stream of Server-Sent Events that pushes the table and
     # the commentary to every open page. Nothing else: no files by name, no
     # POST, and a Host header that is not this machine is refused (a page
-    # elsewhere cannot reach in through a name that points here).
+    # elsewhere cannot reach in through a name that points here). With a
+    # VOICEVOX voice (the hub's voice), also the fixed phrases'
+    # files (/clip/<digest>.wav, only those of the list) and the lines'
+    # sound (/voice/<digest>.wav, only the texts the hub registered:
+    # never a text a page sends).
     class Server
       ASSETS = File.expand_path("assets", __dir__)
       FILES = {
@@ -23,6 +27,8 @@ module AsterismGames
         "/tiles_river.bmp" => ["tiles_river.bmp", "image/bmp"],
         "/TILES_LICENSE.txt" => ["TILES_LICENSE.txt", "text/plain; charset=utf-8"]
       }.freeze
+      CLIP = %r{\A/clip/([0-9a-f]{16}\.wav)\z}
+      LIVE = %r{\A/voice/([0-9a-f]{32}\.wav)\z}
       LOCAL_HOSTS = %w[127.0.0.1 localhost].freeze
       PING_S = 15
       HEAD_LIMIT = 8192
@@ -86,6 +92,12 @@ module AsterismGames
         path, query = target.split("?", 2)
         if path == "/events"
           events(sock, params(query))
+        elsif (m = path.match(CLIP) || path.match(LIVE))
+          voice = @hub.respond_to?(:voice) ? @hub.voice : nil
+          body = voice && (path.start_with?("/clip/") ? voice.clip(m[1]) : voice.wav(m[1]))
+          return respond(sock, 404, "text/plain", "not found\n") unless body
+          respond(sock, 200, "audio/wav", method == "HEAD" ? "" : body, "Cache-Control" => "max-age=600",
+                                                                "Content-Length" => body.bytesize.to_s)
         elsif (f = FILES[path])
           body = File.binread(File.join(ASSETS, f[0]))
           respond(sock, 200, f[1], method == "HEAD" ? "" : body, "Cache-Control" => "no-cache",

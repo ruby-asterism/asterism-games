@@ -19,7 +19,7 @@ class TestGem < Minitest::Test
     files = spec.files
     files.each do |f|
       next assert_match(%r{\Alib/asterism_games/play/mahjong(_text|_screen)?\.rb\z}, f) if f.include?("/play/mahjong")
-      next assert_match(%r{\Alib/asterism_games/commentate/(mahjong(_events|_phrases)?\.rb|assets/[a-z_]+\.(html|js|css)|assets/tiles_(hand|river)\.bmp|assets/TILES_LICENSE\.txt)\z}, f) if f.include?("/commentate/") && f.match?(/mahjong|tiles|assets/i)
+      next assert_match(%r{\Alib/asterism_games/commentate/(mahjong(_events|_phrases)?\.rb|mahjong_voice\.yml|assets/[a-z_]+\.(html|js|css)|assets/tiles_(hand|river)\.bmp|assets/TILES_LICENSE\.txt)\z}, f) if f.include?("/commentate/") && f.match?(/mahjong|tiles|assets/i)
 
       refute_match(%r{mahjong|riichi|\Aapp/|\Adeploy/|\Aconfig/|\Atest/|\Avar/|\Avendor/|credentials}i, f, "#{f} is not the gem's")
       refute_match(/\.(tar|pem|key|crt|p12|env)\z|\.env\b|secret|token/i, f, "#{f} looks like a key")
@@ -29,6 +29,10 @@ class TestGem < Minitest::Test
     assert_equal lib.sort, files.grep(%r{\Alib/.*\.rb\z}).sort, "every file of lib/ is in the gem"
     assets = Dir.glob("lib/asterism_games/commentate/assets/*", base: ROOT)
     assert_equal assets.sort, files.grep(%r{\Alib/asterism_games/commentate/assets/}).sort, "every file of the page is in the gem"
+    # The voice: the list of the fixed phrases, never a sound (README
+    # "Commentary", "The voice": made on each machine by its VOICEVOX).
+    assert_includes files, "lib/asterism_games/commentate/mahjong_voice.yml"
+    assert_empty files.grep(/\.(wav|mp3|ogg|flac)\z/i), "no voice in the gem"
     assert_includes files, "lib/asterism_games/othello.rb"
     assert_includes files, "lib/asterism_games/board.rb"
     assert_includes files, "VERSION", "version.rb reads it"

@@ -5,6 +5,7 @@ require "monitor"
 require_relative "mahjong_events"
 require_relative "mahjong_phrases"
 require_relative "server"
+require_relative "voice"
 
 module AsterismGames
   module Commentate
@@ -19,14 +20,21 @@ module AsterismGames
 
       # public: hide the hands from everything that leaves this process (the
       # views lose hand and drawn, the lines are the public ones). json: an
-      # IO for a JSON line per commentary line (--json), or nil.
-      def initialize(public: false, table: nil, json: nil, rng: Random.new, clock: -> { Time.now }, version: nil)
+      # IO for a JSON line per commentary line (--json), or nil. voice: a
+      # Voice (VOICEVOX: the lines in its character's tone, each with the
+      # URLs of its sound), or nil (the browser's voice; voice_note says
+      # why, for the page).
+      def initialize(public: false, table: nil, json: nil, rng: Random.new, clock: -> { Time.now }, version: nil,
+                     voice: nil, voice_note: nil)
         @public = public
         @want = table
         @json = json
         @rng = rng
         @clock = clock
         @version = version
+        @voice = voice
+        @voice_note = voice_note
+        @tone = voice ? voice.tone : "plain"
         @lock = Monitor.new
         @tables = {} # id => {"host", "name", "view", "memo", "lines", "at", "gone"}
         @clients = []
@@ -52,9 +60,10 @@ module AsterismGames
           t["at"] = @clock.call
           evs, t["memo"] = MahjongEvents.diff(t["view"], view, t["memo"])
           evs.each do |ev|
-            l = MahjongPhrases.line(ev, view, @rng)
+            l = MahjongPhrases.line(ev, view, @rng, tone: @tone)
             l = public_line(l) if @public
             next unless l
+            l["voice"] = @voice.plan(l, @rng) if @voice
             @seq += 1
             l["id"] = @seq
             l["at"] = @clock.call.strftime("%H:%M:%S")
@@ -120,11 +129,18 @@ module AsterismGames
       end
 
       def status
-        { "public" => @public, "version" => @version, "want" => @want,
+        { "public" => @public, "version" => @version, "want" => @want, "voice" => voice_status,
           "tables" => @tables.sort.map { |id, t| { "id" => id, "name" => t["name"], "host" => t["host"], "gone" => t["gone"] ? true : false } } }
       end
 
+      attr_reader :voice
+
       private
+
+      def voice_status
+        return @voice.status if @voice
+        { "engine" => "browser", "note" => @voice_note }
+      end
 
       def want?(id) = @want && id.end_with?(@want)
 
@@ -191,10 +207,11 @@ module AsterismGames
         require "asterism"
         # A pipe or a file (--json to another tool) gets each line at once.
         out.sync = true if out.respond_to?(:sync=)
-        hub = MahjongHub.new(public: opts[:public], table: table_filter(opts), json: opts[:json] ? out : nil,
-                             version: AsterismGames::VERSION)
-        server = Server.new(hub, port: opts[:port], log: ->(m) { err.puts("commentate: #{m}") }).start
         info = opts[:json] ? err : out
+        voice, note = start_voice(opts, info)
+        hub = MahjongHub.new(public: opts[:public], table: table_filter(opts), json: opts[:json] ? out : nil,
+                             version: AsterismGames::VERSION, voice: voice, voice_note: note)
+        server = Server.new(hub, port: opts[:port], log: ->(m) { err.puts("commentate: #{m}") }).start
         info.puts "commentate: #{server.url} (127.0.0.1 only; Ctrl-C quits)"
         info.puts "commentate: hands hidden (--public)" if opts[:public]
         open_browser(server.url, err) if opts[:open]
@@ -218,6 +235,25 @@ module AsterismGames
         end
       ensure
         server&.stop
+        voice&.stop
+      end
+
+      # The VOICEVOX voice ([voice, nil]), or [nil, note] when the engine is
+      # not there (the browser's voice reads). Voicevox::NotFound (no such
+      # character or style) goes up: the command says what there is.
+      def start_voice(opts, info, root: ClipBank.cache_root)
+        url = opts[:voicevox] || Voicevox::DEFAULT_URL
+        log = ->(m) { info.puts "commentate: #{m}" }
+        voice = Voice.connect(url: url, speaker: opts[:speaker] || DEFAULT_SPEAKER, style: opts[:style] || DEFAULT_STYLE,
+                              root: root, log: log)
+        unless voice
+          info.puts "commentate: no VOICEVOX at #{url}: the browser's voice reads (README \"Commentary\", \"The voice\")"
+          return [nil, "missing"]
+        end
+        info.puts "commentate: VOICEVOX #{voice.engine_version} at #{url}: #{voice.speaker} (#{voice.style}, #{voice.id}), " \
+                  "fixed phrases in #{voice.bank.dir}; credit: #{voice.credit}"
+        voice.make_missing_async
+        [voice, nil]
       end
 
       def connect(opts, err, &blk)

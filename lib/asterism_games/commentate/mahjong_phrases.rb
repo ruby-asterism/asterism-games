@@ -7,14 +7,22 @@ module AsterismGames
     # things (東1局, 本場, 供託, ドラ, リーチ, ポン). Pure: the view gives the
     # names, rng (anything with rand(n)) chooses among the phrasings.
     #
-    #   line = MahjongPhrases.line(event, view, rng)
-    #   # => {"type", "prio", "text", "speech", "ptext", "pspeech"}
+    #   line = MahjongPhrases.line(event, view, rng, tone: "zundamon")
+    #   # => {"type", "prio", "text", "speech", "ptext", "pspeech", "clips"}
     #
     # "text" is the caption, "speech" the same for a voice (the tiles and
     # the yaku as they are read: サンマン, リーチ). "ptext" / "pspeech" are
     # the line with the hands hidden: the same when the event does not
     # touch a hand, a shorter one when part of it does (a riichi's waits),
-    # nil when all of it does (a tenpai): then nothing is said.
+    # nil when all of it does (a tenpai): then nothing is said. "clips" are
+    # the keys of the fixed phrases (mahjong_voice.yml) a voice plays
+    # before the line: never one that tells a hand.
+    #
+    # The tone (TONES) is the character's way of speaking: the plain one,
+    # and ずんだもん's (〜なのだ) when the voice is VOICEVOX's ずんだもん. A
+    # tone has phrasings of its own for every event (the same number as
+    # the plain ones, so one choice gives the same line in both), and a
+    # few words for an AI asked to speak in it (C3).
     module MahjongPhrases
       WIND_TEXT = { "east" => "東", "south" => "南", "west" => "西", "north" => "北" }.freeze
       WIND_READ = { "east" => "トン", "south" => "ナン", "west" => "シャー", "north" => "ペー" }.freeze
@@ -142,25 +150,189 @@ module AsterismGames
         ]
       }.freeze
 
+      # ずんだもん's phrasings (TONES): the same events, the same number of
+      # phrasings, the endings 〜なのだ / 〜のだ.
+      ZUNDAMON_PHRASES = {
+        "hello" => ["%{status_line}"],
+        "round_start" => [
+          "%{round}なのだ。親は%{dealer}、ドラは%{dora}なのだ。",
+          "さあ%{round}が始まるのだ！ 親は%{dealer}、ドラ%{dora}なのだ。",
+          "%{round}、%{dealer}の親番なのだ。ドラは%{dora}なのだ。"
+        ],
+        "round_start_game" => [
+          "対局開始なのだ！ 東1局、起家は%{dealer}。ドラは%{dora}なのだ。",
+          "さあ始まったのだ！ 東1局、親は%{dealer}。ドラは%{dora}なのだ。"
+        ],
+        "round_start_oorasu" => [
+          "いよいよオーラスなのだ！ %{round}、親は%{dealer}。トップは%{leader}、%{lead_score}点なのだ。",
+          "最後の局、オーラスなのだ！ %{round}。%{leader}が%{lead_score}点でトップ、逃げ切れるのか。",
+          "オーラスなのだ！ %{round}。この一局で決まるのだ。トップは%{leader}なのだ。"
+        ],
+        "round_start_oorasu_again" => [
+          "オーラス続行なのだ、%{round}。親は%{dealer}なのだ。",
+          "まだ終わらないのだ！ %{round}。親の%{dealer}が粘るのだ。"
+        ],
+        "dora_discard" => [
+          "%{name}、%{tile}を切ったのだ。",
+          "%{name}からドラの%{tile}なのだ。",
+          "%{name}、%{tile}を手放したのだ。"
+        ],
+        "red_discard" => [
+          "%{name}、赤の%{plain}を切ったのだ。",
+          "%{name}から赤ドラ、%{plain}なのだ。"
+        ],
+        "call" => [
+          "%{name}、%{call}なのだ！ %{called}。",
+          "%{name}が%{called}を%{call}したのだ。",
+          "%{call}なのだ！ %{name}、仕掛けたのだ。"
+        ],
+        "kan" => [
+          "%{name}、%{kind}なのだ！",
+          "%{kind}なのだ。%{name}がカンをしたのだ。"
+        ],
+        "riichi" => [
+          "%{name}、リーチなのだ！ 待ちは%{waits}なのだ。",
+          "リーチが入ったのだ、%{name}。待ちは%{waits}なのだ。",
+          "%{name}から%{turn}巡目のリーチなのだ！ %{waits}待ちなのだ。"
+        ],
+        "riichi_public" => [
+          "%{name}、リーチなのだ！",
+          "リーチが入ったのだ、%{name}。",
+          "%{name}から%{turn}巡目のリーチなのだ！"
+        ],
+        "new_dora" => [
+          "新ドラは%{dora}なのだ。",
+          "カンドラがめくれて、ドラは%{dora}なのだ。"
+        ],
+        "wall" => [
+          "残り%{left}枚なのだ。",
+          "山は残り%{left}枚になったのだ。"
+        ],
+        "tenpai" => [
+          "%{name}、テンパイなのだ。待ちは%{waits}なのだ。",
+          "%{name}の手がテンパイしたのだ。%{waits}待ちなのだ。",
+          "%{name}、静かにテンパイなのだ。%{waits}待ちなのだ。"
+        ],
+        "win" => [
+          "%{by_word}なのだ！ %{name}、%{yaku}。%{points}なのだ。",
+          "%{name}の%{by_word}なのだ！ %{yaku}で%{points}なのだ。",
+          "%{name}、%{from_part}%{by_word}なのだ。%{yaku}、%{points}なのだ。"
+        ],
+        "win_strong" => [
+          "%{by_word}なのだ！！ %{name}、%{level}なのだ！ %{yaku}、%{points}なのだ！",
+          "出たのだ、%{level}！ %{name}の%{by_word}、%{yaku}。%{points}なのだ！",
+          "大きいのだ！ %{name}、%{from_part}%{by_word}で%{level}なのだ！ %{yaku}、%{points}なのだ！"
+        ],
+        "draw" => [
+          "流局なのだ。%{tenpai_line}",
+          "ここで流局なのだ。%{tenpai_line}"
+        ],
+        "abort" => [
+          "途中流局なのだ、%{kind}。",
+          "%{kind}で流局なのだ。"
+        ],
+        "lead_change" => [
+          "逆転なのだ！ %{name}がトップに立ったのだ、%{score}点。",
+          "トップが入れ替わるのだ！ %{name}、%{score}点でトップなのだ。",
+          "ここで逆転、%{name}がトップなのだ！"
+        ],
+        "game_over" => [
+          "終局なのだ！ トップは%{top}、%{top_score}点。%{ranks}",
+          "対局終了なのだ。%{top}が%{top_score}点でトップなのだ。%{ranks}"
+        ]
+      }.freeze
+
+      # The characters' tones: which VOICEVOX characters speak in each, its
+      # phrasings, and how to ask an AI to speak so (C3). Any other
+      # character, and the browser's voice, speak plain.
+      TONES = {
+        "plain" => {
+          "speakers" => [],
+          "phrases" => PHRASES,
+          "prompt" => "落ち着いた実況の口調で、です・ます調で話す。"
+        },
+        "zundamon" => {
+          "speakers" => ["ずんだもん"],
+          "phrases" => ZUNDAMON_PHRASES,
+          "prompt" => "ずんだもんの口調で話す。語尾は「〜なのだ」「〜のだ」、一人称は「ボク」。明るく元気に、短く。"
+        }
+      }.freeze
+
+      # Words a speech synthesiser reads wrongly (VOICEVOX: 流局 ナガレキョク,
+      # 起家 オコリカ, 跳満 トベミツル, 三萬 サンヨロズ): the speech and the
+      # fixed phrases are read through this (reading), longest first. The
+      # tiles and the yaku are read by their own tables already; these are
+      # the words of the phrasings and what could slip through. 本場, 供託,
+      # 巡目, 親番, 終局, 逆転 are read rightly as they are (checked on
+      # VOICEVOX 0.25.0) and stay kanji.
+      SPEECH_READ = {
+        "途中流局" => "途中リューキョク", "流局" => "リューキョク", "起家" => "チーチャ", "東1局" => "トン1局",
+        "三倍満" => "サンバイマン", "跳満" => "ハネマン", "倍満" => "バイマン", "満貫" => "マンガン", "役満" => "ヤクマン",
+        "立直" => "リーチ", "一発" => "イッパツ", "裏ドラ" => "ウラドラ", "赤ドラ" => "アカドラ",
+        "符" => "フ", "翻" => "ハン", "暗槓" => "アンカン", "加槓" => "カカン",
+        "大明槓" => "ダイミンカン", "聴牌" => "テンパイ", "和了" => "ホーラ"
+      }.freeze
+      SPEECH_READ_RE = Regexp.union(SPEECH_READ.keys.sort_by { |k| -k.size })
+
+      LEVEL_CLIP = { "満貫" => "mangan", "跳満" => "haneman", "倍満" => "baiman", "三倍満" => "sanbaiman",
+                     "役満" => "yakuman" }.freeze
+
       module_function
 
+      # The tone of a VOICEVOX character (nil: the browser's voice).
+      def tone_for(speaker)
+        TONES.find { |_, t| t["speakers"].include?(speaker) }&.first || "plain"
+      end
+
+      def phrases(tone) = (TONES[tone] || TONES["plain"])["phrases"]
+
+      # The keys of the fixed phrases played before the line of ev
+      # (mahjong_voice.yml): the round's name, riichi, the call, ron or
+      # tsumo and the level, ... Nothing for what tells a hand (a tenpai)
+      # or for the small things (a discard, the wall).
+      def clips(ev)
+        case ev["type"]
+        when "round_start"
+          return ["oorasu"] if ev["oorasu"]
+          return ["game_start"] if ev["game_start"]
+          r = ev["round"]
+          r.is_a?(Hash) && r["wind"] && r["number"] ? ["round_#{r['wind']}#{r['number']}"] : []
+        when "riichi" then ["riichi"]
+        when "call"
+          c = ev["call"].to_s
+          return ["kan"] if c.end_with?("kan")
+          %w[chi pon].include?(c) ? [c] : []
+        when "win"
+          out = [ev["by"] == "ron" ? "ron" : "tsumo"]
+          out << LEVEL_CLIP[ev["level"]] if LEVEL_CLIP[ev["level"]]
+          out
+        when "draw" then ["ryuukyoku"]
+        when "abort" then ["abort"]
+        when "lead_change" then ["lead_change"]
+        when "game_over" then ["game_over"]
+        else []
+        end
+      end
+
       # The line of an event in view (the view the event came from).
-      def line(ev, view, rng = Random.new)
+      def line(ev, view, rng = Random.new, tone: "plain")
         key, pkey = keys_of(ev)
-        vals = values(ev, view)
-        i = rng.rand(PHRASES.fetch(key).size)
-        text, speech = fill(PHRASES[key][i], vals)
+        book = phrases(tone)
+        vals = values(ev, view, tone)
+        i = rng.rand(book.fetch(key).size)
+        text, speech = fill(book[key][i], vals)
         out = { "type" => ev["type"], "prio" => ev["prio"].to_i, "text" => text, "speech" => speech }
         if ev["hands"]
           out["ptext"] = nil
           out["pspeech"] = nil
         elsif pkey
-          pt = PHRASES.fetch(pkey)
+          pt = book.fetch(pkey)
           out["ptext"], out["pspeech"] = fill(pt[i % pt.size], vals)
         else
           out["ptext"] = text
           out["pspeech"] = speech
         end
+        out["clips"] = clips(ev)
         out
       end
 
@@ -181,7 +353,8 @@ module AsterismGames
       end
 
       # The values of the templates: {key => [caption, speech]}.
-      def values(ev, view)
+      def values(ev, view, tone = "plain")
+        z = tone == "zundamon"
         v = {}
         seats = Array(view.is_a?(Hash) ? view["seats"] : nil)
         name = ->(i) { seat_name(seats, i) }
@@ -223,9 +396,9 @@ module AsterismGames
         end
         if ev["type"] == "draw"
           t = Array(ev["tenpai"])
-          v["tenpai_line"] = if t.empty? then both.call("全員ノーテン。")
-                             elsif t.size == 4 then both.call("全員テンパイ。")
-                             else both.call("テンパイは#{t.map { |i| name.call(i) }.join('、')}。")
+          v["tenpai_line"] = if t.empty? then both.call(z ? "全員ノーテンなのだ。" : "全員ノーテン。")
+                             elsif t.size == 4 then both.call(z ? "全員テンパイなのだ。" : "全員テンパイ。")
+                             else both.call("テンパイは#{t.map { |i| name.call(i) }.join('、')}#{'なのだ' if z}。")
                              end
         end
         v["kind"] = [ABORT_TEXT[ev["kind"]] || ev["kind"].to_s, ABORT_READ[ev["kind"]] || ev["kind"].to_s] if ev["type"] == "abort"
@@ -246,15 +419,27 @@ module AsterismGames
             v["lead_score"] = both.call(sc[li].to_s)
           end
         end
-        v["status_line"] = hello_words(ev, view) if ev["type"] == "hello"
+        v["status_line"] = hello_words(ev, view, tone) if ev["type"] == "hello"
         v
+      end
+
+      # The speech as a synthesiser should read it: SPEECH_READ, and a tile
+      # name that slipped through (5萬, 赤5筒) read as a player says it.
+      def reading(speech)
+        s = speech.to_s.gsub(/(赤)?([0-9])(萬|筒|索)/) do
+          red, d, suit = Regexp.last_match.captures
+          red ||= d == "0"
+          d = "5" if d == "0"
+          "#{'アカ' if red}#{NUM_READ[d.to_i - 1]}#{SUIT_READ[SUIT_TEXT.key(suit)]}"
+        end
+        s.gsub(SPEECH_READ_RE) { |w| SPEECH_READ[w] }
       end
 
       # Fills a template from the values: [caption, speech].
       def fill(tpl, vals)
         text = tpl.gsub(/%\{(\w+)\}/) { (vals[Regexp.last_match(1)] || ["", ""])[0] }
         speech = tpl.gsub(/%\{(\w+)\}/) { (vals[Regexp.last_match(1)] || ["", ""])[1] }
-        [text, speech.delete("！").gsub(/\s+/, " ").strip]
+        [text, reading(speech.delete("！").gsub(/\s+/, " ").strip)]
       end
 
       def seat_name(seats, i)
@@ -325,7 +510,8 @@ module AsterismGames
       end
 
       # What the first view says: where the table is.
-      def hello_words(ev, view)
+      def hello_words(ev, _view, tone = "plain")
+        z = tone == "zundamon"
         case ev["status"]
         when "play", "result"
           r = ev["round"] || {}
@@ -335,9 +521,10 @@ module AsterismGames
           extra = +""
           extra << "、供託#{sticks}本" if sticks.positive?
           extra << "、残り#{left}枚" if left
+          return ["観戦を始めるのだ！ #{rt}#{extra}なのだ。", "観戦を始めるのだ！ #{rr}#{extra}なのだ。"] if z
           ["観戦を始めます。#{rt}#{extra}。", "観戦を始めます。#{rr}#{extra}。"]
-        when "over" then ["観戦を始めます。対局は終わったところです。"] * 2
-        else ["観戦を始めます。卓は対局の始まりを待っています。"] * 2
+        when "over" then [z ? "観戦を始めるのだ！ 対局は終わったところなのだ。" : "観戦を始めます。対局は終わったところです。"] * 2
+        else [z ? "観戦を始めるのだ！ 卓は対局の始まりを待っているのだ。" : "観戦を始めます。卓は対局の始まりを待っています。"] * 2
         end
       end
     end

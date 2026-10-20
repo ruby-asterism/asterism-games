@@ -63,7 +63,7 @@ the console ("Permanent tables"; the server's setup: docs/install.md).
 | `bin/asterism-games` | the host (loads the framework and the games); `status`; `play <game>`, a table in this terminal ("Playing in a terminal"); `commentate <game>`, a table in the browser with commentary ("Commentary"); `help` |
 | `bin/mahjong-bots` | players without screens, for trying a mahjong table (one process each; not in the gem) |
 | `lib/asterism_games/play.rb`, `lib/asterism_games/play/` | the terminal clients ("Playing in a terminal"): the options, `othello.rb`, `mahjong.rb` with `mahjong_text.rb` (tiles as text, widths, reading the input) and `mahjong_screen.rb` (the screen); they need neither the framework nor riichi_engine |
-| `lib/asterism_games/commentate.rb`, `lib/asterism_games/commentate/` | `asterism-games commentate mahjong` ("Commentary"): the events and their words (`mahjong_events.rb`, `mahjong_phrases.rb`), the hub and the runner (`mahjong.rb`), the web server (`server.rb`), the page and the tile sheets (`assets/`) |
+| `lib/asterism_games/commentate.rb`, `lib/asterism_games/commentate/` | `asterism-games commentate mahjong` ("Commentary"): the events and their words (`mahjong_events.rb`, `mahjong_phrases.rb`), the hub and the runner (`mahjong.rb`), the web server (`server.rb`), the voice (`voicevox.rb`, VOICEVOX's HTTP; `voice.rb`, the fixed phrases' files and the lines' sound; `mahjong_voice.yml`, the fixed phrases), the page and the tile sheets (`assets/`) |
 | `lib/asterism_games.rb` | the framework, without any game |
 | `lib/asterism_games/game.rb` | the base of a game: the registry, the members and tokens, who joins in a room, the views, the time, saving ("Writing a game") |
 | `lib/asterism_games/remote.rb` | the base of the exposed object: the methods and their numbers of arguments, the caller (`from:`), `join` / `mine` / `leave` |
@@ -1472,9 +1472,11 @@ The host's answers are shown in the table app's words (`今はできない`,
 from outside, the way a sports broadcast does: it reads the table's
 spectate key ("Spectate", with the four hands), draws the table in a
 browser with the tiles of Family mruby's mahjong app, and comments on what
-happens in Japanese, as captions under the table and in the browser's own
-voice (the Web Speech API). It only reads: it never joins the table or
-calls it. CRuby and the asterism gem only; it runs on WSL and on macOS.
+happens in Japanese, as captions under the table and in a voice: a
+VOICEVOX character's (ずんだもん by default) when a VOICEVOX engine runs on
+this machine, else the browser's own (the Web Speech API; "The voice"
+below). It only reads: it never joins the table or calls it. CRuby and
+the asterism gem only; it runs on WSL and on macOS.
 
 ```
 asterism-games commentate mahjong --router tcp/127.0.0.1:7447    # a host on this machine or the home network
@@ -1498,6 +1500,8 @@ when it is taken), prints the address and opens it in the browser (macOS
 | `--public` | hide the hands: the views sent to the page lose `hand` and `drawn`, and no line tells a hand |
 | `--no-open` | do not open the browser |
 | `--json` | each line of commentary as a JSON line on standard output (`at`, `table`, `type`, `prio`, `text`) |
+| `--voicevox URL` | the VOICEVOX engine (default `VOICEVOX_URL`, else `http://127.0.0.1:50021`) |
+| `--speaker NAME`, `--style NAME` | the VOICEVOX character and its style (default `ずんだもん`, `ノーマル`) |
 
 - **The role.** The spectate keys are `asterism/<host>/spectate/<table>/state`.
   On a console's network a `viewer` (Read `asterism/**`) or a `spectator`
@@ -1515,11 +1519,15 @@ when it is taken), prints the address and opens it in the browser (macOS
   **H** hides the hands on that page (backs instead of the tiles, and the
   lines that tell a hand left out). A table that several hosts put is
   chosen in the bar.
-- **The voice.** The browser reads the lines with a Japanese voice when it
-  has one (the bar says when it has none). Browsers speak only after the
-  page has been clicked once: the page says so until then. The lines are
-  read in turn; when the voice falls behind, the old small ones are
-  dropped and a big moment goes first.
+- **The voice.** One queue on the page says the lines in turn, each
+  caption coming up as its voice starts; when the voice falls behind, the
+  old small lines are dropped (their captions still come up) and a win or
+  a big moment is said next. With VOICEVOX, a line plays its fixed phrase
+  first (リーチ, ポン, ロン, the round's name ...) and then the rest of it,
+  synthesised meanwhile; without, the browser reads the lines with a
+  Japanese voice when it has one (the bar says which voice, or that it has
+  none). Browsers play sound only after the page has been clicked once:
+  the page says so until then. "The voice" below.
 - **The commentary.** Made by rules from the difference between one view
   and the one before (pure functions, `commentate/mahjong_events.rb` and
   `mahjong_phrases.rb`, so the host can take them over later), each event
@@ -1559,6 +1567,95 @@ when it is taken), prints the address and opens it in the browser (macOS
   colour (magenta) transparent when it draws them. In this gem they are
   under the MIT License like the rest of it, by the author's decision
   (`TILES_LICENSE.txt` next to them).
+
+### The voice
+
+(games 0.19.0) The commentary speaks with VOICEVOX,
+a free Japanese speech synthesiser, when its engine runs on this machine;
+the default character is ずんだもん (style ノーマル). Nothing of its voice is
+in this gem: the gem holds the words (`commentate/mahjong_voice.yml`) and
+the code that has your VOICEVOX say them.
+
+- **Finding the engine.** At its start the command asks
+  `GET /version` of `--voicevox URL` (default `VOICEVOX_URL`, else
+  `http://127.0.0.1:50021`). When nothing answers, the browser's voice
+  reads, as before, and the page's bar says
+  「VOICEVOX が見つからない: ブラウザの声で読む」.
+- **The fixed phrases** (リーチ, チー, ポン, カン, ロン, ツモ, the rounds'
+  names, 流局, 途中流局, 満貫 to 役満, オーラス, 逆転, 終局, 対局開始, and
+  「実況を始めます」 when the page is clicked) are WAV files, played at
+  once. The command makes the missing ones at its start (in the
+  background: a phrase not made yet is skipped), or
+  `asterism-games commentate voices --make` makes them all now (about 30
+  files, half a minute on a CPU engine). They go to
+  `$XDG_CACHE_HOME/asterism-games/voices/<speaker>-<style>/`
+  (`~/.cache/asterism-games/voices/ずんだもん-ノーマル/` by default) with a
+  `CREDITS.txt`; each is named by the digest of its phrasing, so a changed
+  list makes the changed ones again and removes the old. **The directory
+  can be deleted at any time**: it is made again.
+- **The rest of a line** is synthesised as the line comes (the engine's
+  `/audio_query` and `/synthesis`) while its fixed phrase plays, and
+  served to the page from the command's own web server at a temporary
+  address (`/voice/<digest>.wav`; only lines the command made, never a
+  text a page sends). A line that begins with its fixed phrase's word
+  leaves it out (ロン！ then 「CPU1、断么九 …」). The same line is
+  synthesised once while it is kept (200 lines and 64 MB at most, the
+  least recently used dropped first). A line the engine fails on is read
+  by the browser's voice.
+- **What the engine reads** is always a line's speech, never its caption:
+  the tiles, the yaku and the points as a player says them (サンマン,
+  リーチ, 30フ 2ハン), and the words VOICEVOX would read wrongly written
+  out (流局 リューキョク, 起家 チーチャ, 跳満 ハネマン;
+  `MahjongPhrases::SPEECH_READ`, used for the fixed phrases too). No user
+  dictionary is needed.
+- **Choosing a character.** `asterism-games commentate voices --list`
+  lists the engine's characters and their styles; `--speaker NAME
+  --style NAME` picks one by name (the engine's numbers are looked up,
+  never assumed; a name that is not there is answered with the ones that
+  are). ずんだもん speaks in her own tone: the lines and the fixed phrases
+  end in 〜なのだ (「リーチなのだ！」「満貫、8000点なのだ！」); any other
+  character speaks plainly. The tones are kept with the phrasings
+  (`MahjongPhrases::TONES`), with a note on how to ask an AI to speak so.
+- **The page** plays the sound itself (never the PC with `paplay` or
+  `afplay`), so a Browser Source in OBS carries it. **M** cuts the voice
+  (the captions go on). When VOICEVOX speaks, the page shows the credit
+  in its corner: `VOICEVOX:ずんだもん`.
+
+Running VOICEVOX:
+
+```
+# Windows (and WSL): install the VOICEVOX app on Windows and start it (its engine
+# listens on 127.0.0.1:50021). From WSL with networkingMode=mirrored (.wslconfig)
+# 127.0.0.1 reaches it; otherwise pass Windows' address:
+asterism-games commentate mahjong --voicevox http://$(ip route show default | awk '{print $3}'):50021
+
+# macOS: install the VOICEVOX app and start it; the default URL reaches it.
+
+# docker (Linux, WSL, macOS): the engine alone, CPU version
+docker run -d --name voicevox -p 127.0.0.1:50021:50021 voicevox/voicevox_engine:cpu-0.25.0
+asterism-games commentate voices --list
+asterism-games commentate voices --make            # optional: the commentary makes them at its start too
+asterism-games commentate mahjong --speaker 四国めたん --style ノーマル
+```
+
+The engine takes a gigabyte or two of memory; one line of commentary
+takes it about a second or two on a laptop's CPU.
+
+**VOICEVOX's terms, in short** (read the current terms of VOICEVOX and of
+your character before you publish anything; they can change):
+
+- The software and the voices it makes may be used free of charge,
+  commercially or not, **with a credit** naming the character, such as
+  `VOICEVOX:ずんだもん`. Each character has terms of its own on top of
+  VOICEVOX's (ずんだもん's: a credit where it can be found, in a video's
+  description or on screen; no use against public order, for political or
+  religious campaigns, for deception, and the like).
+- **When you stream or upload the commentary, put the credit in the
+  description too** (the page shows it in its corner).
+- Whoever you give generated voices to must follow the same terms, so
+  they cannot be mixed into an MIT package. That is why this gem ships no
+  sound: each user makes the files with their own VOICEVOX, and they stay
+  on that machine.
 
 ## Playing from a program
 
@@ -2012,6 +2109,20 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   404 / 405 / a foreign Host refused, 127.0.0.1 only, the events stream, a
   port taken), the options and `--help`; with the table there, a CPU
   round played here through the hub.
+- `test_commentate_voice.rb`: the commentary's voice (in `rake test:gem`
+  too), against a small VOICEVOX engine started in the test: a character
+  and a style by name (and the names offered when one is not there), the
+  synthesis, no engine (the browser's voice, nothing made), the fixed
+  phrases made once and named by their digest, made again when the list
+  changes (the old files removed), the cache directory, every clip a line
+  asks for in the list in both tones, a line synthesised once and kept
+  (the least recently used dropped, made again when asked), a failing
+  engine, the words a fixed phrase said left out of the line, ずんだもん's
+  tone (every phrasing, every line of the recorded game, the clips that
+  tell no hand), the hub's lines with their sound, the web server's
+  `/clip/` and `/voice/` (only what the list and the hub name), the
+  missing phrases made at the start, the options and `voices --list |
+  --make`.
 - `test_spectate.rb`: the spectate view (README "Spectate"; its
   framework part in `rake test:gem` too): nothing by default (othello, the
   board), the keys of the permanent tables and of a room, what the rooms

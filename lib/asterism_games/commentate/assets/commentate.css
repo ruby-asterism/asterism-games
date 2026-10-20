@@ -65,6 +65,19 @@ body.obs #captions { max-height: none; background: rgba(0, 0, 0, 0.55); }
 .cap.p3 span { font-weight: bold; color: var(--accent); font-size: 21px; }
 .cap.old span { color: var(--dim); }
 #keys { padding: 0 12px 8px; color: var(--dim); font-size: 12px; }
+/* The voice's credit (VOICEVOX:<character>), in the corner, on a stream too. */
+#credit {
+  position: fixed;
+  right: 8px;
+  bottom: 6px;
+  padding: 1px 6px;
+  font-size: 12px;
+  color: var(--dim);
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 3px;
+  pointer-events: none;
+}
+#credit[hidden] { display: none; }
 @media (max-width: 600px) {
   #captions { font-size: 16px; }
   .cap.p3 span { font-size: 18px; }
