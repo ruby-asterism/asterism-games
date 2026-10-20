@@ -378,28 +378,69 @@ module AsterismGames
       #   [:quit]
       #   [:error, text]            why not (Japanese, for the screen)
       #   [:none]                   nothing
-      def key_command(key, view, sel: -1, pick: false)
+      # ai_pick: A was pressed in the lobby, a seat's number comes next
+      # ([:ai_pick, on] turns it on or off).
+      def key_command(key, view, sel: -1, pick: false, ai_pick: false)
         k = key.is_a?(String) ? key.downcase : key
         return [:quit] if QUIT_KEYS.include?(k)
         return [:line] if LINE_KEYS.include?(k)
         return [:none] unless view.is_a?(Hash) && !view["error"]
         me = view["me"].to_i
-        return lobby_key(k, view, me) if view["st"] == "wait"
+        return lobby_key(k, view, me, ai_pick) if view["st"] == "wait"
         return [:none] if me.negative? || !%w[play result over].include?(view["st"])
         table_key(k, view, sel, pick)
       end
 
-      # The lobby: 1-4 sit there, S stand, C CPUs into the empty seats and
-      # Enter start (the owner's).
-      def lobby_key(k, view, me)
-        owner = me >= 0 && view["ow"] == me
+      # The lobby: 1-4 sit there, S stand, C CPUs into the empty seats,
+      # A then 1-4 that seat's next player (CPU, the AI players offered),
+      # Enter start and W a watch game (the owner's).
+      def lobby_key(k, view, me, ai_pick = false)
+        owner = owner?(view)
+        if ai_pick
+          return [:ai_pick, false] unless %w[1 2 3 4].include?(k)
+          return ai_seat_command(view, k.to_i - 1)
+        end
         case k
         when "1", "2", "3", "4" then [:cmd, "sit", [k]]
         when "s" then me >= 0 ? [:cmd, "stand", []] : [:none]
         when "c" then owner ? [:cmd, "cpu", []] : [:error, "卓の主だけができる"]
+        when "a"
+          return [:error, "卓の主だけができる"] unless owner
+          return [:error, "ゲームホストが AI を出していない"] if Array(view["ak"]).empty?
+          [:ai_pick, true]
+        when "w"
+          return [:error, "卓の主だけができる"] unless owner
+          return [:error, "このゲームホストは観戦対局ができない"] unless view.key?("wc")
+          return [:error, WATCH_AI_NOTE] if view["wc"] == 2
+          return [:error, "4 席を CPU か AI で埋めると観戦で始められる"] unless view["wc"] == 1
+          [:cmd, "watch", []]
         when :enter then owner ? [:cmd, "start", []] : [:none]
         else [:none]
         end
+      end
+
+      WATCH_AI_NOTE = "観戦対局の AI は Claude 1 席・Jev 4 席まで"
+
+      # This member is the owner: "mo" (games 0.20.0; an owner without a
+      # seat too), or its seat is the owner's.
+      def owner?(view)
+        return true if view["mo"] == 1
+        me = view["me"].to_i
+        me >= 0 && view["ow"] == me
+      end
+
+      # A then a seat's number: an empty seat gets a CPU, a CPU the first AI
+      # player offered, an AI player the next one, the last back a CPU.
+      def ai_seat_command(view, seat)
+        sk = view["sk"] || [0, 0, 0, 0]
+        return [:error, "その席は人が座っている"] if sk[seat] == 1
+        n = (seat + 1).to_s
+        return [:cmd, "cpu", [n]] if sk[seat].to_i.zero?
+        kinds = Array(view["ak"])
+        cur = Array(view["ai"])[seat].to_s
+        i = cur.empty? ? -1 : kinds.index(cur)
+        nxt = i.nil? ? nil : kinds[i + 1]
+        nxt ? [:cmd, "ai", [n, nxt]] : [:cmd, "cpu", [n]]
       end
 
       def table_key(k, view, sel, pick)

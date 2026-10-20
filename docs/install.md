@@ -272,6 +272,18 @@ on from the same turn after a few seconds, and the players' screens come
 back to it by themselves. To go back, run it with the old version (it
 prints it); the old image stays (`docker image ls ghcr.io/ruby-asterism/asterism-games`).
 
+### From 0.19.1 to 0.20.0 (watch games)
+
+`./update.sh 0.20.0` (or `--when-idle 0.20.0`). Nothing in `.env`. The
+mahjong tables gain watch games (README "Watch games"): a new method
+`watch` on the table object, which the players' roles already reach (the
+calls go on the table's call key, as every other method). The AI players
+of a watch game spend the same daily money as any game
+(`ASTERISM_GAMES_AI_DAILY_USD` and the per-kind limits); lower them first
+if watch games should not use more of it. The table apps of Family mruby
+show the button only with a 0.20.0 host; older screens work as before
+against it.
+
 ### From 0.19.0 to 0.19.1 (where to get VOICEVOX)
 
 Nothing to do on a server: only the commentary's messages change.

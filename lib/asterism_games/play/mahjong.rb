@@ -21,7 +21,8 @@ module AsterismGames
         On a terminal it reads keys, as the table app does: Left/Right choose a tile,
         Enter or Space discards it; R riichi, T tsumo/ron, P pon, C V B chi, K L J kan,
         N nine kinds, Esc pass, Enter the result's OK; in the lobby 1-4 sit, S stand,
-        C CPUs, Enter start; Q or Ctrl+C quits; : (or /) opens a line for a command.
+        C CPUs, A then 1-4 a seat's CPU or AI player, Enter start, W a watch game;
+        Q or Ctrl+C quits; : (or /) opens a line for a command.
         Mahjong commands (one per line, or after :):
           a .. n         discard that tile of the hand (the drawn tile is the last letter)
           6s, 0p, 東     discard that tile (0: the red five; 1z..7z for the honours too)
@@ -33,7 +34,8 @@ module AsterismGames
           ok             the result's OK (an empty line too); at the end, the owner: back to the lobby
           sit [1-4], stand, cpu [1-4] (empty seats to CPUs; the owner), nocpu 1-4,
           ai 1-4 KIND (an AI player, when the lobby offers one), tonpuu, hanchan,
-          rule ITEM VALUE (README "Local rules"), start (the owner)
+          rule ITEM VALUE (README "Local rules"), start (the owner),
+          watch (the owner: the four seats CPUs or AI players, a game only watched)
           auto           let the client play for you (wins, passes, discards the drawn tile,
                          OKs the results); again to stop
           tables, view, help, quit
@@ -50,8 +52,8 @@ module AsterismGames
       TIMER_EVERY_S = 1.0
 
       # --commands that only work in the lobby, and those of the owner.
-      LOBBY_WORDS = %w[sit stand cpu nocpu ai start tonpuu hanchan rule].freeze
-      OWNER_WORDS = %w[cpu nocpu ai start tonpuu hanchan rule].freeze
+      LOBBY_WORDS = %w[sit stand cpu nocpu ai start watch tonpuu hanchan rule].freeze
+      OWNER_WORDS = %w[cpu nocpu ai start watch tonpuu hanchan rule].freeze
 
       REASONS = {
         "token" => "卓の人ではない", "not seated" => "席に着いていない", "stale" => "画面が古い: 読み直し中",
@@ -60,7 +62,8 @@ module AsterismGames
         "not owner" => "卓の主だけができる", "seats" => "4 席がそろっていない", "no human" => "人が 1 人もいない",
         "no change" => "変わらない", "full" => "卓が満員", "spectators" => "観戦の人数が上限",
         "value" => "選べない値", "no rule" => "その項目は無い", "no ai" => "その AI は今は出せない",
-        "identity" => "この部屋での名乗りが合わない"
+        "identity" => "この部屋での名乗りが合わない", "human" => "人が座っている (観戦対局は 4 席とも CPU か AI)",
+        "ai limit" => MahjongText::WATCH_AI_NOTE
       }.freeze
 
       # The whole run: connect, find the table, play until quit (or over).
@@ -120,6 +123,7 @@ module AsterismGames
         @keys = keys
         @sel = -1
         @pick = false
+        @ai_pick = false # A in the lobby: a seat's number comes next
         @typing = false
         @path = path
         @name = name
@@ -233,7 +237,8 @@ module AsterismGames
       # One key (Play.key_loop); false to quit, :line for a line to type.
       def key(k)
         v = @view.is_a?(Hash) ? @view : nil
-        r = MahjongText.key_command(k, v, sel: @sel, pick: @pick)
+        r = MahjongText.key_command(k, v, sel: @sel, pick: @pick, ai_pick: @ai_pick)
+        @ai_pick = false unless r[0] == :ai_pick
         case r[0]
         when :quit then return false
         when :line then return :line
@@ -245,6 +250,12 @@ module AsterismGames
         when :pick
           @lock.synchronize do
             @pick = r[1]
+            @note = ""
+            draw
+          end
+        when :ai_pick
+          @lock.synchronize do
+            @ai_pick = r[1]
             @note = ""
             draw
           end
@@ -315,9 +326,10 @@ module AsterismGames
         return "画面を待っています" unless v.is_a?(Hash) && !v["error"]
         return "待ち合わせを待っています" unless v["st"] == "wait"
         return nil unless OWNER_WORDS.include?(w)
-        return "席に着くのを待っています" unless v["me"].to_i >= 0
-        return "卓の主を待っています" unless v["ow"] == v["me"]
-        return "4 席がそろうのを待っています" if w == "start" && (v["sk"] || [0]).any?(&:zero?)
+        unless MahjongText.owner?(v)
+          return v["me"].to_i >= 0 ? "卓の主を待っています" : "席に着くのを待っています"
+        end
+        return "4 席がそろうのを待っています" if %w[start watch].include?(w) && (v["sk"] || [0]).any?(&:zero?)
         nil
       end
 
@@ -394,6 +406,7 @@ module AsterismGames
         when "nocpu" then args.empty? ? "nocpu 1-4" : reason(@table.cpu(@token, seat_arg(args), false))
         when "ai" then args.size < 2 ? "ai 1-4 KIND" : reason(@table.cpu(@token, seat_arg(args), args[1]))
         when "start" then reason(@table.start(@token))
+        when "watch" then reason(@table.watch(@token))
         when "tonpuu" then reason(@table.rule(@token, 0, 1))
         when "hanchan" then reason(@table.rule(@token, 0, 0))
         when "rule"
@@ -453,7 +466,7 @@ module AsterismGames
 
       # What the screen needs of the keys (nil: commands are typed).
       def key_state
-        @keys && !@typing ? { sel: @sel, pick: @pick } : nil
+        @keys && !@typing ? { sel: @sel, pick: @pick, ai_pick: @ai_pick } : nil
       end
 
       # The countdown on a terminal (the move's time and the bank, the

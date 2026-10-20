@@ -157,6 +157,7 @@ module AsterismGames
       def lobby
         v = @v
         out = ["#{v['t'] || @path}  待ち合わせ#{"  ゲームホスト #{v['hv']}" if v['hv']}"]
+        out << "  (卓の主: 自分)" if v["mo"] == 1 && @me.negative?
         sk = v["sk"] || [0, 0, 0, 0]
         ai = v["ai"] || []
         4.times do |s|
@@ -169,8 +170,11 @@ module AsterismGames
           out << "  席#{s + 1}  #{n}#{" (#{tags.join(', ')})" unless tags.empty?}"
         end
         out << "  ルール: #{rules_text}" if v["ru"]
-        watchers = (v["mb"] || []).select { |m| m[1] == -1 }.map(&:first)
+        # Members without a seat; the owner among them (an owner without a
+        # seat, README "Watch games") marked.
+        watchers = (v["mb"] || []).select { |m| m[1] == -1 }.map { |m| m[2].to_i & 2 == 2 ? "#{m[0]}(卓の主)" : m[0] }
         out << "  観戦: #{watchers.join(' ')}" unless watchers.empty?
+        out << "  #{MahjongText::WATCH_AI_NOTE}" if v["wc"] == 2 && MahjongText.owner?(v)
         out
       end
 
@@ -189,6 +193,7 @@ module AsterismGames
         v = @v
         r = v["r"] || []
         out = []
+        out << "観戦対局 (CPU と AI だけ)" if v["wm"] == 1
         if r.size >= 4
           h = row.text("#{round_name(r)}  供託#{r[3]}  残り#{r[5]}  ドラ ")
           bytes(v["dora"]).each { |t| tile_cell(h, t) }
@@ -463,12 +468,16 @@ module AsterismGames
         types = opts.map(&:first).uniq
         case v["st"]
         when "wait"
-          return "観戦中: sit で座る、quit で出る" if @me.negative?
-          owner = v["ow"] == @me
+          owner = MahjongText.owner?(v)
+          if @me.negative?
+            return "観戦中 (卓の主): sit で座る、cpu [席]、ai 席 KIND、watch (観戦で始める)、quit" if owner
+            return "観戦中: sit で座る、quit で出る"
+          end
           return "stand、cpu [席] (空きを CPU で)、nocpu 席、tonpuu / hanchan、start、quit" if owner
           return "4 席がそろったら卓の主が始める (stand、quit)"
         when "over"
           return "ok で待ち合わせに戻す (quit で出る)" if types.include?(NEXT)
+          return "観戦対局: しばらくすると待ち合わせに戻る (quit で出る)" if v["wm"] == 1
           return "次へ: 卓の主が待ち合わせに戻す (quit で出る)"
         when "result"
           return "ok で次へ" if types.include?(NEXT)
@@ -512,6 +521,7 @@ module AsterismGames
         when "wait" then return lobby_keys
         when "over"
           return "[Enter]待ち合わせに戻す  #{COMMON_KEYS}" if types.include?(NEXT)
+          return "観戦対局: しばらくすると待ち合わせに戻る  #{COMMON_KEYS}" if v["wm"] == 1
           return "次へ: 卓の主が待ち合わせに戻す  #{COMMON_KEYS}"
         when "result"
           return "[Enter]OK  #{COMMON_KEYS}" if types.include?(NEXT)
@@ -567,25 +577,36 @@ module AsterismGames
       end
 
       # The lobby's keys: 1-4 for the seats that may be taken (empty or a
-      # CPU's), S stand, C CPUs and Enter start (the owner).
+      # CPU's), S stand, C CPUs, A then 1-4 a seat's CPU or AI player,
+      # Enter start and W a watch game (the owner; README "Watch games").
       def lobby_keys
         v = @v
         sk = v["sk"] || [0, 0, 0, 0]
+        if @keys && @keys[:ai_pick]
+          return "AI: [1]-[4] 席を選ぶ (空き→CPU→#{Array(v['ak']).map { |k| AI_LABELS[k] || k }.join('→')}→CPU) " \
+                 "ほかのキーでやめる"
+        end
+        owner = MahjongText.owner?(v)
         free = (0..3).select { |s| sk[s] != 1 && s != @me }.map { |s| "[#{s + 1}]" }
         words = []
         words << "#{free.join}座る" unless free.empty?
-        if @me >= 0
-          words << "[S]立つ"
-          if v["ow"] == @me
-            words << "[C]CPU で埋める" if sk.any?(&:zero?)
-            words << "[Enter]始める" unless sk.any?(&:zero?)
-          else
-            words << "(卓の主が始める)"
+        words << "[S]立つ" if @me >= 0
+        if owner
+          words << "[C]CPU で埋める" if sk.any?(&:zero?)
+          words << "[A]AI" unless Array(v["ak"]).empty?
+          if v["wc"] == 1
+            words << "[W]観戦で始める"
+          elsif @me >= 0 && sk.none?(&:zero?)
+            words << "[Enter]始める"
           end
+        elsif @me >= 0
+          words << "(卓の主が始める)"
         end
         words << COMMON_KEYS
-        "#{@me.negative? ? '観戦中: ' : ''}#{words.join(' ')}"
+        "#{@me.negative? ? (owner ? '観戦中 (卓の主): ' : '観戦中: ') : ''}#{words.join(' ')}"
       end
+
+      AI_LABELS = { "claude" => "Claude", "jev" => "Jev" }.freeze
 
       def turn_text(r)
         cur = r[6]

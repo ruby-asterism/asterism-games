@@ -3,6 +3,37 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
+## 0.20.0
+
+- **Watch games** (README "Watch games"): the owner of a mahjong table
+  may start a game of CPUs and AI players only, and watch it with the
+  others at the table (and a commentary, `commentate mahjong`). The owner
+  need not be seated: a member that joins a table where nobody is seated
+  and there is no owner is the owner (`join`'s `"owner"`, the new `"mo"`
+  of the member's own view); once somebody sits the first seated is the
+  owner as before, so a game with people seated goes as it did. The new
+  method `watch(token)` starts it when the four seats are CPUs or AI
+  players, nobody is seated and at most one seat is Claude's (Jev may take
+  all four; `"human"`, `"ai limit"`, `"seats"`, `"not owner"` otherwise).
+  The lobby view's `"wc"` says whether it may start (1), is over the AI
+  limit (2) or not (0); views during it have `"wm" => 1` and the host's
+  `@status` `"watch" => true`. Nobody is seated, so the table's
+  abandoning does not apply; instead the game stops (unrecorded) when
+  every member has left. One game, then the lobby with the same seats.
+  The record is kept with `"watch" => true` (also on `records`' entries)
+  and counts in the stats for the CPU and the AI kinds only, never for a
+  person. The AI players' daily limits work as before.
+- `play mahjong`: `W` (and the command `watch`) starts a watch game, for
+  the owner with or without a seat; `A` then a seat's number turns that
+  seat into a CPU, Claude, Jev and back (the kinds the lobby offers); the
+  owner's commands (`cpu`, `ai`, `watch`, `--commands`) work for an owner
+  without a seat; the lobby marks the owner among those watching and says
+  the AI limit when the seats are over it; a watch game is headed
+  `観戦対局`.
+- Family mruby's mahjong app (fmruby-core) has a `観戦で始める[W]` button
+  for the owner when the host says it may start (`"wc"`); with an older
+  host it is not shown.
+
 ## 0.19.1
 
 - The commentary tells where to get VOICEVOX when it finds no engine:

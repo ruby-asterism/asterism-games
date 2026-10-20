@@ -82,6 +82,9 @@ module AsterismGames
                  "rules" => rules_look, "names" => @seats.map { |s| s ? s["name"].to_s : "" },
                  "kinds" => (0..3).map { |i| seat_look(i, nil)["kind"] },
                  "ais" => @seats.map { |x| x && x["ai"] ? x["ai"].to_s : "" }, "rounds" => [] }
+        # A watch game (README "Watch games"): CPUs and AI players only, no
+        # person's stats (its seats count for their kinds).
+        @rec["watch"] = true if @watch
       end
 
       # A round is dealt (Table#new_round): the scores, the dora indicator
@@ -233,9 +236,13 @@ module AsterismGames
           counts[res["from"]]["dealins"] += 1 if res["kind"] == "ron_agari" && res["from"].is_a?(Integer) && res["from"].between?(0, 3)
         end
         names = Array(rec["names"])
+        watch = rec["watch"] ? true : false
         seats = (0..3).map do |s|
           rank, score, pt = final[s]
-          { "seat" => s, "name" => names[s].to_s, "kind" => record_kind(rec, s), "rank" => rank, "score" => score,
+          kind = record_kind(rec, s)
+          # A watch game counts for no person (README "Watch games").
+          kind = "cpu" if watch && kind == "human"
+          { "seat" => s, "name" => names[s].to_s, "kind" => kind, "rank" => rank, "score" => score,
             "points" => pt, "counts" => counts[s] }
         end
         { "variant" => rec["game"], "reason" => rec["reason"], "rounds" => rounds.size, "seats" => seats }
@@ -287,8 +294,10 @@ module AsterismGames
           ranks[seat] = rank
           scores[seat] = score
         end
-        { "id" => rec["id"], "at" => rec["at"], "game" => rec["game"], "names" => rec["names"], "ranks" => ranks,
-          "scores" => scores }
+        out = { "id" => rec["id"], "at" => rec["at"], "game" => rec["game"], "names" => rec["names"], "ranks" => ranks,
+                "scores" => scores }
+        out["watch"] = true if rec["watch"]
+        out
       end
 
       def record_of(id)
@@ -310,7 +319,7 @@ module AsterismGames
       end
 
       def record_head(rec)
-        out = rec.slice("id", "at", "time", "table", "game", "rules", "names", "kinds", "final", "reason")
+        out = rec.slice("id", "at", "time", "table", "game", "rules", "names", "kinds", "final", "reason", "watch")
         out["rounds"] = rec["rounds"].map do |r|
           res = r["result"] || {}
           [r["wind"], r["number"], r["honba"], res["kind"], res["changes"]]

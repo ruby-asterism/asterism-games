@@ -20,6 +20,8 @@ module AsterismGames
     #                                  on: an AI player's name puts it in, README "AI players";
     #                                  on one seat with a CPU or AI player: turns it into that one)
     #   start(token)                -> "ok" or why not (the owner, four seats taken)
+    #   watch(token)                -> "ok" or why not (the owner: a watch game, the four
+    #                                  seats CPUs or AI players, README "Watch games")
     #   rule(token, item, value)    -> "ok" or why not (the owner, in the lobby:
     #                                  a local rule, README "Local rules")
     #   view(token, assist)         -> the member's view (Hash) or {"error" => "token"};
@@ -45,17 +47,19 @@ module AsterismGames
     # The same node gets its membership and token back from join. Every
     # call by a member counts as a sign that it is there (away_ms).
     class Remote < AsterismGames::Remote
-      METHODS = exposes(join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, rule: 3, view: 2, act: 4, table: 0,
+      METHODS = exposes(join: 1, mine: 0, sit: 2, stand: 1, cpu: 3, start: 1, watch: 1, rule: 3, view: 2, act: 4, table: 0,
                         describe: 0, look: 1, choose: 3, points: 1, records: -1, record: -1, stats: -1, leave: 1)
       object_doc "A riichi mahjong table (four seats). From a program: call describe first, then join, sit, " \
                  "and look / choose in a loop."
       docs sit: [%w[token seat], "Takes seat 0-3 (-1: any free one), in the lobby. \"ok\" or why not."],
            stand: [%w[token], "Gives the seat up, in the lobby. \"ok\" or why not."],
-           cpu: [%w[token seat on], "The owner (the first to sit): on true puts a CPU in the empty seat (seat -1: " \
+           cpu: [%w[token seat on], "The owner: on true puts a CPU in the empty seat (seat -1: " \
                                     "every empty seat), false takes a CPU or AI player out; a name the lobby offers " \
                                     "(look's \"ai_players\": \"claude\", \"jev\") puts that AI player in. On one seat that holds " \
                                     "a CPU or another AI player, on turns it into the one asked for."],
            start: [%w[token], "The owner starts the game once the four seats are taken. \"ok\" or why not."],
+           watch: [%w[token], "The owner starts a watch game: the four seats CPUs or AI players (Claude 1 seat at " \
+                              "most), nobody seated; one game, then the lobby. \"ok\" or why not."],
            rule: [%w[token item value], "The owner sets a local rule in the lobby: item 0 the game (0 hanchan, " \
                                         "1 east only), see describe. \"ok\" or why not."],
            view: [%w[token assist], "The member's view in the table screens' short keys and tile bytes " \
@@ -101,6 +105,11 @@ module AsterismGames
       def start(token, from: nil)
         mark(token, from)
         @game.start(token, now)
+      end
+
+      def watch(token, from: nil)
+        mark(token, from)
+        @game.start_watch(token, now)
       end
 
       def rule(token, item, value, from: nil)

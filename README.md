@@ -476,7 +476,8 @@ asterism/games/games/@status
 
 `last` is the four in rank order as `[name, rank, score]`, by the names
 the table shows its members anyway (a table app shows them to whoever
-joins); it is there once a game has ended. The rooms' status file
+joins); it is there once a game has ended. During a watch game the
+table's entry has `"watch" => true` (games 0.20.0). The rooms' status file
 (`GET /status` of the rooms' host) stays counts only.
 
 `ais` counts the AI players' seats (they are counted in `cpus` too), and
@@ -701,6 +702,7 @@ connects again after 3 s; while a client of a router only reconnects
 | `stand` | token | `"ok"` or why not (lobby only) |
 | `cpu` | token, seat, on | the owner: a CPU into an empty seat (on) or out of it (a CPU or an AI player); seat -1 with on fills every empty seat; on as a name the lobby offers (`"claude"`, `"jev"`) puts that AI player in ("AI players"), `"no ai"` when it is not offered; on one seat that holds a CPU or an AI player of another kind, on turns it into the one asked for (games 0.12.1) |
 | `start` | token | the owner, once the four seats are taken and one is a member: the seats are drawn (who deals first) and the game starts |
+| `watch` | token | the owner: a watch game ("Watch games", games 0.20.0): the four seats CPUs or AI players, nobody seated, Claude in one seat at most; `"ok"` or why not (`"not owner"`, `"not waiting"`, `"seats"`, `"human"`, `"ai limit"`) |
 | `rule` | token, item, value | the owner, in the lobby: a local rule ("Local rules"); `"ok"` or why not (`"not owner"`, `"not waiting"`, `"no rule"`, `"value"`, `"no change"`) |
 | `view` | token, assist | the member's view (below), or `{"error" => "token"}`; assist: the help its screen shows (Assist, 0-3) |
 | `act` | token, sv, type, tiles | `"ok"`, or why not: `"token"`, `"not seated"`, `"stale"` (sv is not the current one), `"not offered"`, `"not playing"` |
@@ -712,8 +714,9 @@ connects again after 3 s; while a client of a router only reconnects
 
 - People join a table and wait in its lobby (`"st" => "wait"`): a member
   sits in a seat or watches. The first member who sat is the owner (when the
-  owner stands or leaves, the member seated longest takes over). The owner
-  fills empty seats with CPUs and starts. At the end of a game the owner's
+  owner stands or leaves, the member seated longest takes over). While
+  nobody is seated the owner may be a member without a seat (games 0.20.0,
+  "Watch games"). The owner fills empty seats with CPUs and starts. At the end of a game the owner's
   next (or `over_seconds`) brings the table back to the lobby with the same
   seats, for another game.
 - The node that calls is the caller in the call's key (`from:`, filled
@@ -973,6 +976,47 @@ going for everyone (the other away seats are played for as before). A
 table of CPUs only (`humans: 0`, the permanent spectator tables) is never
 abandoned.
 
+### Watch games
+
+A game of CPUs and AI players only, which the people at the table watch
+(games 0.20.0): the owner fills the four seats and starts it without
+sitting down, and a commentary (`commentate mahjong`, "Commentary") can
+follow it like any other table.
+
+- **The owner without a seat.** A member that joins a table where nobody
+  is seated and nobody is the owner is the owner (`join`'s `"owner"`, the
+  member's own view's `"mo"`). When somebody sits, the first to sit is the
+  owner as before: whenever a member is seated the role is where it always
+  was (the seated member who sat first, "Players that drop out"). An owner
+  who stands up with nobody else seated keeps the role; an owner who
+  leaves with nobody seated hands it to the member who joined first, of
+  those there. An older table app, which knows only `"ow"` (the owner's
+  seat), shows an owner without a seat as no owner, as it showed a lobby
+  without one before.
+- **Starting.** `watch(token)`, the owner, in the lobby: the four seats
+  are CPUs or AI players (`cpu`), no member is seated, and at most one seat
+  is Claude's (`WATCH_AI_MAX`: Claude 1, Jev 4). The lobby view's `"wc"`
+  tells the screens whether it may start (1), or the seats are all CPUs
+  and AI players but over the AI limit (2), or not (0); a host before
+  0.20.0 has no `"wc"`, and the screens offer no watch game then. The
+  seats are drawn as for `start`. The AI players' money is as for any
+  game ("AI players"): a kind past its day's limit becomes a CPU.
+- **During it.** Nobody is seated, so nobody is played for and the
+  table's abandoning does not apply ("Players that drop out"); the results
+  move on by themselves as at a table of CPUs (`result_seconds`), and the
+  end of the game after `over_seconds`. The members watch with the four
+  hands ("Spectators", the spectator delay too). Views have `"wm" => 1`
+  and the host's `@status` has `"watch" => true` for the table ("Status").
+  When every member has left the table (`leave`, or forgotten after being
+  away six times `away_seconds`) the game stops: back to the lobby, an
+  unfinished game not recorded. The log says `watch game started (...)`
+  and `watch game stopped: nobody at the table (not recorded)`.
+- **One game.** At the end the table goes back to the lobby with the same
+  seats; the owner starts another with `watch` again.
+- **Records.** The game is recorded as any other with `"watch" => true`
+  (in `records`' entries and in `record(id)`). Its seats count in the
+  stats for their kinds (CPU, Claude, Jev), never for a person ("Stats").
+
 ### Views
 
 A Hash (MessagePack); tiles are one byte each in binary strings (bin).
@@ -986,7 +1030,9 @@ A Hash (MessagePack); tiles are one byte each in binary strings (bin).
 | `sk` | the four seats: 0 empty, 1 a member, 2 a CPU (an AI player too) |
 | `ai`, `ak` | when an AI player sits: each seat's kind (`"claude"`, `"jev"`, `""` for the others); in the lobby, the AI players the owner may seat ("AI players") |
 | `aw` | the seats whose member is away, as bits |
-| `ow` | the owner's seat (-1: nobody seated) |
+| `ow` | the owner's seat (-1: nobody seated, or an owner without a seat) |
+| `mo` | the member's own view only: 1 when this member is the owner, seated or not (games 0.20.0, "Watch games") |
+| `wc`, `wm` | in the lobby, whether a watch game may start: 1 yes, 2 the seats are all CPUs and AI players but over the AI limit, 0 no; during a watch game `wm` 1 ("Watch games", games 0.20.0) |
 | `mb` | the members in the order they joined: `[name, seat (-1 none), flags (1 away, 2 owner)]` |
 | `r` | `[bakaze (0 east, 1 south, 2 west), kyoku, honba, riichi sticks, dealer seat, tiles left, seat to act, phase (0 draw, 1 discard, 2 calls, 3 end)]` |
 | `sc`, `ri` | the scores; riichi as bits |
@@ -1171,7 +1217,7 @@ assistant through `asterism mcp`).
 
 | Method | Arguments | Returns |
 |---|---|---|
-| `records` | from (optional, 0) | `{"records" => [...], "total", "next"}`: the games, newest first, from the from-th, as many as fit one message; `next` is the from of the next page (none: the end). Each: `id`, `at` (the host's local time, `"2026-10-18 21:05"`), `game` (`hanchan` / `tonpuu`), `names`, `ranks`, `scores` (in seat order) |
+| `records` | from (optional, 0) | `{"records" => [...], "total", "next"}`: the games, newest first, from the from-th, as many as fit one message; `next` is the from of the next page (none: the end). Each: `id`, `at` (the host's local time, `"2026-10-18 21:05"`), `game` (`hanchan` / `tonpuu`), `names`, `ranks`, `scores` (in seat order), `watch` (`true` for a watch game, "Watch games"; else absent) |
 | `record` | id | the game's head: `id`, `at`, `time` (Unix seconds), `table`, `game`, `rules` (as `look`'s), `names`, `kinds` (human / cpu / ai), `final` (`[[seat, rank, score, points x 10], ...]`), `reason` (as the view's `fr`), `rounds` (`[[wind, number, honba, kind, [four changes]], ...]`) |
 | `record` | id, round | round `round` (from 0) as below, with `id`, `round`, `of` (how many rounds), `part`, `parts` |
 | `record` | id, round, part | a round too big for one message comes in parts (`parts` > 1): part 0 has everything with the first moves, part k the moves from `move_from` on |
@@ -1331,7 +1377,9 @@ pipe or a file (and the tests) they read lines as before, and
 | `1`..`4` | the lobby: sit there (an empty seat or a CPU's) |
 | `S` | the lobby: stand |
 | `C` | the lobby, the owner: CPUs into the empty seats |
+| `A`, then `1`..`4` | the lobby, the owner: that seat's next player: an empty seat a CPU, a CPU the first AI player offered, an AI player the next one, the last back a CPU (games 0.20.0; another key gives it up) |
 | Enter | the lobby, the owner: start (four seats taken) |
+| `W` | the lobby, the owner (seated or not): a watch game, the four seats CPUs or AI players ("Watch games", games 0.20.0) |
 
 | Othello | |
 |---|---|
@@ -1460,6 +1508,7 @@ Typed (in a pipe or a file each line; on a terminal after `:`):
 | `cpu [1-4]`, `nocpu 1-4`, `ai 1-4 KIND` | the owner: CPUs into the empty seats (or one), a CPU out, an AI player in when the lobby offers one ("AI players") |
 | `tonpuu`, `hanchan`, `rule ITEM VALUE` | the owner: the game's length, any local rule ("Local rules") |
 | `start` | the owner: start |
+| `watch` | the owner, seated or not: a watch game ("Watch games", games 0.20.0); `--commands "cpu,ai 1 claude,watch"` from a client that does not sit |
 | `auto` | the client plays for you: wins when offered, passes calls, discards the drawn tile, OKs the results (again to stop) |
 | `tables`, `view`, `help`, `quit` | |
 

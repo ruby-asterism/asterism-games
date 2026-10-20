@@ -21,6 +21,9 @@ module AsterismGames
     # The first member who sat is the table's owner: the owner fills empty
     # seats with CPUs and starts the game once the four seats are taken. At
     # the end of a game the table goes back to the lobby with its seats.
+    # While nobody is seated the owner may be a member without a seat (the
+    # first who joined, README "Watch games"): it fills the four seats with
+    # CPUs and AI players and starts a game it only watches (start_watch).
     #
     # Seats are nil (empty, in the lobby only), "human" (a member) or "cpu"
     # (riichi_engine's player). A human who does not decide in time is played
@@ -152,6 +155,9 @@ module AsterismGames
       # times the bank, so a fixed time is just its seconds. The table app
       # offers the lobby view's "tc".
       RULE_TIMES = [[5, 20], [5, 0], [30, 0], [60, 0], [600, 0]].freeze
+      # A watch game's AI seats at most, per kind (README "Watch games"); a
+      # kind not named here may take every seat.
+      WATCH_AI_MAX = { "claude" => 1, "jev" => 4 }.freeze
       # The public view's keys that belong to the game (a spectator's delayed
       # view takes them from the past, the rest is now).
       GAME_KEYS = %w[st sv r sc ri dora kw fu hc ls ev cl dl res fin fr in ok].freeze
@@ -186,6 +192,19 @@ module AsterismGames
       # join: {"token", "seat" (-1: none), "owner"}.
       def member_reply(node)
         { "token" => @members[node]["token"], "seat" => seat_index(node) || -1, "owner" => @owner == node }
+      end
+
+      # A member who joins a table with nobody seated and no owner is the
+      # owner (README "Watch games"); once somebody sits, the first seated
+      # is, as before.
+      def join(node, name, now)
+        r = super
+        node = node.to_s
+        if r.is_a?(Hash) && r["token"] && @owner.nil? && !humans_seated?
+          @owner = node
+          r["owner"] = true
+        end
+        r
       end
 
       # A table of 16 members ("full"), or no room for another spectator.
@@ -261,7 +280,9 @@ module AsterismGames
         @seats[cur] = nil if cur
         m = @members[node]
         @seats[seat] = { "kind" => "human", "node" => node, "token" => m["token"], "name" => m["name"], "sat" => sat }
-        @owner ||= node
+        # The first to sit is the owner; an owner without a seat (nobody was
+        # seated) hands the role to it.
+        @owner = node if @owner.nil? || seat_index(@owner).nil?
         m["seen"] = now
         name_cpus
         changed
@@ -500,6 +521,47 @@ module AsterismGames
         "ok"
       end
 
+      # The owner starts a watch game (README "Watch games"): the four seats
+      # CPUs or AI players, no member seated, at most WATCH_AI_MAX AI seats
+      # of a kind. One game, then the lobby; it stops when every member has
+      # left. Returns "ok" or why not ("seats", "human", "ai limit", ...).
+      def start_watch(token, now)
+        node = node_of(token)
+        return "token" unless node
+        return "not waiting" unless @status == "wait"
+        return "not owner" unless @owner == node
+        return "seats" unless @seats.all?
+        return "human" if humans_seated?
+        return "ai limit" unless watch_ai_ok?
+        @watch = true
+        @seats = @seats.shuffle(random: Random.new(SecureRandom.random_number(2**32)))
+        name_cpus
+        start_game(now)
+        @log&.call("mahjong: #{@name}: watch game started (#{@seats.map { |s| s['name'] }.join(', ')}; " \
+                   "rules #{rule_values.inspect})")
+        tick(now)
+        "ok"
+      end
+
+      # The AI seats are within WATCH_AI_MAX.
+      def watch_ai_ok?
+        @seats.compact.filter_map { |s| s["ai"] }.tally.all? { |kind, n| n <= (WATCH_AI_MAX[kind] || 4) }
+      end
+
+      # The lobby's "wc" (README "Watch games"): 1 a watch game may start
+      # (four seats, all CPUs or AI players, within the AI limits), 2 all
+      # CPUs or AI players but too many AI seats of a kind, 0 not.
+      def watch_code
+        return 0 unless @seats.all? && !humans_seated?
+        watch_ai_ok? ? 1 : 2
+      end
+
+      def watch? = @watch
+
+      def humans_seated?
+        @seats.any? { |s| s && s["kind"] == "human" }
+      end
+
       def seat_of(token)
         return nil unless token.is_a?(String) && !token.empty?
         @seats.index { |s| s && s["kind"] == "human" && s["token"] == token }
@@ -732,6 +794,7 @@ module AsterismGames
         expire_members(now)
         hand_over_owner(now)
         abandon_game(now)
+        stop_watch(now)
         200.times { break unless step(now) }
         note_for_spectators(now)
       end
@@ -779,6 +842,7 @@ module AsterismGames
       # table of CPUs only (humans 0) plays on.
       def abandon_game(now)
         ms = @opts["abandon_ms"].to_i
+        return if @watch # nobody is seated: stop_watch instead
         return unless ms.positive? && %w[play result].include?(@status) && @opts["humans"].to_i.positive?
         return if (0..3).any? { |i| human_counts?(i, now, ms) }
         off = (0..3).select { |i| human?(i) }
@@ -790,6 +854,18 @@ module AsterismGames
         name_cpus
         @log&.call("mahjong: #{@name}: game abandoned: no human there for #{ms / 1000} s " \
                    "(seats #{off.inspect} emptied; not recorded)")
+      end
+
+      # A watch game (README "Watch games") that nobody is at any more
+      # (every member left the table, or was forgotten after being away)
+      # stops: back to the lobby, nothing of an unfinished game recorded.
+      def stop_watch(_now)
+        return unless @watch && @status != "wait" && @members.empty?
+        unfinished = @status != "over"
+        @rec = nil
+        @rec_draw = nil
+        to_lobby
+        @log&.call("mahjong: #{@name}: watch game stopped: nobody at the table#{unfinished ? ' (not recorded)' : ''}")
       end
 
       # ------------------------------------------------------------ spectators
@@ -1230,6 +1306,7 @@ module AsterismGames
       # CPUs stay; members that left during the game were replaced by CPUs).
       def to_lobby
         @status = "wait"
+        @watch = false
         @state = nil
         @game = nil
         @banks = nil
@@ -1311,7 +1388,9 @@ module AsterismGames
           v["tc"] = rule_choices(10)
           v["dc"] = rule_choices(16) # the spectator delays to choose from (seconds)
           v["ak"] = @ai_kinds unless @ai_kinds.empty? # the AI players the owner may seat (README "AI players")
+          v["wc"] = watch_code # whether a watch game may start (README "Watch games")
         end
+        v["wm"] = 1 if @watch && @status != "wait" # a watch game is being played
         # The AI players' seats: their kinds ("" for the others), when there is one.
         v["ai"] = @seats.map { |s| s && s["ai"] ? s["ai"] : "" } if @seats.any? { |s| s && s["ai"] }
         if @game
@@ -1360,7 +1439,9 @@ module AsterismGames
       # most recent game's result.
       def status_extra(_now)
         last = last_result
-        last ? { "last" => last } : {}
+        out = last ? { "last" => last } : {}
+        out["watch"] = true if @watch && @status != "wait"
+        out
       end
 
       # "dl": [seats, ms left] and, on a seat's own move with a bank, the
@@ -1522,7 +1603,11 @@ module AsterismGames
       def member_view(token, now, assist = ASSIST_DEFAULT)
         node = node_of(token)
         return nil unless node
-        view(seat_index(node) || -1, now, assist)
+        v = view(seat_index(node) || -1, now, assist)
+        # This member is the owner (README "Watch games": an owner without
+        # a seat has no "ow" to tell it).
+        v["mo"] = 1 if @owner == node
+        v
       end
 
       def bits
@@ -1602,7 +1687,7 @@ module AsterismGames
           "cpu_left" => @cpu_at && [@cpu_at - now, 0].max, "next_left" => @next_at && [@next_at - now, 0].max,
           "intro_left" => @intro_at && [@intro_at - now, 0].max, "oks" => @oks, "ok_humans" => @ok_humans,
           "result" => @result, "flow" => @flow, "final" => @final, "final_reason" => @final_reason, "event" => @event,
-          "banks" => @banks, "call" => @call, "rec" => @rec, "rec_draw" => @rec_draw,
+          "banks" => @banks, "call" => @call, "rec" => @rec, "rec_draw" => @rec_draw, "watch" => @watch,
           "rules" => { "choice" => @choice, "turn_ms" => @time_choice&.at(0), "bank_ms" => @time_choice&.at(1),
                        "cpu" => @cpu_choice, "delay_ms" => @delay_choice } }
       end
@@ -1635,6 +1720,7 @@ module AsterismGames
         @call = d["call"]
         @rec = d["rec"].is_a?(Hash) ? d["rec"] : nil
         @rec_draw = d["rec_draw"]
+        @watch = d["watch"] && @status != "wait" ? true : false
         @oks = d["oks"].is_a?(Array) && d["oks"].size == 4 ? d["oks"].map(&:to_i) : [0] * 4
         # A result saved before the OKs moves on as it did (by its time).
         @ok_humans = d["ok_humans"] ? true : false
@@ -1677,6 +1763,7 @@ module AsterismGames
         @spec_shown = nil
         @now = 0
         @status = "wait"
+        @watch = false        # a watch game (README "Watch games")
         @seats = [nil] * 4
         reset_members
         @owner = nil
@@ -1711,11 +1798,20 @@ module AsterismGames
         start_game(0)
       end
 
-      # The owner's role goes to the seated member who sat first (none: the
-      # next to sit).
+      # The owner's role goes to the seated member who sat first. With
+      # nobody seated (README "Watch games") the owner stays while it is a
+      # member and there, else the role goes to the first who joined of
+      # those there (or of all), none without members.
       def pass_owner
         seated = @seats.compact.select { |s| s["kind"] == "human" }
-        @owner = seated.min_by { |s| s["sat"].to_i }&.fetch("node")
+        unless seated.empty?
+          @owner = seated.min_by { |s| s["sat"].to_i }["node"]
+          return
+        end
+        return if @owner && @members[@owner] && !member_away?(@owner)
+        there = @members.keys.reject { |n| member_away?(n) }
+        list = there.empty? ? @members.keys : there
+        @owner = list.min_by { |n| @members[n]["at"].to_i }
       end
 
       def cpu_seat
