@@ -16,7 +16,8 @@ Gem::Specification.new do |s|
                   "the rooms of an Asterism console and the permanent tables next to them. " \
                   "A game subclasses AsterismGames::Game and AsterismGames::Remote and writes only its " \
                   "rules and the methods it exposes. Comes with othello and a shared drawing board as samples, " \
-                  "and terminal clients for othello and mahjong (asterism-games play)."
+                  "terminal clients for othello and mahjong (asterism-games play), and a mahjong commentator " \
+                  "that draws a table in the browser (asterism-games commentate)."
   s.authors = ["Katsuhiko Kageyama"]
   s.homepage = "https://github.com/ruby-asterism/asterism-games"
   s.metadata = {
@@ -30,7 +31,11 @@ Gem::Specification.new do |s|
   s.required_ruby_version = ">= 3.2"
   # Listed by name and pattern, never from git: nothing else in the
   # checkout (app/, deploy/, credentials, var/) can slip in.
+  # The commentary page's files (README "Commentary"): its HTML, script
+  # and style, and the two tile sheets of Family mruby's mahjong app with
+  # their note (MIT here, TILES_LICENSE.txt).
   s.files = Dir["lib/asterism_games.rb", "lib/asterism_games/**/*.rb"] +
+            Dir["lib/asterism_games/commentate/assets/*.{html,js,css,bmp,txt}"] +
             ["bin/asterism-games", "VERSION", "README.md", "CHANGELOG.md", "LICENSE"]
   s.require_paths = ["lib"]
   s.bindir = "bin"

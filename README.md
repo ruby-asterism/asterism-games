@@ -60,9 +60,10 @@ the console ("Permanent tables"; the server's setup: docs/install.md).
 | Path | What |
 |---|---|
 | `asterism-games.gemspec` | the gem: what it holds and needs ("The gem and the image") |
-| `bin/asterism-games` | the host (loads the framework and the games); `status`; `play <game>`, a table in this terminal ("Playing in a terminal"); `help` |
+| `bin/asterism-games` | the host (loads the framework and the games); `status`; `play <game>`, a table in this terminal ("Playing in a terminal"); `commentate <game>`, a table in the browser with commentary ("Commentary"); `help` |
 | `bin/mahjong-bots` | players without screens, for trying a mahjong table (one process each; not in the gem) |
 | `lib/asterism_games/play.rb`, `lib/asterism_games/play/` | the terminal clients ("Playing in a terminal"): the options, `othello.rb`, `mahjong.rb` with `mahjong_text.rb` (tiles as text, widths, reading the input) and `mahjong_screen.rb` (the screen); they need neither the framework nor riichi_engine |
+| `lib/asterism_games/commentate.rb`, `lib/asterism_games/commentate/` | `asterism-games commentate mahjong` ("Commentary"): the events and their words (`mahjong_events.rb`, `mahjong_phrases.rb`), the hub and the runner (`mahjong.rb`), the web server (`server.rb`), the page and the tile sheets (`assets/`) |
 | `lib/asterism_games.rb` | the framework, without any game |
 | `lib/asterism_games/game.rb` | the base of a game: the registry, the members and tokens, who joins in a room, the views, the time, saving ("Writing a game") |
 | `lib/asterism_games/remote.rb` | the base of the exposed object: the methods and their numbers of arguments, the caller (`from:`), `join` / `mine` / `leave` |
@@ -89,7 +90,9 @@ the console ("Permanent tables"; the server's setup: docs/install.md).
 game host of your own: the framework, the two sample games that need
 nothing else (othello, the drawing board), `bin/asterism-games` (with
 `play`, the terminal clients of othello and mahjong: a mahjong table needs
-riichi_engine, its client does not). It depends on
+riichi_engine, its client does not; and `commentate`, a mahjong table watched
+in the browser with commentary, with the tile sheets of Family mruby's
+mahjong app). It depends on
 the asterism gem only (0.7.1 or later in
 0.x; what came after 0.7.1, such as `@status` and `on_app_join`, is used
 when there). Not in it: mahjong (`app/`, it needs the riichi_engine fork
@@ -1463,6 +1466,100 @@ Typed (in a pipe or a file each line; on a terminal after `:`):
 The host's answers are shown in the table app's words (`今はできない`,
 `卓の主だけができる` ...).
 
+## Commentary
+
+(games 0.19.0) `asterism-games commentate mahjong` watches a mahjong table
+from outside, the way a sports broadcast does: it reads the table's
+spectate key ("Spectate", with the four hands), draws the table in a
+browser with the tiles of Family mruby's mahjong app, and comments on what
+happens in Japanese, as captions under the table and in the browser's own
+voice (the Web Speech API). It only reads: it never joins the table or
+calls it. CRuby and the asterism gem only; it runs on WSL and on macOS.
+
+```
+asterism-games commentate mahjong --router tcp/127.0.0.1:7447    # a host on this machine or the home network
+asterism-games commentate mahjong --credentials viewer.tar        # a console's network (a viewer's or a spectator's .tar)
+asterism-games commentate mahjong --credentials viewer.tar --namespace room/01   # a room's tables
+asterism-games commentate mahjong --public                        # for a stream: the hands never reach the page
+asterism-games commentate mahjong --json | tee commentary.jsonl   # the lines for another tool too
+```
+
+It starts a small web server on `127.0.0.1` (port 7470, the next free one
+when it is taken), prints the address and opens it in the browser (macOS
+`open`; WSL `wslview`, else Windows' `start`; elsewhere `xdg-open`).
+
+| Option | |
+|---|---|
+| `--router LOCATOR`, `--credentials FILE` | as `play` (with neither, `ASTERISM_ROUTER` / `ASTERISM_CREDENTIALS`, all or nothing; with nothing, `tcp/127.0.0.1:7447`) |
+| `--namespace PREFIX` | a room's tables: `room/01` shows `room01-<table>` (the spectate keys are outside the room, so the connection has no namespace) |
+| `--table TABLE` | the table to show first: `mahjong1`, `games/mahjong1` or `games/spectate/mahjong1`; without it, every table that puts its spectate key is offered and the first one shown |
+| `--node NODE` | the node ID (default `commentate-<host>-<pid>`, or the `.tar`'s name) |
+| `--port N` | the page's port (default 7470) |
+| `--public` | hide the hands: the views sent to the page lose `hand` and `drawn`, and no line tells a hand |
+| `--no-open` | do not open the browser |
+| `--json` | each line of commentary as a JSON line on standard output (`at`, `table`, `type`, `prio`, `text`) |
+
+- **The role.** The spectate keys are `asterism/<host>/spectate/<table>/state`.
+  On a console's network a `viewer` (Read `asterism/**`) or a `spectator`
+  (Read `asterism/*/spectate` and `asterism/*/spectate/**`) reads them; the
+  players' role `games` does not. On a plain zenohd anyone does.
+- **The page.** A bar of states on top (the table, the voice, the delay the
+  host puts on the table, a host that is not there), the table in a
+  canvas (the round, honba, riichi sticks, the wall and the dora
+  indicators; for each seat its wind, name, points, riichi, river with the
+  riichi tile sideways and the called tiles pale, hand and drawn tile,
+  melds; the seat to act framed), the captions below with the time of
+  each, the newest at the bottom. Two seats to a row in a wide window, one
+  in a narrow one (a phone). Keys: **Space** pauses (what comes meanwhile
+  is held and shown when it goes on), **M** turns the voice off and on,
+  **H** hides the hands on that page (backs instead of the tiles, and the
+  lines that tell a hand left out). A table that several hosts put is
+  chosen in the bar.
+- **The voice.** The browser reads the lines with a Japanese voice when it
+  has one (the bar says when it has none). Browsers speak only after the
+  page has been clicked once: the page says so until then. The lines are
+  read in turn; when the voice falls behind, the old small ones are
+  dropped and a big moment goes first.
+- **The commentary.** Made by rules from the difference between one view
+  and the one before (pure functions, `commentate/mahjong_events.rb` and
+  `mahjong_phrases.rb`, so the host can take them over later), each event
+  in two to three phrasings chosen at random, the big moments in strong
+  ones: the first look at the table, a round's start (the dealer and the
+  dora; the game's first; the oorasu, and the oorasu going on), a discard
+  of a dora or a red five, a call (チー, ポン, the kans), a new dora, the
+  wall at 10, riichi with its waits, a tenpai (from the hand, once a round
+  for each seat), a win with its yaku and points (満貫 and over: strong),
+  a draw with who was tenpai, an abortive draw, the lead changing hands,
+  the end with the ranks. The tiles and the yaku are read as a player
+  says them (サンマン, リーチ, タンヤオ). With the hands hidden (`--public`,
+  H) a tenpai is not said and a riichi is said without its waits.
+- **It does not stop.** A host that leaves (`on_leave`, or no put for 15 s)
+  is shown as gone and comes back with its next put; a new round or a new
+  game goes on as before. The delay of the table is the host's
+  ("Spectators"); the page shows it and adds none.
+- **The web server.** HTTP by hand on the standard library's `socket`
+  (no gem): the page, its script and style, the two tile sheets and
+  `/events`, a stream of Server-Sent Events (`status`, `state`, `line`)
+  that pushes the table and the commentary. It listens on `127.0.0.1`
+  only, answers GET (and HEAD) on those paths only, and refuses a request
+  whose Host is not `127.0.0.1` or `localhost`. The page loads nothing from
+  elsewhere.
+- **On a stream (OBS).** Add a Browser Source with the address
+  (`http://127.0.0.1:7470/`), 1280 x 720 or larger. `?obs=1` leaves out the
+  bar and the keys' line and makes the background transparent around the
+  captions; `?hands=0` hides the hands on that page, `?voice=0` silences
+  it, `?table=games/mahjong1` picks the table. Start the command with
+  `--public` when the stream must never show a hand. OBS's browser does not
+  always play the Web Speech voice into the stream: for the voice, capture
+  a browser window and the desktop's sound instead.
+- **The tiles.** `lib/asterism_games/commentate/assets/tiles_hand.bmp` and
+  `tiles_river.bmp` are the hand-drawn sheets of Family mruby's mahjong app
+  (fmruby-core's `flash/app/game/mahjong/`), copied byte for byte; the
+  browser reads the BMPs as they are and only makes their transparent
+  colour (magenta) transparent when it draws them. In this gem they are
+  under the MIT License like the rest of it, by the author's decision
+  (`TILES_LICENSE.txt` next to them).
+
 ## Playing from a program
 
 The mahjong table also speaks to programs (games 0.10.0): an AI assistant
@@ -1901,6 +1998,20 @@ ASTERISM_TEST_ROUTER=tcp/127.0.0.1:7447 bundle exec rake test   # also through a
   tonpuu game against three CPUs each to the end from scripted input
   (letters, tiles, calls, passes, OKs; `PLAY_TRANSCRIPT_DIR` keeps what
   they showed).
+- `test_commentate.rb`: `asterism-games commentate` (in `rake test:gem`
+  too): the waits of a hand (seven pairs, thirteen orphans, with melds),
+  the dora of an indicator, each event from views made by hand (a round's
+  start, the oorasu, riichi with its waits, calls and an added kan, a dora
+  and a red five discarded, the wall, a new dora, a tenpai once a round, a
+  big win and the lead changing hands, a draw, an abortive draw, the end)
+  and their words, a recorded tonpuu of four CPUs
+  (`test/fixtures/commentate_tonpuu.json.gz`) through the events and
+  phrases, nothing of a hand with the hands hidden, the hub (the pages'
+  frames, `--public`, `--json`, a page that opens late, a host that leaves
+  and comes back), the web server (the page, the sheets byte for byte,
+  404 / 405 / a foreign Host refused, 127.0.0.1 only, the events stream, a
+  port taken), the options and `--help`; with the table there, a CPU
+  round played here through the hub.
 - `test_spectate.rb`: the spectate view (README "Spectate"; its
   framework part in `rake test:gem` too): nothing by default (othello, the
   board), the keys of the permanent tables and of a room, what the rooms
@@ -2094,4 +2205,7 @@ each result that long.
 
 ## License
 
-MIT (LICENSE).
+MIT (LICENSE). The tile sheets of the commentary page
+(`lib/asterism_games/commentate/assets/tiles_*.bmp`, the hand-drawn tiles
+of Family mruby's mahjong app) are under the MIT License in this gem too
+(`TILES_LICENSE.txt`).

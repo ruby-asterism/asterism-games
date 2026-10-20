@@ -3,6 +3,29 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
+## 0.19.0
+
+- **Commentary** (README "Commentary"): `asterism-games commentate
+  mahjong` watches a table from its spectate key (0.18.0) and shows it in
+  the browser: a small web server on `127.0.0.1` (HTTP and Server-Sent
+  Events by hand on `socket`, no new gem; port 7470 or the next free one),
+  a page that draws the table in a canvas with the hand-drawn tile sheets
+  of Family mruby's mahjong app, and commentary in Japanese made by rules
+  from what changed between two views (a round's start, the oorasu,
+  riichi and its waits, calls, a dora or red five discarded, a new dora,
+  the wall at 10, a tenpai, a win with its yaku and points, a draw, the
+  lead changing hands, the end), shown as captions and read by the
+  browser's voice (Web Speech API) in a queue that drops the old small
+  lines first. Space pauses, M silences, H hides the hands; `--public`
+  keeps the hands from the page altogether; `--json` gives the lines on
+  standard output; `--table`, `--namespace` (a room's tables), `--port`,
+  `--no-open`. It only reads (never joins or calls a table) and goes on
+  when the host leaves and comes back.
+- The gem holds the page (HTML, JS, CSS) and the two tile sheets
+  `tiles_hand.bmp` and `tiles_river.bmp`, copied byte for byte from
+  fmruby-core; in the gem they are MIT (`TILES_LICENSE.txt`). The gem's
+  test checks they are there and unchanged.
+
 ## 0.18.0
 
 - **Spectate** (README "Spectate"): the host puts a table's spectate view

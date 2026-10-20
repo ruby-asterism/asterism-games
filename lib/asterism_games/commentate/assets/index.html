@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>麻雀の実況</title>
+<link rel="stylesheet" href="/commentate.css">
+</head>
+<body>
+<header id="bar">
+  <span id="tname" class="item strong">卓を待っています</span>
+  <select id="tables" class="item" title="卓" hidden></select>
+  <span id="voice" class="item" title="M で切り替え">声: 切</span>
+  <span id="delay" class="item"></span>
+  <span id="mode" class="item"></span>
+  <span id="conn" class="item"></span>
+</header>
+<div id="hint" role="button" tabindex="0">画面をクリックすると実況の声が出ます (ブラウザの自動再生の決まり)</div>
+<main id="stage"><canvas id="table" aria-label="卓"></canvas></main>
+<section id="captions" aria-live="polite"></section>
+<footer id="keys">Space 一時停止 / M 声 / H 手牌を隠す</footer>
+<script src="/commentate.js"></script>
+</body>
+</html>

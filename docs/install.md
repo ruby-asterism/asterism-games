@@ -272,6 +272,13 @@ on from the same turn after a few seconds, and the players' screens come
 back to it by themselves. To go back, run it with the old version (it
 prints it); the old image stays (`docker image ls ghcr.io/ruby-asterism/asterism-games`).
 
+### From 0.18.0 to 0.19.0 (the commentary in the browser)
+
+Nothing to do on a server: the host and the tables are the same as
+0.18.0's. The version adds `asterism-games commentate mahjong` (README
+"Commentary"), which a watcher runs on their own PC with a `viewer` or
+`spectator` certificate; it reads the spectate keys 0.18.0 puts.
+
 ### From 0.17.1 to 0.18.0 (the tables watched from outside)
 
 `./update.sh 0.18.0` (or `--when-idle 0.18.0`). Nothing in `.env`. The

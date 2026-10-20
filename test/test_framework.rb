@@ -33,19 +33,21 @@ class TestFramework < Minitest::Test
       end
     end
     assert_equal FRAMEWORK.sort, (Dir.glob("asterism_games{.rb,/*.rb}", base: LIB) -
-                                  ["asterism_games/othello.rb", "asterism_games/board.rb", "asterism_games/play.rb"]).sort,
+                                  ["asterism_games/othello.rb", "asterism_games/board.rb", "asterism_games/play.rb",
+                                   "asterism_games/commentate.rb"]).sort,
                  "every framework file is listed"
     # The gem's games need nothing but the framework either.
     Dir.glob("asterism_games/{othello,board}{.rb,/*.rb}", base: LIB).each do |f|
       refute_match(/riichi|mahjong|anthropic/i, File.read(File.join(LIB, f)).lines.grep(/^\s*require/).join, "#{f} requires more than the framework")
     end
-    # The terminal clients (asterism-games play): the mahjong one too, but
-    # neither the table nor riichi_engine nor the framework.
-    Dir.glob("asterism_games/play{.rb,/*.rb}", base: LIB).each do |f|
+    # The terminal clients (asterism-games play) and the commentator
+    # (asterism-games commentate): the mahjong ones too, but neither the
+    # table nor riichi_engine nor the framework.
+    Dir.glob("asterism_games/{play,commentate}{.rb,/*.rb}", base: LIB).each do |f|
       reqs = File.read(File.join(LIB, f)).lines.grep(/^\s*require/).join
       refute_match(/riichi|anthropic|"asterism_games"|mahjong\/(table|engine)/i, reqs, "#{f} requires more than asterism")
     end
-    assert_empty Dir.glob("**/*mahjong*", base: LIB).grep_v(%r{\Aasterism_games/play/}),
+    assert_empty Dir.glob("**/*mahjong*", base: LIB).grep_v(%r{\Aasterism_games/(play|commentate)/}),
                  "the mahjong table is the image's (app/), not the gem's"
   end
 
