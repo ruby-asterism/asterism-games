@@ -1874,9 +1874,12 @@ offered), and show the seat by its name (`Claude`, `Jev`, numbered when there ar
   reports, per day (the host's local date), in `state_dir/ai_usage.json`
   (shared by the rooms' hosts and the permanent tables; counts and money
   only). When today's total reaches `ASTERISM_GAMES_AI_DAILY_USD` (3.0) no
-  table offers an AI player any more and the seated ones become CPUs; a
-  game asks at most `ASTERISM_GAMES_AI_CALLS_PER_GAME` (400) decisions,
-  then its AI seats become CPUs. `bin/asterism-games status` prints the
+  table offers an AI player any more and the seated ones become CPUs; each
+  AI seat asks at most `ASTERISM_GAMES_AI_CALLS_PER_GAME` (400) decisions
+  in a game, then that seat becomes a CPU (games 0.20.0: the count is each
+  seat's own, so a game's most is 400 times its AI seats; before, the
+  seats of a game shared the 400 and every AI seat stopped together). A
+  tonpuu takes about 150-200 decisions a seat, a hanchan about twice that. `bin/asterism-games status` prints the
   day's decisions, tokens and money per kind; the host's `@status` has the
   totals (`ai_today`).
 - **A limit per kind** (games 0.15.0). `ASTERISM_GAMES_AI_DAILY_USD_CLAUDE`
@@ -1889,7 +1892,7 @@ offered), and show the seat by its name (`Claude`, `Jev`, numbered when there ar
   0.15.0. A value that is not a number of dollars (0 or more) is ignored,
   with a line in the log. The log says the limits at the start
   (`games: AI players: claude, jev (at most $10.0 a day for claude, $2.0
-  for jev, 400 decisions a game)`) and once for each kind that stops
+  for jev, 400 decisions a seat in a game)`) and once for each kind that stops
   (`today's limit for claude ($10.0) is reached`); a new day lets it play
   again. `ai_today` on `@status` then has `kinds` (README "Status").
 - **Prices.** USD per million tokens, settings with the published prices
@@ -1953,8 +1956,9 @@ game between two machines without a host is fmruby-core's
   "moves" => [{"n", "square", "turns", "text"}]}`; the answer is a move's
   `n`. One out of range, one that does not come in `ai_turn_seconds` (30 s)
   or a failure is played by the CPU, and the game goes on. When the day's
-  money is spent, or the game has asked `ASTERISM_GAMES_AI_CALLS_PER_GAME`
-  decisions, Jev's seat becomes the CPU. The table apps show Jev by its
+  money is spent, or the seat has asked `ASTERISM_GAMES_AI_CALLS_PER_GAME`
+  decisions in the game (each seat its own count, games 0.20.0), Jev's
+  seat becomes the CPU. The table apps show Jev by its
   name with `[AI]` and say when it is thinking; `dl` counts its time down.
 - Nothing in othello is hidden, so every member sees the same view: the
   table's view (the one the host puts on the state key) and `me`, the

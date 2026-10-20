@@ -636,7 +636,8 @@ module AsterismGames
       # on a discard); a decision that does not come in time, or fails, is
       # the CPU's. A decision with one move only is not asked. The host
       # turns the AI seats into CPUs when the day's money is spent, and the
-      # table does when the game has asked ai_calls_per_game decisions.
+      # table turns an AI seat into a CPU when that seat has asked
+      # ai_calls_per_game decisions in the game (each seat its own count).
 
       def ai_seat?(seat)
         s = @seats[seat]
@@ -656,14 +657,17 @@ module AsterismGames
       # The decisions to ask, once each: [{seat:, key:, kind:, until:, request:}].
       def ai_requests(now)
         out = []
-        @ai_want.each do |seat, w|
+        @ai_want.to_a.each do |seat, w|
           next if w[:sent]
-          if @ai_calls_per_game && @ai_calls >= @ai_calls_per_game
-            ai_off!("#{@ai_calls_per_game} decisions in this game")
-            return []
+          # Each AI seat asks at most ai_calls_per_game decisions a game
+          # (games 0.20.0; before, the seats shared them): past it that
+          # seat alone is a CPU.
+          if @ai_calls_per_game && @ai_calls[seat] >= @ai_calls_per_game
+            ai_off!("#{@ai_calls_per_game} decisions of seat #{seat} in this game", seats: [seat])
+            next
           end
           w[:sent] = true
-          @ai_calls += 1
+          @ai_calls[seat] += 1
           @stats["ai_asked"] += 1
           out << { seat: seat, key: w[:key], kind: w[:kind], until: w[:at],
                    request: { "game" => "mahjong", "table" => @name, "seat" => seat,
@@ -682,14 +686,15 @@ module AsterismGames
         true
       end
 
-      # The AI seats become CPUs (the day's money, or the game's decisions,
-      # are used up): all of them, or those of one kind (its own daily
-      # limit, README "AI players").
-      def ai_off!(why, kind: nil)
-        seats = (0..3).select { |i| ai_seat?(i) && (kind.nil? || @seats[i]["ai"] == kind) }
+      # The AI seats become CPUs (the day's money, or a seat's decisions of
+      # the game, are used up): all of them, those of one kind (its own
+      # daily limit, README "AI players"), or the seats named.
+      def ai_off!(why, kind: nil, seats: nil)
+        only = seats
+        seats = (0..3).select { |i| ai_seat?(i) && (kind.nil? || @seats[i]["ai"] == kind) && (only.nil? || only.include?(i)) }
         return false if seats.empty?
         seats.each { |i| @seats[i].delete("ai") }
-        if kind
+        if kind || only
           seats.each do |i|
             @ai_want.delete(i)
             @ai_got.delete(i)
@@ -1328,7 +1333,7 @@ module AsterismGames
       end
 
       def start_game(now)
-        @ai_calls = 0
+        @ai_calls = Hash.new(0)
         @ai_want = {}
         @ai_got = {}
         @game = { "bakaze" => "ton", "kyoku" => 1, "honba" => 0, "kyoutaku" => 0, "oya" => 0,
@@ -1789,7 +1794,7 @@ module AsterismGames
         @answered = []        # seats whose own answer to the calls moved their view on
         @ai_want = {}         # seat => the decision asked of its AI player (README "AI players")
         @ai_got = {}          # seat => [key, move number or nil] come back
-        @ai_calls = 0         # decisions asked this game
+        @ai_calls = Hash.new(0) # seat => decisions asked this game
         @dirty = true
         @unsaved = false
         return unless @opts["humans"].to_i.zero?

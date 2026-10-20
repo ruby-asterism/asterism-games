@@ -107,7 +107,7 @@ module AsterismGames
                                     prices: ->(k) { settings.prices(k) })
       unless deciders.empty?
         @log.call("games: AI players: #{deciders.keys.join(', ')} (#{AI::Hub.limits_text(deciders.keys, budget)}, " \
-                  "#{settings.calls_per_game} decisions a game)")
+                  "#{settings.calls_per_game} decisions a seat in a game)")
       end
       AI::Hub.new(deciders, budget, calls_per_game: settings.calls_per_game, threads: settings.threads, log: @log)
     end

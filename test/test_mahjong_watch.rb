@@ -241,4 +241,57 @@ class TestMahjongWatch < Minitest::Test
     assert_includes s.lines(lobby.merge("wc" => 2), keys: {}), "  #{AsterismGames::Play::MahjongText::WATCH_AI_NOTE}"
     assert_match(/\AAI: \[1\]-\[4\]/, s.lines(lobby, keys: { ai_pick: true }).last)
   end
+
+  # The game's decisions are each AI seat's own (games 0.20.0): four AI
+  # seats play a tonpuu to its end with the default 400 each.
+  def test_four_ai_seats_play_to_the_end_with_their_own_decisions
+    t = table
+    t.ai_calls_per_game = 400
+    a = member(t, "a")
+    assert_equal "ok", t.cpu(a, 0, "claude")
+    (1..3).each { |i| assert_equal "ok", t.cpu(a, i, "jev") }
+    assert_equal "ok", t.start_watch(a, 0)
+    asked = Hash.new(0)
+    fake = AI::Fake.new
+    now = 0
+    400_000.times do
+      break if t.status == "over"
+      now += 10
+      t.tick(now)
+      t.ai_requests(now).each do |r|
+        asked[r[:seat]] += 1
+        t.ai_answer(r[:seat], r[:key], fake.decide(r[:request]).n, now)
+      end
+    end
+    assert_equal "over", t.status
+    assert_equal 4, (0..3).count { |i| t.ai_seat?(i) }, "every AI seat is still an AI player at the end"
+    assert_equal 0, t.stats["ai_off"]
+    assert_equal 4, asked.size
+    assert(asked.values.all? { |n| n < 400 })
+    puts "\n  watch tonpuu with four AI seats: #{asked.values.sum} decisions (#{asked.sort.map { |k, n| "seat #{k}: #{n}" }.join(', ')}), none turned into a CPU"
+  end
+
+  def test_each_ai_seat_stops_at_its_own_count
+    t = table
+    t.ai_calls_per_game = 5
+    a = member(t, "a")
+    assert_equal "ok", t.cpu(a, 0, "claude")
+    (1..3).each { |i| assert_equal "ok", t.cpu(a, i, "jev") }
+    assert_equal "ok", t.start_watch(a, 0)
+    asked = Hash.new(0)
+    fake = AI::Fake.new
+    now = 0
+    400_000.times do
+      break if t.status == "over"
+      now += 10
+      t.tick(now)
+      t.ai_requests(now).each do |r|
+        asked[r[:seat]] += 1
+        t.ai_answer(r[:seat], r[:key], fake.decide(r[:request]).n, now)
+      end
+    end
+    assert_equal "over", t.status
+    assert_equal({ 0 => 5, 1 => 5, 2 => 5, 3 => 5 }, asked, "five each, not five for the table")
+    assert_equal 4, t.stats["ai_off"], "one seat at a time"
+  end
 end

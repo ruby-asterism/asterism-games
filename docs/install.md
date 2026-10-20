@@ -241,7 +241,7 @@ and create one; it is shown once, so put it straight into `.env`.
    ```
 
 3. `docker compose up -d games`. The log says
-   `games: AI players: claude, jev (at most $3.0 a day, 400 decisions a game)`
+   `games: AI players: claude, jev (at most $3.0 a day, 400 decisions a seat in a game)`
    (with the kinds' limits: `at most $10.0 a day for claude, $2.0 for jev`);
    the table apps' lobby shows `+Claude` / `+Jev` to the owner.
 
@@ -280,7 +280,9 @@ mahjong tables gain watch games (README "Watch games"): a new method
 calls go on the table's call key, as every other method). The AI players
 of a watch game spend the same daily money as any game
 (`ASTERISM_GAMES_AI_DAILY_USD` and the per-kind limits); lower them first
-if watch games should not use more of it. The table apps of Family mruby
+if watch games should not use more of it. `ASTERISM_GAMES_AI_CALLS_PER_GAME`
+(400) now counts each AI seat's decisions of a game, not the game's: a
+game with four AI seats may ask up to 1600 (README "AI players"). The table apps of Family mruby
 show the button only with a 0.20.0 host; older screens work as before
 against it.
 

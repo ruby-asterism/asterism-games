@@ -23,6 +23,12 @@ described ("games 0.10.0" and the like).
   The record is kept with `"watch" => true` (also on `records`' entries)
   and counts in the stats for the CPU and the AI kinds only, never for a
   person. The AI players' daily limits work as before.
+- **The game's AI decisions are each seat's own**: `ASTERISM_GAMES_AI_CALLS_PER_GAME`
+  (400) is now how many decisions each AI seat may ask in a game (mahjong
+  and othello, every game, watch games or not); a seat past it becomes a
+  CPU alone. Before, the seats of a game shared it, so a game with three
+  or four AI seats stopped them all part way through a tonpuu. A game's
+  most is now 400 times its AI seats; the daily limits are as before.
 - `play mahjong`: `W` (and the command `watch`) starts a watch game, for
   the owner with or without a seat; `A` then a seat's number turns that
   seat into a CPU, Claude, Jev and back (the kinds the lobby offers); the

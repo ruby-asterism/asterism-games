@@ -78,7 +78,7 @@ module AsterismGames
         @stats = Hash.new(0)
         @ai_kinds = []         # the AI players the host can offer now (the lobby view's "ak")
         @ai_calls_per_game = nil
-        @ai_calls = 0          # decisions asked this game
+        @ai_calls = Hash.new(0) # seat => decisions asked this game
         @ai_want = nil         # the decision asked of the AI seat to move: {seat:, key:, kind:, at:, sent:}
         @ai_got = nil          # [key, move number or nil] come back
         load_saved(0)
@@ -205,7 +205,7 @@ module AsterismGames
         @seats = @seats.shuffle(random: Random.new(SecureRandom.random_number(2**32)))
         @game = Othello::Match.new
         @result = nil
-        @ai_calls = 0
+        @ai_calls = Hash.new(0)
         @status = "play"
         @log&.call("othello: #{@name}: game started (#{@seats.map { |s| s['name'] }.join(' (black), ')} (white))")
         schedule(now)
@@ -272,7 +272,8 @@ module AsterismGames
       # does not come in time, or fails, is the CPU's. A turn with one legal
       # move is not asked (it is played as the CPU plays). The host turns
       # the AI seats into CPUs when the day's money is spent, and the table
-      # does when the game has asked ai_calls_per_game decisions.
+      # turns an AI seat into a CPU when that seat has asked
+      # ai_calls_per_game decisions in the game (each seat its own count).
 
       def ai_seat?(seat)
         s = @seats[seat]
@@ -291,12 +292,12 @@ module AsterismGames
       def ai_requests(now)
         w = @ai_want
         return [] if w.nil? || w[:sent]
-        if @ai_calls_per_game && @ai_calls >= @ai_calls_per_game
-          ai_off!("#{@ai_calls_per_game} decisions in this game")
+        if @ai_calls_per_game && @ai_calls[w[:seat]] >= @ai_calls_per_game
+          ai_off!("#{@ai_calls_per_game} decisions of seat #{w[:seat]} in this game", seats: [w[:seat]])
           return []
         end
         w[:sent] = true
-        @ai_calls += 1
+        @ai_calls[w[:seat]] += 1
         @stats["ai_asked"] += 1
         [{ seat: w[:seat], key: w[:key], kind: w[:kind], until: w[:at],
            request: { "game" => "othello", "table" => @name, "seat" => w[:seat],
@@ -313,10 +314,12 @@ module AsterismGames
         true
       end
 
-      # The AI seats become CPUs (the day's money, or the game's decisions,
-      # are used up): all of them, or those of one kind.
-      def ai_off!(why, kind: nil)
-        seats = (0...SEATS).select { |i| ai_seat?(i) && (kind.nil? || @seats[i]["ai"] == kind) }
+      # The AI seats become CPUs (the day's money, or a seat's decisions of
+      # the game, are used up): all of them, those of one kind, or the
+      # seats named.
+      def ai_off!(why, kind: nil, seats: nil)
+        only = seats
+        seats = (0...SEATS).select { |i| ai_seat?(i) && (kind.nil? || @seats[i]["ai"] == kind) && (only.nil? || only.include?(i)) }
         return false if seats.empty?
         seats.each { |i| @seats[i].delete("ai") }
         @stats["ai_off"] += 1
