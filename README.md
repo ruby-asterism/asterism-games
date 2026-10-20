@@ -1690,11 +1690,14 @@ asterism-games commentate mahjong --ai off   # the fixed commentary alone
 - **When.** A riichi, a win (a mangan or more counts as bigger), a draw or
   an abortive draw, the lead changing hands, the last round (オーラス),
   the end; and a quiet minute in the middle of a round. One call at a
-  time and **at most one every 20 s**: a scene that comes sooner waits
-  (the biggest of those waiting, for 15 s at most) and is let go when its
-  round or phase is over. Calls are made only while a page is open (or
-  with `--json`): nobody watching, nothing is spent. A tonpuu of four CPUs
-  gets one or two a round.
+  time and **at most one every 20 s**, or every 8 s for a scene bigger
+  than the last one asked about (a win after a riichi, the end after a
+  win; the ranks: the end, a big win and the lead changing hands, a win
+  and the oorasu, a draw, a riichi, a quiet minute). A scene that comes
+  sooner waits (the biggest of those waiting, for 15 s at most) and is let
+  go when its round or phase is over. Calls are made only while a page is
+  open (or with `--json`): nobody watching, nothing is spent. A tonpuu of
+  four CPUs gets about two a round, and a line for its wins.
 - **What it is told.** A fixed part, the same to the byte every time and
   cached (prompt caching: the calls after the first read it at a tenth of
   the price): the commentator's role, mahjong's rules in short, the tone,

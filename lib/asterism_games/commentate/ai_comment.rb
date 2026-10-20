@@ -15,8 +15,10 @@ module AsterismGames
     # the fixed commentary in the same voice.
     #
     # - Which scenes: Scenes.rank of the lines a view made; at most one call
-    #   every MIN_INTERVAL_S (a scene that comes sooner waits, the biggest
-    #   one, and is let go after PENDING_S), one at a time, only for the
+    #   every MIN_INTERVAL_S, or OUTRANK_INTERVAL_S for a scene bigger than
+    #   the last one asked about (a win after a riichi); a scene that comes
+    #   sooner waits (the biggest one, let go after PENDING_S); one at a
+    #   time, only for the
     #   tables a page watches (nobody watching: nothing is spent).
     # - The ask: Prompt.system (the fixed part: the role, mahjong's rules in
     #   short, the tone, the length, whether the hands may be told; cached)
@@ -38,6 +40,7 @@ module AsterismGames
       DEFAULT_DAILY_USD = 3.0
       KIND = "commentary"
       MIN_INTERVAL_S = 20
+      OUTRANK_INTERVAL_S = 8
       QUIET_S = 60
       PENDING_S = 15
       MAX_AGE_S = 15
@@ -125,6 +128,7 @@ module AsterismGames
         @tables = {} # id => {"view", "line_at", "quiet_at", "pending", "recent"}
         @busy = false
         @last_call = nil
+        @last_rank = nil
         @calls = 0
         @deliver = nil
         @changed = nil
@@ -243,7 +247,7 @@ module AsterismGames
         job = nil
         @lock.synchronize do
           return if @busy
-          return if @last_call && now - @last_call < MIN_INTERVAL_S
+          return if @last_call && now - @last_call < OUTRANK_INTERVAL_S
           best = nil
           @tables.each do |id, t|
             sc = t["pending"] or next
@@ -256,10 +260,15 @@ module AsterismGames
           end
           return unless best
           id, t, sc = best
+          # A scene bigger than the last one asked about (a win after a
+          # riichi) waits OUTRANK_INTERVAL_S, any other MIN_INTERVAL_S.
+          gap = @last_rank && sc["rank"] > @last_rank ? OUTRANK_INTERVAL_S : MIN_INTERVAL_S
+          return if @last_call && now - @last_call < gap
           t["pending"] = nil
           t["quiet_at"] = now if sc["kind"] == "quiet"
           @busy = true
           @last_call = now
+          @last_rank = sc["rank"]
           @calls += 1
           job = { "table" => id, "kind" => sc["kind"], "rank" => sc["rank"], "asked_at" => now, "hands" => hands,
                   "round" => sc["round"], "status" => sc["status"], "sv" => sc["sv"],

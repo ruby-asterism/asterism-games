@@ -118,20 +118,39 @@ class TestCommentateAI < Minitest::Test
     @now += 5.5 # 20.5 s after the first call, the waiting scene is 15.5 s old: let go
     ai.tick
     assert_equal 1, fake.count, "a scene that waited longer than PENDING_S is let go"
-    # A win waits for the bound and goes then, the biggest of those waiting.
+    # A win after a riichi outranks it: it waits OUTRANK_INTERVAL_S (8 s)
+    # only, the biggest of those waiting.
     @now += 30
     ai.observe("h/t", v.merge("sv" => 3), [line("riichi", 2)])
     assert_equal 2, fake.count
-    @now += 8
+    @now += 5
     r = v.merge("status" => "result", "sv" => 4)
     ai.observe("h/t", r, [line("win", 3, "ロン！！ 満貫！"), line("lead_change", 3, "逆転！")])
     ai.observe("h/t", r.merge("sv" => 5), [line("riichi", 2)]) # smaller: does not replace it
+    assert_equal 2, fake.count, "not within 8 s"
+    @now += 2.9
+    ai.tick
     assert_equal 2, fake.count
-    @now += 12
+    @now += 0.2 # 8.1 s after the riichi's call
     ai.tick
     assert_equal 3, fake.count
     assert_equal "win_strong", out.last[2]["kind"]
     assert_includes fake.requests.last["user"], "- ロン！！ 満貫！\n- 逆転！"
+    # After the win (rank 4), a smaller or equal scene waits the full 20 s.
+    ai.observe("h/t", view(round: ["east", 2, 0], sv: 6), [line("round_start", 1)])
+    @now += 9
+    ai.observe("h/t", view(round: ["east", 2, 0], sv: 7), [line("riichi", 2)])
+    assert_equal 3, fake.count, "a riichi after a win is not bigger: 20 s"
+    @now += 11.1
+    ai.tick
+    assert_equal 4, fake.count
+    # The end outranks the riichi: 8 s.
+    @now += 8.1
+    ai.observe("h/t", view(round: ["east", 2, 0], sv: 8).merge("status" => "over"), [line("game_over", 2)])
+    assert_equal 5, fake.count
+    assert_equal "game_over", out.last[2]["kind"]
+    fake = A::Fake.new
+    ai, = ai_with(fake)
     # A scene of a round that is over is let go too.
     @now += 25
     ai.observe("h/t", v.merge("sv" => 6), [line("riichi", 2)])
@@ -141,7 +160,7 @@ class TestCommentateAI < Minitest::Test
     ai.observe("h/t", view(round: ["east", 2, 0], sv: 8), [line("round_start", 1)])
     @now += 30
     ai.tick
-    assert_equal 4, fake.count, "the draw of the round before was not asked about"
+    assert_equal 1, fake.count, "the draw of the round before was not asked about"
   end
 
   def test_a_quiet_minute
@@ -438,17 +457,47 @@ class TestCommentateAI < Minitest::Test
     ai.attach(deliver: ->(_id, _text, job) { asked << [job["asked_at"], job["kind"]] })
     hub = C::MahjongHub.new(json: StringIO.new, ai: ai, rng: Random.new(1), clock: -> { Time.at(@now) })
     rounds = 0
+    prev = nil
     recorded.each do |v|
-      @now += 1.5
+      # The recording has one view per change; the host keeps a round's
+      # result on the table for result_seconds (8 by default).
+      if prev && prev["status"] == "result"
+        4.times do
+          @now += 2
+          hub.tick
+        end
+      else
+        @now += 1.5
+      end
       rounds += 1 if hub.update("games", "mahjong1", v).any? { |l| l["type"] == "round_start" }
       hub.tick
+      prev = v
     end
     rounds += 1 # the first round started before the first view
     calls = fake.count
     assert_operator calls, :>=, rounds, "at least one a round"
-    assert_operator calls, :<=, rounds * 4, "a few a round, not more"
+    assert_operator calls, :<=, rounds * 3, "a few a round, not more"
     gaps = asked.map(&:first).each_cons(2).map { |a, b| b - a }
-    assert gaps.all? { |g| g >= A::MIN_INTERVAL_S }, gaps.inspect
+    assert gaps.all? { |g| g >= A::OUTRANK_INTERVAL_S }, gaps.inspect
+    # A gap under 20 s only for a scene bigger than the one before.
+    asked.each_cons(2) do |(t1, k1), (t2, k2)|
+      next if t2 - t1 >= A::MIN_INTERVAL_S
+      assert_operator rank_of(k2), :>, rank_of(k1), "#{k1} then #{k2} after #{t2 - t1} s"
+    end
+    # The wins are said: every win of the game (4) gets its line, here the
+    # riichi before most of them notwithstanding.
+    lines = hub.tables["games/mahjong1"]["lines"]
+    wins = lines.each_index.select { |i| lines[i]["type"] == "win" }
+    voiced = wins.count do |i|
+      lines[(i + 1)..].take_while { |l| l["ai"] || !%w[round_start game_over].include?(l["type"]) }.any? { |l| l["ai"] }
+    end
+    assert_equal 4, wins.size
+    assert_operator voiced, :>=, 3, "most wins get an AI line (#{voiced} of #{wins.size})"
+  end
+
+  def rank_of(kind)
+    { "game_over" => 5, "win_strong" => 4, "lead_change" => 4, "win" => 3, "oorasu" => 3, "draw" => 2, "abort" => 2,
+      "riichi" => 1, "quiet" => 0 }.fetch(kind)
   end
 
   # ------------------------------------------------------------ options and setup

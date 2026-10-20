@@ -65,7 +65,8 @@ module AsterismGames
       The AI's one-liners: at the big moments (a riichi, a win, a draw, the
       lead changing hands, the last round, the end) and after a quiet
       minute, Claude says a short line after the fixed commentary (at most
-      one call every 20 s, only while a page is open). With the hands hidden
+      one call every 20 s, 8 s for a bigger scene than the last, such as a
+      win after a riichi; only while a page is open). With the hands hidden
       (--public, H) it is not told the hands. What it costs is counted in
       $XDG_STATE_HOME/asterism-games/commentary_ai_usage.json
       (~/.local/state/... by default); the page shows today's money.
