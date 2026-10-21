@@ -62,11 +62,11 @@ class TestCommentateSounds < Minitest::Test
     assert_equal [["round", 0]], S.effects(view(status: "over"), view), "the next game"
   end
 
-  def test_a_move_discard_draw_and_the_turn
+  def test_a_move_is_its_discard_only
     a = view(wall: 60, turn: 0)
     b = view(wall: 59, turn: 1, seats: seats_with(0, river: ["1m"]))
-    assert_equal [["discard_other", 0], ["draw", 0], ["turn", 70]], S.effects(a, b)
-    assert_equal [["discard_other", 0]], S.effects(a, view(wall: 60, turn: 0, seats: seats_with(0, river: ["1m"])))
+    assert_equal [["discard_other", 0]], S.effects(a, b), "no draw or turn sound: the app's spectator hears none"
+    assert_empty S.effects(a, view(wall: 59, turn: 1)), "a draw and the turn moving alone sound nothing"
     assert_empty S.effects(a, a), "the same view put again"
   end
 
@@ -80,7 +80,7 @@ class TestCommentateSounds < Minitest::Test
     kakan = view(seats: seats_with(2, melds: [{ "type" => "added_kan", "tiles" => %w[1m 1m 1m 1m] }]))
     assert_equal ["kan"], names(pon, kakan), "a pon turned into an added kan"
     r = view(wall: 59, turn: 2, seats: seats_with(1, riichi: true, river: ["5p"]))
-    assert_equal %w[riichi discard_other draw turn], names(view(wall: 60, turn: 1), r), "the jingle first"
+    assert_equal %w[riichi discard_other], names(view(wall: 60, turn: 1), r), "the jingle first"
   end
 
   def test_a_win_a_draw_and_the_end
@@ -123,7 +123,7 @@ class TestCommentateSounds < Minitest::Test
       S.effects(prev, v).each do |n, ms|
         count[n] += 1
         assert_includes S::NAMES, n
-        assert_includes [0, S::TURN_DELAY_MS, S::SHOUT_MS], ms
+        assert_includes [0, S::SHOUT_MS], ms
       end
       s = S.scene(v)
       scenes << s if scenes.last != s
@@ -134,7 +134,7 @@ class TestCommentateSounds < Minitest::Test
     assert_equal 1, count["fanfare1"]
     assert_equal count["ron"] + count["tsumo"], count["points"]
     assert_operator count["discard_other"], :>, 100
-    assert_operator count["draw"], :>, 100
+    assert_equal 0, count["draw"] + count["turn"], "the player's own sounds are not played"
     assert_operator count["riichi"], :>=, 1
     assert_equal "none", scenes.last
     assert_includes scenes, "tense"

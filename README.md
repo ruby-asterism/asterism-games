@@ -1748,9 +1748,10 @@ the first click (the browser's autoplay rule).
   (never waiting in its queue): a round's start, the jingles of a call
   (チー, ポン, カン), of a riichi, of a win (ロン, ツモ) followed by the
   winner's points, a draw of the round and the abortive draws, a discard
-  (the app's sound for another player's discard, whoever made it), a draw
-  and the turn moving (as each seat's player hears them), and the fanfare
-  at the end of the game (the app's spectator's: the winner's). They
+  (the app's sound for another player's discard, whoever made it), and
+  the fanfare at the end of the game (the app's spectator's: the
+  winner's). As for the app's spectator, a move sounds its discard only:
+  the player's own sounds (a draw, the turn coming) are not played. They
   share the APU's four channels as in the app: a sound of a higher
   priority still sounding keeps its channels, otherwise the newest wins.
   A voice that would start on top of a jingle waits for most of it (at

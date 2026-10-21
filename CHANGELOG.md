@@ -12,8 +12,8 @@ described ("games 0.10.0" and the like).
   starts low (the app's levels: off, low, mid, high, **B** or the bar's
   button) and goes down to half while the voice speaks. The effects (a
   round's start, the jingles of the calls, riichi and the wins, the
-  winner's points, the draws, a discard, a draw, the turn, the fanfare at
-  the end) play beside the voice, sharing the APU's channels as in the
+  winner's points, the draws, a discard, the fanfare at the end; as for
+  the app's spectator, no draw or turn sound) play beside the voice, sharing the APU's channels as in the
   app; **E** turns them off and on; the page remembers both. Which sound
   when is a pure function of two views (`commentate/mahjong_sounds.rb`);
   each `state` event now carries `bgm` and `sounds`.

@@ -11,16 +11,13 @@ module AsterismGames
     #   scene  = MahjongSounds.scene(cur)           # "lobby", "play", "tense" or "none"
     #
     # The names are the app's (mahjong_sound.rb's SFX, the files in
-    # assets/sounds/, sounds.json). The app plays them for its own player;
-    # here the page is a spectator of every seat, as the app's spectator is
-    # (a discard is discard_other whoever made it), and hears each seat's
-    # draw and turn as the seat's player would. In the order the app plays
-    # them, at the same moments:
+    # assets/sounds/, sounds.json). The page hears the table as the app's
+    # spectator does: a discard is discard_other whoever made it, and the
+    # player's own sounds (a draw, the turn coming) are not played. In the
+    # order the app plays them, at the same moments:
     #   a new round           round
     #   a call, a riichi      chi, pon, kan, riichi (the jingle of the call)
     #   a discard             discard_other
-    #   a draw                draw (the wall gets shorter)
-    #   the turn moving       turn, 70 ms later (as the app's)
     #   a win                 ron or tsumo (the jingle), then points after
     #                         the shout (1 s), the winner's points
     #   a draw of the round   ryuukyoku (and the abortive draws: kyuushu for
@@ -34,11 +31,10 @@ module AsterismGames
     module MahjongSounds
       TENSE_LEFT = 10 # mahjong_sound.rb's TENSE_LEFT (sounds.json's tense_left)
       SHOUT_MS = 1000 # how long the app shows a shout (a win's result waits for it)
-      TURN_DELAY_MS = 70
       CALLS = { "chi" => "chi", "pon" => "pon", "open_kan" => "kan", "closed_kan" => "kan", "added_kan" => "kan" }.freeze
       DRAWS = %w[ryuukyoku suufon_renda suukaikan suucha_riichi sanchahou].freeze
       # Every name these functions give (the files the page needs).
-      NAMES = %w[round chi pon kan riichi discard_other draw turn ron tsumo points ryuukyoku kyuushu fanfare1].freeze
+      NAMES = %w[round chi pon kan riichi discard_other ron tsumo points ryuukyoku kyuushu fanfare1].freeze
 
       module_function
 
@@ -78,15 +74,7 @@ module AsterismGames
           end
         end
         out << [jingle, 0] if jingle
-        if st == "play" && pst == "play" && same
-          out << ["discard_other", 0] if river_n(cur) > river_n(prev)
-          pw = prev.dig("round", "wall_left")
-          cw = cur.dig("round", "wall_left")
-          out << ["draw", 0] if pw.is_a?(Integer) && cw.is_a?(Integer) && cw < pw
-          pt = prev.dig("round", "turn")
-          ct = cur.dig("round", "turn")
-          out << ["turn", TURN_DELAY_MS] if ct.is_a?(Integer) && pt.is_a?(Integer) && ct != pt
-        end
+        out << ["discard_other", 0] if st == "play" && pst == "play" && same && river_n(cur) > river_n(prev)
         if st == "over" && pst != "over"
           out << ["fanfare1", jingle ? SHOUT_MS : 0]
         elsif win
