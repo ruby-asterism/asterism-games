@@ -56,8 +56,14 @@ module AsterismGames
                               fixed commentary alone
         -h, --help            this text
 
-      The page: Space pauses, M turns the voice off and on, H hides the hands.
-      The browser speaks once the page has been clicked (its autoplay rule).
+      The page: Space pauses, M turns the voice off and on, B steps the BGM
+      (off, low, mid, high), E turns the effects off and on, H hides the
+      hands. The browser speaks once the page has been clicked (its autoplay rule).
+
+      The sound: the BGM and the effects of Family mruby's mahjong app, at
+      the app's moments, the BGM low by default and lower while the voice
+      speaks. The BGM is shiru8bit's (CC BY 3.0): the page shows the credit
+      (BGM: shiru8bit (CC BY 3.0)); put it in a stream's description too.
 
       The voice: VOICEVOX's character says the fixed phrases (リーチ, ポン,
       ロン, the rounds ...) from WAV files made on this machine at the first

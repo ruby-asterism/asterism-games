@@ -92,7 +92,7 @@ nothing else (othello, the drawing board), `bin/asterism-games` (with
 `play`, the terminal clients of othello and mahjong: a mahjong table needs
 riichi_engine, its client does not; and `commentate`, a mahjong table watched
 in the browser with commentary, with the tile sheets of Family mruby's
-mahjong app). It depends on
+mahjong app and its sound: the effects and the BGM, "The sound"). It depends on
 the asterism gem only (0.7.1 or later in
 0.x; what came after 0.7.1, such as `@status` and `on_app_join`, is used
 when there). Not in it: mahjong (`app/`, it needs the riichi_engine fork
@@ -1568,7 +1568,8 @@ when it is taken), prints the address and opens it in the browser (macOS
   each, the newest at the bottom. Two seats to a row in a wide window, one
   in a narrow one (a phone). Keys: **Space** pauses (what comes meanwhile
   is held and shown when it goes on), **M** turns the voice off and on,
-  **H** hides the hands on that page (backs instead of the tiles, and the
+  **B** steps the BGM (off, low, mid, high), **E** turns the effects off
+  and on, **H** hides the hands on that page (backs instead of the tiles, and the
   lines that tell a hand left out). A table that several hosts put is
   chosen in the bar.
 - **The AI's one-liners.** Claude's short lines at the big moments,
@@ -1583,6 +1584,9 @@ when it is taken), prints the address and opens it in the browser (macOS
   Japanese voice when it has one (the bar says which voice, or that it has
   none). Browsers play sound only after the page has been clicked once:
   the page says so until then. "The voice" below.
+- **The sound.** The BGM and the effects of Family mruby's mahjong app,
+  at the moments the app plays them, the BGM low by default and lower
+  while the voice speaks. "The sound" below.
 - **The commentary.** Made by rules from the difference between one view
   and the one before (pure functions, `commentate/mahjong_events.rb` and
   `mahjong_phrases.rb`, so the host can take them over later), each event
@@ -1601,9 +1605,10 @@ when it is taken), prints the address and opens it in the browser (macOS
   game goes on as before. The delay of the table is the host's
   ("Spectators"); the page shows it and adds none.
 - **The web server.** HTTP by hand on the standard library's `socket`
-  (no gem): the page, its script and style, the two tile sheets and
-  `/events`, a stream of Server-Sent Events (`status`, `state`, `line`)
-  that pushes the table and the commentary. It listens on `127.0.0.1`
+  (no gem): the page, its script and style, the two tile sheets, the
+  sounds (`/sounds/`, the files of `assets/sounds/` only) and `/events`,
+  a stream of Server-Sent Events (`status`, `state`, `line`) that pushes
+  the table and the commentary. It listens on `127.0.0.1`
   only, answers GET (and HEAD) on those paths only, and refuses a request
   whose Host is not `127.0.0.1` or `localhost`. The page loads nothing from
   elsewhere.
@@ -1714,8 +1719,60 @@ your character before you publish anything; they can change):
   description too** (the page shows it in its corner).
 - Whoever you give generated voices to must follow the same terms, so
   they cannot be mixed into an MIT package. That is why this gem ships no
-  sound: each user makes the files with their own VOICEVOX, and they stay
-  on that machine.
+  voice: each user makes the files with their own VOICEVOX, and they stay
+  on that machine. (The sounds it does ship are the mahjong app's effects
+  and BGM, "The sound".)
+
+### The sound
+
+(games 0.21.0) The page plays the sound of Family mruby's mahjong app:
+its BGM for the scene and its effects and jingles for what happens, the
+same sounds at the same moments as the app. They are files in the gem
+(`lib/asterism_games/commentate/assets/sounds/`), made beforehand with
+Family mruby's own APU emulator from the app's notes and its NSF tunes
+(not played again by ear), and the page plays them with Web Audio after
+the first click (the browser's autoplay rule).
+
+- **The BGM** follows the app's scenes: the lobby (a table waiting, or no
+  table yet) "After The Rain", the game and its results "Spring Thing",
+  the tense part (a riichi on the table, or 10 tiles or fewer left)
+  "Encounter", nothing at the end of a game (the fanfare plays alone). A
+  tune starts from its beginning and repeats its loop without a seam.
+  **B** (or the bar's button) steps it off, low, mid, high: the app's
+  levels (low is 30 % of the tune's full level, mid 55 %, high 100 %, the
+  effects always at theirs), **low by default**.
+- **Ducking.** While the voice speaks (VOICEVOX or the browser's), the BGM
+  goes down to half its level, and back up a moment after the voice stops
+  (not between two lines). The effects are not lowered.
+- **The effects** come with each new view of the table, beside the voice
+  (never waiting in its queue): a round's start, the jingles of a call
+  (チー, ポン, カン), of a riichi, of a win (ロン, ツモ) followed by the
+  winner's points, a draw of the round and the abortive draws, a discard
+  (the app's sound for another player's discard, whoever made it), a draw
+  and the turn moving (as each seat's player hears them), and the fanfare
+  at the end of the game (the app's spectator's: the winner's). They
+  share the APU's four channels as in the app: a sound of a higher
+  priority still sounding keeps its channels, otherwise the newest wins.
+  A voice that would start on top of a jingle waits for most of it (at
+  most 0.6 s). **E** turns the effects off and on. The page remembers
+  both switches (the browser's local storage).
+- **Which sound, when** is a pure function of two views
+  (`commentate/mahjong_sounds.rb`), and each `state` event carries the
+  BGM's scene (`bgm`) and the effects (`sounds`, `[name, delay ms]`).
+- **The files.** The effects are WAVs (mono, 16-bit, the APU's 15720 Hz,
+  under 40 KB each); the three tunes are MP3s (24 kHz mono, 64 kbit/s,
+  about 1 MB each: the tune from its start through one pass of its loop,
+  115 to 154 s). `sounds.json` lists each with its SHA-256, the loop
+  points, the app's levels and scenes. They are made by fmruby-core's
+  `tools/mahjong_sounds.rb` (`ruby tools/mahjong_sounds.rb <dir>`;
+  `--check <dir>` makes them again elsewhere and says whether any differs).
+- **Their licenses** (`assets/SOUNDS_LICENSE.txt`): the effects are the
+  app's author's and are under the MIT License in this gem, by his
+  decision (fmruby-core keeps them under GPL-3.0). **The BGM is not MIT**:
+  the tunes are by shiru8bit under CC BY 3.0, unchanged (only played from
+  their NSF files and saved as MP3). The page shows
+  「BGM: shiru8bit (CC BY 3.0)」 in its corner while the BGM is on, beside
+  the voice's credit; put it in a stream's description too.
 
 ### The AI's one-liners
 

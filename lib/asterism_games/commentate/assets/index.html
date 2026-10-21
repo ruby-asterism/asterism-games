@@ -11,16 +11,18 @@
   <span id="tname" class="item strong">卓を待っています</span>
   <select id="tables" class="item" title="卓" hidden></select>
   <span id="voice" class="item" title="M で切り替え">声: 切</span>
+  <span id="bgm" class="item btn" role="button" title="B で切り替え (切/小/中/大)">BGM 小 [B]</span>
+  <span id="se" class="item btn" role="button" title="E で切り替え">効果音 入 [E]</span>
   <span id="ai" class="item"></span>
   <span id="delay" class="item"></span>
   <span id="mode" class="item"></span>
   <span id="conn" class="item"></span>
 </header>
-<div id="hint" role="button" tabindex="0">画面をクリックすると実況の声が出ます (ブラウザの自動再生の決まり)</div>
+<div id="hint" role="button" tabindex="0">画面をクリックすると実況の声と音が出ます (ブラウザの自動再生の決まり)</div>
 <main id="stage"><canvas id="table" aria-label="卓"></canvas></main>
 <section id="captions" aria-live="polite"></section>
-<footer id="keys">Space 一時停止 / M 声 / H 手牌を隠す</footer>
-<div id="credit" hidden></div>
+<footer id="keys">Space 一時停止 / M 声 / B BGM / E 効果音 / H 手牌を隠す</footer>
+<div id="credits"><span id="credit" hidden></span><span id="bgmcredit" hidden>BGM: shiru8bit (CC BY 3.0)</span></div>
 <script src="/commentate.js"></script>
 </body>
 </html>

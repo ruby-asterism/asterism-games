@@ -1,0 +1,335 @@
+{
+  "made_by": "fmruby-core tools/mahjong_sounds.rb (Family mruby's APU, components/apu_emu)",
+  "from": {
+    "flash/app/game/mahjong/mahjong_sound.rb": {
+      "SFX": "a8739fe35e6aa353a1bca456b26bd90f706ce1cbd0b43824f1531f890048e2bd"
+    },
+    "flash/usr/share/sounds/nsf/after_the_rain.nsf": "2d12f597da28207ae72d6ef82ceda6e7a0c32268d09e94328e499a9c6dff1023",
+    "flash/usr/share/sounds/nsf/spring_thing.nsf": "7541ff743d241752fa0b496b1f6ed7146526208c5a4b0d59cff8f8e8d55e45ac",
+    "flash/usr/share/sounds/nsf/encounter.nsf": "d11c34896b7a60a325e7296499e3b58bb4df04dec2d26bdd15bed178baf551a7"
+  },
+  "rate": 15720,
+  "bgm_levels": [
+    0.0,
+    0.3,
+    0.55,
+    1.0
+  ],
+  "bgm_names": [
+    "切",
+    "小",
+    "中",
+    "大"
+  ],
+  "bgm_default": 1,
+  "tense_left": 10,
+  "scenes": {
+    "lobby": "after_the_rain",
+    "play": "spring_thing",
+    "tense": "encounter"
+  },
+  "tunes": {
+    "after_the_rain": {
+      "file": "after_the_rain.mp3",
+      "nsf": "after_the_rain.nsf",
+      "track": 0,
+      "title": "8-bit Chiptune - After The Rain",
+      "author": "shiru8bit",
+      "license": "CC BY 3.0",
+      "intro_s": 0.0167,
+      "loop_s": 153.6,
+      "loop_start": 3.083333,
+      "loop_end": 156.683333,
+      "length_s": 157.6833
+    },
+    "spring_thing": {
+      "file": "spring_thing.mp3",
+      "nsf": "spring_thing.nsf",
+      "track": 0,
+      "title": "8-bit Chiptune - Spring Thing",
+      "author": "shiru8bit",
+      "license": "CC BY 3.0",
+      "intro_s": 1.9167,
+      "loop_s": 115.2,
+      "loop_start": 7.183333,
+      "loop_end": 122.383333,
+      "length_s": 123.3833
+    },
+    "encounter": {
+      "file": "encounter.mp3",
+      "nsf": "encounter.nsf",
+      "track": 0,
+      "title": "8-bit Chiptune - Encounter",
+      "author": "shiru8bit",
+      "license": "CC BY 3.0",
+      "intro_s": 0.0,
+      "loop_s": 128.0,
+      "loop_start": 1.116667,
+      "loop_end": 129.116667,
+      "length_s": 130.1167
+    }
+  },
+  "effects": {
+    "discard": {
+      "file": "discard.wav",
+      "priority": 1,
+      "channels": [
+        3
+      ],
+      "length_s": 0.083
+    },
+    "discard_other": {
+      "file": "discard_other.wav",
+      "priority": 1,
+      "channels": [
+        3
+      ],
+      "length_s": 0.05
+    },
+    "draw": {
+      "file": "draw.wav",
+      "priority": 1,
+      "channels": [
+        1
+      ],
+      "length_s": 0.083
+    },
+    "turn": {
+      "file": "turn.wav",
+      "priority": 2,
+      "channels": [
+        0
+      ],
+      "length_s": 0.2
+    },
+    "round": {
+      "file": "round.wav",
+      "priority": 3,
+      "channels": [
+        0,
+        2
+      ],
+      "length_s": 0.545
+    },
+    "yaku": {
+      "file": "yaku.wav",
+      "priority": 2,
+      "channels": [
+        0
+      ],
+      "length_s": 0.117
+    },
+    "points": {
+      "file": "points.wav",
+      "priority": 3,
+      "channels": [
+        0,
+        1,
+        2
+      ],
+      "length_s": 0.476
+    },
+    "riichi": {
+      "file": "riichi.wav",
+      "priority": 3,
+      "channels": [
+        0,
+        1
+      ],
+      "length_s": 0.35
+    },
+    "pon": {
+      "file": "pon.wav",
+      "priority": 3,
+      "channels": [
+        0,
+        3
+      ],
+      "length_s": 0.183
+    },
+    "chi": {
+      "file": "chi.wav",
+      "priority": 3,
+      "channels": [
+        0
+      ],
+      "length_s": 0.167
+    },
+    "kan": {
+      "file": "kan.wav",
+      "priority": 3,
+      "channels": [
+        0,
+        2
+      ],
+      "length_s": 0.374
+    },
+    "ron": {
+      "file": "ron.wav",
+      "priority": 3,
+      "channels": [
+        3,
+        0,
+        1,
+        2
+      ],
+      "length_s": 0.599
+    },
+    "tsumo": {
+      "file": "tsumo.wav",
+      "priority": 3,
+      "channels": [
+        0,
+        1,
+        2
+      ],
+      "length_s": 0.532
+    },
+    "kyuushu": {
+      "file": "kyuushu.wav",
+      "priority": 3,
+      "channels": [
+        0,
+        2
+      ],
+      "length_s": 0.464
+    },
+    "ryuukyoku": {
+      "file": "ryuukyoku.wav",
+      "priority": 3,
+      "channels": [
+        0,
+        2
+      ],
+      "length_s": 0.841
+    },
+    "fanfare1": {
+      "file": "fanfare1.wav",
+      "priority": 4,
+      "channels": [
+        0,
+        1,
+        2
+      ],
+      "length_s": 1.188
+    },
+    "fanfare2": {
+      "file": "fanfare2.wav",
+      "priority": 4,
+      "channels": [
+        0,
+        1,
+        2
+      ],
+      "length_s": 0.783
+    },
+    "fanfare3": {
+      "file": "fanfare3.wav",
+      "priority": 4,
+      "channels": [
+        0,
+        2
+      ],
+      "length_s": 0.853
+    },
+    "fanfare4": {
+      "file": "fanfare4.wav",
+      "priority": 4,
+      "channels": [
+        0,
+        2
+      ],
+      "length_s": 1.06
+    }
+  },
+  "files": {
+    "after_the_rain.mp3": {
+      "sha256": "031f62d6d389cf972ca4d76d4f60eb39aaf81abfddb8cd9bfdadb6a9ee2d0c36",
+      "bytes": 1262208
+    },
+    "chi.wav": {
+      "sha256": "4dc17f9942b7b24c0516e63722edb0337b8a08878436c541a25b008afffd93db",
+      "bytes": 5286
+    },
+    "discard.wav": {
+      "sha256": "b7c7e6d9d85c095086bbb363878f2d43718852faa760ec9a80c22a278af25c3d",
+      "bytes": 2664
+    },
+    "discard_other.wav": {
+      "sha256": "827a02bcc0b4b562c0e5570fbdefa7380c1d93f08d891c5a25b582d78eebc19b",
+      "bytes": 1616
+    },
+    "draw.wav": {
+      "sha256": "109f99db18e74a70c658651fde27080ca3d10e56ad6af9c4923fa79b3cc55c5f",
+      "bytes": 2666
+    },
+    "encounter.mp3": {
+      "sha256": "d266523c8a39b9df416ba0e279b3d408ed53aa9cb9eb4dd91c234f3e81ab7e70",
+      "bytes": 1041600
+    },
+    "fanfare1.wav": {
+      "sha256": "1c033836febf9f7fd4453c33233fd23103f4ad0f86caf385faf86227e38d2a90",
+      "bytes": 37404
+    },
+    "fanfare2.wav": {
+      "sha256": "7c5cf3343d909d0fd0c0bc7218ef27b824d3ee3b217ed3b80ada4141813dd9b3",
+      "bytes": 24652
+    },
+    "fanfare3.wav": {
+      "sha256": "1bf38ce91857961b980d268adb8898a5242c159d1d4f00a5e8243fc919b94c57",
+      "bytes": 26872
+    },
+    "fanfare4.wav": {
+      "sha256": "f75997ee293281fa8b5c5dc0a33980def453f6a889cba16a36cb2449e3ef87c1",
+      "bytes": 33362
+    },
+    "kan.wav": {
+      "sha256": "50ac3498c781e1c7cfd1275c9625167650d1b1390719bc544dc6e90aa73e06f9",
+      "bytes": 11790
+    },
+    "kyuushu.wav": {
+      "sha256": "73d5c7a57ad5dd109df0da1cde6364943ac9b956233cac1336c5d5d517bcf7af",
+      "bytes": 14626
+    },
+    "points.wav": {
+      "sha256": "2b6167f3bc36339118e30b290a8a2fe9b5069da5cb2b6160b1be89db24546296",
+      "bytes": 15004
+    },
+    "pon.wav": {
+      "sha256": "cf904f8855444198c89a76d76acf1041efc42dd888b3ad0f1f964099ab1ee8d8",
+      "bytes": 5810
+    },
+    "riichi.wav": {
+      "sha256": "e8d8064abba1da685453bc0fb30d938a2da5ad69aef69e4993459676c1a75e65",
+      "bytes": 11050
+    },
+    "ron.wav": {
+      "sha256": "aaec44cfe51ffb0219e6936cd0642e0b8b972b0f4e21625fb54d1e36028e4029",
+      "bytes": 18892
+    },
+    "round.wav": {
+      "sha256": "f2857dd2e45e0a1e130e63285119e3072a35056f571954f95665cce81b7047d4",
+      "bytes": 17164
+    },
+    "ryuukyoku.wav": {
+      "sha256": "105f366cf26b8be5e8aa210886c05b91965e566ecf610a64b4b5b63db452bff7",
+      "bytes": 26500
+    },
+    "spring_thing.mp3": {
+      "sha256": "55f90585c6994293d33ece9145b9a7f58c457a86a9b466c52882997a12fb87db",
+      "bytes": 987648
+    },
+    "tsumo.wav": {
+      "sha256": "2f849a68fe071355714322e0e5693c529067621c7030252ad6efce69f7ef5750",
+      "bytes": 16766
+    },
+    "turn.wav": {
+      "sha256": "a2813659474f629ea8fc88e5dc4eae70ba662d8bbe569178089522c929edd0c4",
+      "bytes": 6334
+    },
+    "yaku.wav": {
+      "sha256": "b19fbb15ad4ee6125bfa9ebe31c3701d6a25551a2bdb7e490f68c1f26dd3d8a5",
+      "bytes": 3714
+    }
+  }
+}

@@ -1,0 +1,63 @@
+The sounds in sounds/
+
+These are the sound of Family mruby's mahjong app (fmruby-core,
+flash/app/game/mahjong/mahjong_sound.rb), which the commentary page plays:
+the effects and jingles, and the BGM of its scenes. They were not played
+again by ear: fmruby-core's tools/mahjong_sounds.rb plays the app's notes
+and tunes with Family mruby's own APU emulator (components/apu_emu) and
+writes the files; sounds/sounds.json lists each file with its SHA-256 and
+what it was made from.
+
+1. The effects and jingles (sounds/*.wav)
+
+   discard, discard_other, draw, turn, round, yaku, points, riichi, pon,
+   chi, kan, ron, tsumo, kyuushu, ryuukyoku, fanfare1, fanfare2, fanfare3,
+   fanfare4
+
+   Written by Katsuhiko Kageyama, the author of Family mruby and of this
+   gem, as notes for the APU. In this gem they are under the MIT License,
+   the license of the gem (LICENSE), by the author's decision. In
+   fmruby-core they stay under that repository's license (GPL-3.0).
+
+   MIT License
+
+   Copyright (c) 2026 Katsuhiko Kageyama
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in all
+   copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+2. The BGM (sounds/*.mp3): music by shiru8bit, CC BY 3.0
+
+   NOT under the MIT License. These three tunes are by shiru8bit and are
+   licensed under the Creative Commons Attribution 3.0 Unported license
+   (CC BY 3.0, https://creativecommons.org/licenses/by/3.0/), as the NSF
+   files Family mruby ships (fmruby-core, flash/usr/share/sounds/nsf/).
+
+     after_the_rain.mp3  "8-bit Chiptune - After The Rain" by shiru8bit
+                         https://opengameart.org/content/8-bit-chiptune-after-the-rain
+     spring_thing.mp3    "8-bit Chiptune - Spring Thing" by shiru8bit
+                         https://opengameart.org/content/8-bit-chiptune-spring-thing
+     encounter.mp3       "8-bit Chiptune - Encounter" by shiru8bit
+                         https://opengameart.org/node/100497
+
+   The music is not changed. Each file is the original NSF played by
+   Family mruby's APU emulator and saved as MP3: from the start of the tune
+   through one pass of its loop (and a second more); the page repeats the
+   loop as the NSF does. Whoever passes these files on, or plays them in a
+   stream or a recording, gives the same credit, for example
+   "BGM: shiru8bit (CC BY 3.0)" (the page shows it in its corner).

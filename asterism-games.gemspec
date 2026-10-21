@@ -34,10 +34,13 @@ Gem::Specification.new do |s|
   # The commentary page's files (README "Commentary"): its HTML, script
   # and style, and the two tile sheets of Family mruby's mahjong app with
   # their note (MIT here, TILES_LICENSE.txt); the list of the fixed
-  # phrases of the voice (mahjong_voice.yml: words only, no sound).
+  # phrases of the voice (mahjong_voice.yml: words only, no voice); the
+  # mahjong app's effects and BGM made with Family mruby's APU (sounds/,
+  # the effects MIT and the BGM CC BY 3.0, SOUNDS_LICENSE.txt).
   s.files = Dir["lib/asterism_games.rb", "lib/asterism_games/**/*.rb"] +
             Dir["lib/asterism_games/commentate/*.yml"] +
             Dir["lib/asterism_games/commentate/assets/*.{html,js,css,bmp,txt}"] +
+            Dir["lib/asterism_games/commentate/assets/sounds/*.{wav,mp3,json}"] +
             ["bin/asterism-games", "VERSION", "README.md", "CHANGELOG.md", "LICENSE"]
   s.require_paths = ["lib"]
   s.bindir = "bin"

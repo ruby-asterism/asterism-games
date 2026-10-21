@@ -15,7 +15,9 @@ module AsterismGames
     # VOICEVOX voice (the hub's voice), also the fixed phrases'
     # files (/clip/<digest>.wav, only those of the list) and the lines'
     # sound (/voice/<digest>.wav, only the texts the hub registered:
-    # never a text a page sends).
+    # never a text a page sends). And the mahjong app's sound (README "The
+    # sound"): /sounds/<name>.wav|mp3 and their sounds.json, the files of
+    # assets/sounds/ only, with their note (/SOUNDS_LICENSE.txt).
     class Server
       ASSETS = File.expand_path("assets", __dir__)
       FILES = {
@@ -25,8 +27,11 @@ module AsterismGames
         "/commentate.css" => ["commentate.css", "text/css; charset=utf-8"],
         "/tiles_hand.bmp" => ["tiles_hand.bmp", "image/bmp"],
         "/tiles_river.bmp" => ["tiles_river.bmp", "image/bmp"],
-        "/TILES_LICENSE.txt" => ["TILES_LICENSE.txt", "text/plain; charset=utf-8"]
+        "/TILES_LICENSE.txt" => ["TILES_LICENSE.txt", "text/plain; charset=utf-8"],
+        "/SOUNDS_LICENSE.txt" => ["SOUNDS_LICENSE.txt", "text/plain; charset=utf-8"]
       }.freeze
+      SOUNDS = %r{\A/sounds/([a-z0-9_]+\.(wav|mp3|json))\z}
+      SOUND_TYPES = { "wav" => "audio/wav", "mp3" => "audio/mpeg", "json" => "application/json; charset=utf-8" }.freeze
       CLIP = %r{\A/clip/([0-9a-f]{16}\.wav)\z}
       LIVE = %r{\A/voice/([0-9a-f]{32}\.wav)\z}
       LOCAL_HOSTS = %w[127.0.0.1 localhost].freeze
@@ -98,6 +103,13 @@ module AsterismGames
           return respond(sock, 404, "text/plain", "not found\n") unless body
           respond(sock, 200, "audio/wav", method == "HEAD" ? "" : body, "Cache-Control" => "max-age=600",
                                                                 "Content-Length" => body.bytesize.to_s)
+        elsif (m = path.match(SOUNDS))
+          file = File.join(ASSETS, "sounds", m[1])
+          return respond(sock, 404, "text/plain", "not found\n") unless File.file?(file)
+          body = File.binread(file)
+          cache = m[2] == "json" ? "no-cache" : "max-age=3600"
+          respond(sock, 200, SOUND_TYPES[m[2]], method == "HEAD" ? "" : body, "Cache-Control" => cache,
+                                                                         "Content-Length" => body.bytesize.to_s)
         elsif (f = FILES[path])
           body = File.binread(File.join(ASSETS, f[0]))
           respond(sock, 200, f[1], method == "HEAD" ? "" : body, "Cache-Control" => "no-cache",

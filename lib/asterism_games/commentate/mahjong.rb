@@ -4,6 +4,7 @@ require "json"
 require "monitor"
 require_relative "mahjong_events"
 require_relative "mahjong_phrases"
+require_relative "mahjong_sounds"
 require_relative "server"
 require_relative "voice"
 require_relative "ai_comment"
@@ -68,6 +69,7 @@ module AsterismGames
           t["gone"] = false
           t["at"] = @clock.call
           evs, t["memo"] = MahjongEvents.diff(t["view"], view, t["memo"])
+          sounds = MahjongSounds.effects(t["view"], view)
           evs.each do |ev|
             l = MahjongPhrases.line(ev, view, @rng, tone: @tone)
             l = public_line(l) if @public
@@ -82,8 +84,7 @@ module AsterismGames
           end
           t["lines"].shift while t["lines"].size > KEEP_LINES
           t["view"] = view
-          out = shown(view)
-          frames << [id, Server.frame("state", { "table" => id, "view" => out })]
+          frames << [id, Server.frame("state", state_frame(id, view).merge("sounds" => sounds))]
           lines.each { |l| frames << [id, Server.frame("line", l)] }
           broadcast_status if fresh || was_gone
           frames.each { |tid, f| each_client(tid) { |c| c.push(f) } }
@@ -182,7 +183,7 @@ module AsterismGames
           out = [["status", status]]
           t = @tables[client.table]
           if t
-            out << ["state", { "table" => client.table, "view" => shown(t["view"]) }]
+            out << ["state", state_frame(client.table, t["view"])]
             t["lines"].each { |l| out << ["line", l.merge("old" => true)] }
           end
           out
@@ -226,7 +227,7 @@ module AsterismGames
           if c.table.nil? && (d = default_table)
             c.table = d
             t = @tables[d]
-            c.push(Server.frame("state", { "table" => d, "view" => shown(t["view"]) })) if t["view"]
+            c.push(Server.frame("state", state_frame(d, t["view"]))) if t["view"]
           end
           c.push(f)
         end
@@ -237,6 +238,12 @@ module AsterismGames
           c.table ||= default_table
           blk.call(c) if c.table == id
         end
+      end
+
+      # A "state" event: the view as it leaves, and the BGM's scene for it
+      # (MahjongSounds; update adds the effects of the step).
+      def state_frame(id, view)
+        { "table" => id, "view" => shown(view), "bgm" => MahjongSounds.scene(view) }
       end
 
       # The view as it leaves: without the hands with --public.

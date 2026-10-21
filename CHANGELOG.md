@@ -3,6 +3,28 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
+## 0.21.0
+
+- **The commentary's sound** (README "The sound"): the page of
+  `commentate mahjong` plays Family mruby's mahjong app's BGM and effects,
+  the same sounds at the same moments as the app. The BGM follows the
+  app's scenes (the lobby, the game, the tense part, none at the end),
+  starts low (the app's levels: off, low, mid, high, **B** or the bar's
+  button) and goes down to half while the voice speaks. The effects (a
+  round's start, the jingles of the calls, riichi and the wins, the
+  winner's points, the draws, a discard, a draw, the turn, the fanfare at
+  the end) play beside the voice, sharing the APU's channels as in the
+  app; **E** turns them off and on; the page remembers both. Which sound
+  when is a pure function of two views (`commentate/mahjong_sounds.rb`);
+  each `state` event now carries `bgm` and `sounds`.
+- The files are in the gem (`commentate/assets/sounds/`, 3.6 MB: WAVs for
+  the effects, MP3s for the three tunes, `sounds.json`), made with Family
+  mruby's own APU emulator by fmruby-core's `tools/mahjong_sounds.rb`.
+  The effects are MIT here; the BGM is shiru8bit's under CC BY 3.0,
+  unchanged (`SOUNDS_LICENSE.txt`), credited in the page's corner. The
+  web server serves `/sounds/` (those files only) and
+  `/SOUNDS_LICENSE.txt`.
+
 ## 0.20.1
 
 - `play mahjong`: an owner's command queued with `--commands` (`watch`,
