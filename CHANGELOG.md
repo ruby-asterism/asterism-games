@@ -5,6 +5,8 @@ described ("games 0.10.0" and the like).
 
 ## Unreleased
 
+## 0.22.0
+
 - Needs CRuby 3.4 or newer (`required_ruby_version >= 3.4`; 3.2 is past its end of life). The image is built on `ruby:3.4.11-slim`.
 
 ## 0.21.0
