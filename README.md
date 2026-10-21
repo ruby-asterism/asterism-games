@@ -102,7 +102,7 @@ anthropic gem as well, which is not a dependency (`gem install anthropic`,
 "AI players").
 
 ```
-gem install asterism-games              # CRuby 3.2 or newer and a C compiler (asterism-zenoh)
+gem install asterism-games              # CRuby 3.4 or newer and a C compiler (asterism-zenoh)
 ```
 
 A host of the sample games on a plain zenohd (`games.yml`):
@@ -144,7 +144,7 @@ docs/install.md (`deploy/vps`, which pulls it, or builds it with
 
 ## Running
 
-From this checkout (everything, mahjong too). CRuby 3.2 or newer and a C
+From this checkout (everything, mahjong too). CRuby 3.4 or newer and a C
 compiler (asterism-zenoh compiles its extension). Bundler fetches the
 riichi_engine fork from GitHub (see "riichi_engine"). The `Gemfile` is for
 this checkout and the image (mahjong, the AI players); the gem's own needs

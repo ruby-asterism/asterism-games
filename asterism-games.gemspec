@@ -28,7 +28,7 @@ Gem::Specification.new do |s|
     "rubygems_mfa_required" => "true"
   }
   s.license = "MIT"
-  s.required_ruby_version = ">= 3.2"
+  s.required_ruby_version = ">= 3.4"
   # Listed by name and pattern, never from git: nothing else in the
   # checkout (app/, deploy/, credentials, var/) can slip in.
   # The commentary page's files (README "Commentary"): its HTML, script

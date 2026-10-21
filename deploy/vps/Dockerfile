@@ -11,7 +11,7 @@
 # rubygems at the version the Gemfile pins, and asterism-zenoh compiles its
 # C extension against the zenoh-c release it pins, downloaded while the
 # image is built.
-ARG RUBY_VERSION=3.2.6
+ARG RUBY_VERSION=3.4.11
 FROM ruby:${RUBY_VERSION}-slim AS build
 
 RUN apt-get update -qq && \

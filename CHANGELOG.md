@@ -3,6 +3,10 @@
 Versions before 0.11.1 are noted in the README where each feature is
 described ("games 0.10.0" and the like).
 
+## Unreleased
+
+- Needs CRuby 3.4 or newer (`required_ruby_version >= 3.4`; 3.2 is past its end of life). The image is built on `ruby:3.4.11-slim`.
+
 ## 0.21.0
 
 - **The commentary's sound** (README "The sound"): the page of
